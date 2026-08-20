@@ -36,19 +36,50 @@ DULY คือระบบบัญชี–การเงิน (Accounting & 
 | 15 | [แผนการทดสอบ](docs/15-test-plan.md) | golden test, property test, UAT, เกณฑ์ go-live |
 | 16 | [อภิธานศัพท์ไทย-อังกฤษ](docs/16-glossary.md) | มาตรฐานคำที่ใช้ทั้งระบบ |
 
-## ฐานข้อมูล
+## การรันระบบ
+
+ต้องมี **PostgreSQL 16+** และ **Node.js 22+**
 
 ```bash
-createdb duly
-for f in db/migrations/*.sql; do psql -d duly -v ON_ERROR_STOP=1 -f "$f"; done
-psql -d duly -v ON_ERROR_STOP=1 -f db/seed/load_seed.sql
-db/tests/run.sh          # ชุดทดสอบกฎบัญชี 43 ข้อ
+# 1. ฐานข้อมูล — migrations + seed + role ของแอป + ข้อมูลตัวอย่าง
+su postgres -c "./db/reset_dev.sh duly_dev"
+
+# 2. API
+cd apps/api && npm install
+export DATABASE_URL='postgres://duly_app:duly_dev_only@127.0.0.1:5432/duly_dev'
+npm run dev                      # http://localhost:3001
+
+# 3. หน้าเว็บ
+cd apps/web && npm install && npm run dev    # http://localhost:5173
 ```
 
-- `db/migrations/` — 15 ไฟล์ 152 ตาราง ครอบคลุมทุกโมดูล ([รายละเอียด](db/README.md))
-- `db/seed/` — ผังบัญชี 3 แม่แบบ, รหัสและอัตราภาษี, ขั้นภาษี, ค่าลดหย่อน, จังหวัด, วันหยุด
-- `db/tests/` — ชุดทดสอบที่พิสูจน์ว่าสคีมาบังคับกฎบัญชีได้จริง
-- `prototype/` — ต้นแบบหน้าเว็บแบบ static HTML
+## การทดสอบ
+
+```bash
+db/tests/run.sh                  # 43 ข้อ — กฎบัญชีที่บังคับในฐานข้อมูล
+cd apps/api && npm test          # 52 ข้อ — เงิน ภาษี บัญชีแยกประเภท RLS และสัญญา HTTP
+```
+
+## โครงสร้างโปรเจกต์
+
+| โฟลเดอร์ | เนื้อหา |
+|----------|---------|
+| `docs/` | เอกสารออกแบบ 17 ฉบับ (ตารางด้านบน) |
+| `db/migrations/` | 15 ไฟล์ **152 ตาราง** ครอบคลุมทุกโมดูล ([รายละเอียด](db/README.md)) |
+| `db/seed/` | ผังบัญชี 3 แม่แบบ, รหัสและอัตราภาษี, ขั้นภาษี, ค่าลดหย่อน, จังหวัด, วันหยุด |
+| `db/tests/` | ชุดทดสอบที่พิสูจน์ว่าสคีมาบังคับกฎบัญชีได้จริง |
+| `apps/api/` | **โค้ดระบบจริง** NestJS + PostgreSQL ([README](apps/api/README.md)) |
+| `apps/web/` | หน้าเว็บที่เรียก API จริง ([README](apps/web/README.md)) |
+| `prototype/` | ต้นแบบหน้าตา **43 หน้าจอ** แบบ static HTML ([README](prototype/README.md)) |
+
+## สิ่งที่ทำงานได้จริงแล้ว
+
+ออกใบกำกับภาษีจากหน้าเว็บ → ระบบจองเลขที่, คัดลอกข้อมูลคู่ค้า, สร้างรายการบัญชีคู่ที่สมดุล,
+บันทึกลงทะเบียนภาษีขาย ทั้งหมดในธุรกรรมเดียว → ยอดปรากฏในงบทดลอง รายงานภาษีขาย
+และผ่านการตรวจยอดคุมโดยอัตโนมัติ
+
+โมดูลที่ยังไม่ได้เขียนโค้ด (แต่มีสคีมาและเอกสารครบแล้ว): รับชำระเงิน, เจ้าหนี้และภาษีหัก ณ ที่จ่าย,
+สินค้าคงคลัง, ทรัพย์สินถาวร, เงินเดือน, e-Tax Invoice, การสร้างไฟล์นำส่งแบบภาษี
 
 ---
 
