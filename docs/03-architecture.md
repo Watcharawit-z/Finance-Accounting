@@ -22,7 +22,7 @@ Backend     Node.js 22 + TypeScript + NestJS   (ทีมไทยหาคน�
             หรือ Go + Echo ถ้าเน้น performance และทีมถนัด Go
             Prisma หรือ Drizzle ORM + raw SQL สำหรับรายงาน
 
-Database    PostgreSQL 17  — schema-per-tenant สำหรับลูกค้าใหญ่, shared schema + RLS สำหรับ SME
+Database    PostgreSQL 16+  — schema-per-tenant สำหรับลูกค้าใหญ่, shared schema + RLS สำหรับ SME
             Redis          — cache, queue, rate limit, session
             S3-compatible  — ไฟล์แนบ, PDF, XML e-Tax (object lock/WORM สำหรับเอกสารตามกฎหมาย)
 
