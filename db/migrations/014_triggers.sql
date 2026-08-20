@@ -22,7 +22,7 @@ BEGIN
     END IF;
   END IF;
   RETURN NEW;
-END $$ LANGUAGE plpgsql;
+END $$ LANGUAGE plpgsql SET search_path = duly, public, pg_temp;
 
 CREATE CONSTRAINT TRIGGER trg_entry_balanced
   AFTER INSERT OR UPDATE ON journal_entry
@@ -56,7 +56,7 @@ BEGIN
     END IF;
   END IF;
   RETURN NEW;
-END $$ LANGUAGE plpgsql;
+END $$ LANGUAGE plpgsql SET search_path = duly, public, pg_temp;
 
 CREATE TRIGGER trg_block_posted_mutation
   BEFORE UPDATE OR DELETE ON journal_entry
@@ -77,7 +77,7 @@ BEGIN
       USING HINT = 'ให้กลับรายการแล้วลงใหม่';
   END IF;
   RETURN COALESCE(NEW, OLD);
-END $$ LANGUAGE plpgsql;
+END $$ LANGUAGE plpgsql SET search_path = duly, public, pg_temp;
 
 CREATE TRIGGER trg_block_posted_line
   BEFORE INSERT OR UPDATE OR DELETE ON journal_line
@@ -107,7 +107,7 @@ BEGIN
     END IF;
   END IF;
   RETURN NEW;
-END $$ LANGUAGE plpgsql;
+END $$ LANGUAGE plpgsql SET search_path = duly, public, pg_temp;
 
 CREATE TRIGGER trg_period_open
   BEFORE INSERT OR UPDATE ON journal_entry
@@ -141,7 +141,7 @@ BEGIN
     END IF;
   END LOOP;
   RETURN NEW;
-END $$ LANGUAGE plpgsql;
+END $$ LANGUAGE plpgsql SET search_path = duly, public, pg_temp;
 
 CREATE TRIGGER trg_account_usable
   BEFORE INSERT OR UPDATE ON journal_line
@@ -155,7 +155,7 @@ BEGIN
   NEW.debit_base  := ROUND(NEW.debit  * NEW.fx_rate, 4);
   NEW.credit_base := ROUND(NEW.credit * NEW.fx_rate, 4);
   RETURN NEW;
-END $$ LANGUAGE plpgsql;
+END $$ LANGUAGE plpgsql SET search_path = duly, public, pg_temp;
 
 CREATE TRIGGER trg_compute_base
   BEFORE INSERT OR UPDATE ON journal_line
@@ -171,7 +171,7 @@ BEGIN
       USING HINT = 'ต้องยื่นแบบเพิ่มเติม (amended) แทน';
   END IF;
   RETURN COALESCE(NEW, OLD);
-END $$ LANGUAGE plpgsql;
+END $$ LANGUAGE plpgsql SET search_path = duly, public, pg_temp;
 
 CREATE TRIGGER trg_block_filed_tax
   BEFORE UPDATE OR DELETE ON tax_transaction
@@ -183,7 +183,7 @@ CREATE TRIGGER trg_block_filed_tax
 CREATE OR REPLACE FUNCTION block_audit_mutation() RETURNS trigger AS $$
 BEGIN
   RAISE EXCEPTION 'audit_event เป็น append-only แก้ไขหรือลบไม่ได้';
-END $$ LANGUAGE plpgsql;
+END $$ LANGUAGE plpgsql SET search_path = duly, public, pg_temp;
 
 CREATE TRIGGER trg_block_audit_mutation
   BEFORE UPDATE OR DELETE ON audit_event
@@ -201,7 +201,7 @@ BEGIN
     RAISE EXCEPTION 'เอกสารต้องเก็บรักษาถึง % ตามกฎหมาย ลบไม่ได้', OLD.retention_until;
   END IF;
   RETURN OLD;
-END $$ LANGUAGE plpgsql;
+END $$ LANGUAGE plpgsql SET search_path = duly, public, pg_temp;
 
 CREATE TRIGGER trg_block_attachment_delete
   BEFORE DELETE ON attachment
@@ -229,7 +229,7 @@ BEGIN
   result := s.prefix || lpad(s.next_no::text, s.padding, '0') || s.suffix;
   UPDATE document_sequence SET next_no = next_no + 1 WHERE id = s.id;
   RETURN result;
-END $$ LANGUAGE plpgsql;
+END $$ LANGUAGE plpgsql SET search_path = duly, public, pg_temp;
 
 -- ---------------------------------------------------------------------
 -- 10) ปรับปรุงยอดคงเหลือรายเดือนอัตโนมัติเมื่อ post
@@ -252,4 +252,4 @@ BEGIN
     credit_base  = b.credit_base  + EXCLUDED.credit_base,
     closing_base = b.closing_base + EXCLUDED.closing_base,
     updated_at   = now();
-END $$ LANGUAGE plpgsql;
+END $$ LANGUAGE plpgsql SET search_path = duly, public, pg_temp;

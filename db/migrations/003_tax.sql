@@ -79,12 +79,18 @@ CREATE TABLE tax_depreciation_rate (
   id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   asset_class       text NOT NULL,
   name_th           text NOT NULL,
-  max_rate_percent  numeric(9,4) NOT NULL,
+  -- อัตราคงที่ (เช่น อาคารถาวร 5%) — NULL เมื่อกฎหมายกำหนดเป็นสูตร
+  max_rate_percent  numeric(9,4),
+  -- สูตรคำนวณอัตรา สำหรับกรณีที่กฎหมายผูกกับอายุสัญญา/อายุความคุ้มครอง
+  -- เช่น สิทธิการเช่าที่มีกำหนดเวลา = 100 ÷ จำนวนปีที่เหลือของสัญญา
+  rate_formula      text,
   min_years         numeric(9,2),
-  sme_bonus_percent numeric(9,4),        -- สิทธิหักเพิ่มสำหรับ SME (ถ้ามี)
+  sme_bonus_percent numeric(9,4),        -- สิทธิหักเบื้องต้นสำหรับ SME (ถ้ามี)
+  cost_cap          numeric(19,4),       -- เพดานมูลค่าต้นทุนที่หักได้ (รถยนต์นั่ง 1 ลบ.)
   effective_from    date NOT NULL,
   effective_to      date,
-  legal_ref         text
+  legal_ref         text,
+  CONSTRAINT rate_or_formula CHECK (max_rate_percent IS NOT NULL OR rate_formula IS NOT NULL)
 );
 
 CREATE TABLE tax_filing (

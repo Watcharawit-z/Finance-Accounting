@@ -24,6 +24,8 @@ CREATE TABLE report_line (
   label_th      text NOT NULL,
   label_en      text,
   line_kind     text NOT NULL,        -- header|detail|subtotal|total|spacer|note_ref
+  -- ส่วนของงบที่บรรทัดนี้อยู่ ใช้ตรวจความสมดุลและจัดกลุ่มโดยไม่ต้องเดาจากลำดับ
+  section       text,                 -- asset|liability_equity|revenue|expense|operating|investing|financing
   -- แหล่งตัวเลข: อ้าง sub_type ไม่ใช่รหัสบัญชี (ลูกค้าเปลี่ยนรหัสได้)
   sub_types     text[] NOT NULL DEFAULT '{}',
   account_ids   uuid[] NOT NULL DEFAULT '{}',

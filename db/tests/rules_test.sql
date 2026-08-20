@@ -353,6 +353,107 @@ DO $$ BEGIN PERFORM must_fail($q$
 $q$, 'ออกใบลดหนี้โดยไม่อ้างอิงใบกำกับภาษีเดิม'); END $$;
 
 \echo ''
+\echo '=== 15. งบการเงินที่สร้างจากนิยามรายงาน ==='
+DO $$
+DECLARE diff numeric; n integer;
+BEGIN
+  -- 15.1 งบแสดงฐานะการเงินต้องสมดุล
+  diff := balance_sheet_check('22222222-2222-2222-2222-222222222222','2026-12-31');
+  IF diff <> 0 THEN
+    RAISE EXCEPTION 'FAIL: งบแสดงฐานะการเงินไม่สมดุล ผลต่าง %', diff;
+  END IF;
+  RAISE NOTICE '  PASS  รวมสินทรัพย์ = รวมหนี้สินและส่วนของผู้ถือหุ้น (ผลต่าง 0)';
+
+  -- 15.2 รายการที่ถูกกลับรายการต้องยังอยู่ในงบ (ไม่ถูกหักซ้ำสองครั้ง)
+  SELECT amount INTO diff FROM report_detail_lines(
+    '22222222-2222-2222-2222-222222222222','BS','1900-01-01','2026-12-31') WHERE seq_no = 50;
+  IF diff <> 35500 THEN
+    RAISE EXCEPTION 'FAIL: ลูกหนี้ควรเป็น 35,500 (107,000 - กลับรายการ 107,000 + FX 35,500) ได้ %', diff;
+  END IF;
+  RAISE NOTICE '  PASS  รายการที่กลับรายการแล้วยังคงอยู่ในบัญชีแยกประเภท ไม่ถูกหักซ้ำ';
+
+  -- 15.3 กำไรของงวดที่ยังไม่ปิดบัญชีต้องเข้าส่วนของผู้ถือหุ้น
+  SELECT amount INTO diff FROM report_detail_lines(
+    '22222222-2222-2222-2222-222222222222','BS','1900-01-01','2026-12-31') WHERE seq_no = 390;
+  IF diff <> 35500 THEN
+    RAISE EXCEPTION 'FAIL: กำไรสะสมควรรวมผลการดำเนินงานของงวด = 35,500 ได้ %', diff;
+  END IF;
+  RAISE NOTICE '  PASS  กำไรของงวดที่ยังไม่ปิดบัญชีถูกนำเข้าส่วนของผู้ถือหุ้นอัตโนมัติ';
+
+  -- 15.4 ไม่มี sub_type ในผังบัญชีที่หลุดจากงบการเงิน
+  SELECT count(*) INTO n FROM orphan_sub_types;
+  IF n > 0 THEN
+    RAISE EXCEPTION 'FAIL: มี sub_type % รายการที่ไม่ปรากฏในงบการเงิน: %',
+      n, (SELECT string_agg(sub_type,', ') FROM orphan_sub_types);
+  END IF;
+  RAISE NOTICE '  PASS  ทุก sub_type ในผังบัญชีมีที่อยู่ในงบการเงิน';
+END $$;
+
+\echo ''
+\echo '=== 16. ข้อมูลตั้งต้น (seed) ==='
+DO $$
+DECLARE n integer; c text;
+BEGIN
+  INSERT INTO company (id,tenant_id,code,legal_name_th,tax_id)
+  VALUES ('12121212-1212-1212-1212-121212121212','11111111-1111-1111-1111-111111111111',
+          'C02','บจก. ทดสอบผังบัญชี','0105548021448') ON CONFLICT DO NOTHING;
+
+  n := seed_chart_of_accounts('12121212-1212-1212-1212-121212121212','T');
+  IF n < 150 THEN RAISE EXCEPTION 'FAIL: ผังบัญชีโหลดได้แค่ % บัญชี', n; END IF;
+  RAISE NOTICE '  PASS  โหลดผังบัญชีแม่แบบซื้อมาขายไป % บัญชี', n;
+
+  SELECT count(*) INTO n FROM account
+   WHERE company_id='12121212-1212-1212-1212-121212121212' AND path IS NULL;
+  IF n > 0 THEN RAISE EXCEPTION 'FAIL: มี % บัญชีที่ไม่มี ltree path', n; END IF;
+  RAISE NOTICE '  PASS  ทุกบัญชีมีลำดับชั้น (ltree path) ครบ';
+
+  SELECT code INTO c FROM account
+   WHERE id = account_by_subtype('12121212-1212-1212-1212-121212121212','trade_receivable');
+  IF c IS NULL THEN RAISE EXCEPTION 'FAIL: หาบัญชีลูกหนี้จาก sub_type ไม่เจอ'; END IF;
+  RAISE NOTICE '  PASS  ค้นบัญชีจาก sub_type ได้ (trade_receivable → %)', c;
+
+  IF next_business_day('2026-04-13') <> DATE '2026-04-16' THEN
+    RAISE EXCEPTION 'FAIL: วันทำการถัดไปจากสงกรานต์ควรเป็น 16 เม.ย. ได้ %', next_business_day('2026-04-13');
+  END IF;
+  RAISE NOTICE '  PASS  คำนวณวันทำการถัดไปข้ามวันหยุดสงกรานต์และวันหยุดสุดสัปดาห์ได้';
+
+  SELECT count(*) INTO n FROM province;
+  IF n <> 77 THEN RAISE EXCEPTION 'FAIL: ต้องมี 77 จังหวัด ได้ %', n; END IF;
+  RAISE NOTICE '  PASS  ข้อมูลจังหวัดครบ 77 จังหวัด';
+END $$;
+
+\echo ''
+\echo '=== 17. อัตราภาษีต้อง lookup ตามวันที่ของเอกสาร ==='
+DO $$
+DECLARE r numeric;
+BEGIN
+  -- ค่าบริการจ่ายผ่าน e-Withholding Tax ปี 2569 → 1%
+  SELECT tr.rate INTO r FROM tax_rate tr JOIN tax_code tc ON tc.id = tr.tax_code_id
+   WHERE tc.code = 'WHT_SERVICE' AND tc.company_id IS NULL
+     AND tr.condition_json->>'channel' = 'e_wht'
+     AND DATE '2026-06-15' BETWEEN tr.effective_from AND COALESCE(tr.effective_to, DATE '9999-12-31');
+  IF r <> 1.0 THEN RAISE EXCEPTION 'FAIL: e-WHT ค่าบริการปี 2569 ควรเป็น 1%% ได้ %', r; END IF;
+  RAISE NOTICE '  PASS  ค่าบริการผ่าน e-Withholding Tax ปี 2569 = 1%%';
+
+  -- ช่องทางปกติยังเป็น 3%
+  SELECT tr.rate INTO r FROM tax_rate tr JOIN tax_code tc ON tc.id = tr.tax_code_id
+   WHERE tc.code = 'WHT_SERVICE' AND tc.company_id IS NULL
+     AND tr.condition_json->>'channel' = 'manual'
+     AND DATE '2026-06-15' BETWEEN tr.effective_from AND COALESCE(tr.effective_to, DATE '9999-12-31');
+  IF r <> 3.0 THEN RAISE EXCEPTION 'FAIL: ค่าบริการช่องทางปกติควรเป็น 3%% ได้ %', r; END IF;
+  RAISE NOTICE '  PASS  ค่าบริการช่องทางยื่นแบบปกติ = 3%%';
+
+  -- เพดานประกันสังคมเปลี่ยนตามปี
+  SELECT wage_ceiling INTO r FROM sso_rate
+   WHERE DATE '2025-06-15' BETWEEN effective_from AND COALESCE(effective_to, DATE '9999-12-31');
+  IF r <> 15000 THEN RAISE EXCEPTION 'FAIL: เพดานประกันสังคมปี 2568 ควรเป็น 15,000 ได้ %', r; END IF;
+  SELECT wage_ceiling INTO r FROM sso_rate
+   WHERE DATE '2026-06-15' BETWEEN effective_from AND COALESCE(effective_to, DATE '9999-12-31');
+  IF r <> 17500 THEN RAISE EXCEPTION 'FAIL: เพดานประกันสังคมปี 2569 ควรเป็น 17,500 ได้ %', r; END IF;
+  RAISE NOTICE '  PASS  เพดานประกันสังคม 2568 = 15,000 และ 2569 = 17,500 (แยกตามวันที่)';
+END $$;
+
+\echo ''
 \echo '============================================'
 \echo ' ผ่านทุกกฎ — สคีมาบังคับกฎบัญชีได้จริง'
 \echo '============================================'

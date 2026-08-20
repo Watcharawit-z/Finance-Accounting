@@ -9,7 +9,7 @@ CREATE OR REPLACE FUNCTION current_company_ids() RETURNS uuid[] AS $$
     WHEN COALESCE(current_setting('app.company_ids', true), '') = '' THEN ARRAY[]::uuid[]
     ELSE string_to_array(current_setting('app.company_ids', true), ',')::uuid[]
   END;
-$$ LANGUAGE sql STABLE;
+$$ LANGUAGE sql STABLE SET search_path = duly, public, pg_temp;
 
 -- เปิด RLS + สร้าง policy ให้ทุกตารางที่มีคอลัมน์ company_id
 DO $$

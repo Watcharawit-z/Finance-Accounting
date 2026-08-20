@@ -1,0 +1,216 @@
+code,name_th,name_en,account_type,sub_type,is_postable,is_contra,requires_partner,cash_flow_class,templates
+1000,สินทรัพย์,Assets,asset,header,0,0,0,,STM
+1100,สินทรัพย์หมุนเวียน,Current Assets,asset,header,0,0,0,,STM
+1110,เงินสดและรายการเทียบเท่าเงินสด,Cash and Cash Equivalents,asset,header,0,0,0,,STM
+1111,เงินสดในมือ,Cash on Hand,asset,cash,1,0,0,none,STM
+1112,เงินสดย่อย,Petty Cash,asset,cash,1,0,0,none,STM
+1113,เงินฝากธนาคาร-ออมทรัพย์,Bank - Savings,asset,bank,1,0,0,none,STM
+1114,เงินฝากธนาคาร-กระแสรายวัน,Bank - Current,asset,bank,1,0,0,none,STM
+1115,เงินฝากธนาคาร-ประจำ,Bank - Fixed Deposit,asset,bank,1,0,0,none,STM
+1116,เงินฝากธนาคาร-สกุลต่างประเทศ,Bank - Foreign Currency,asset,bank,1,0,0,none,STM
+1117,เงินระหว่างทาง,Cash in Transit,asset,cash_in_transit,1,0,0,none,STM
+1120,เงินลงทุนชั่วคราว,Short-term Investments,asset,short_term_investment,1,0,0,investing,STM
+1130,ลูกหนี้การค้า,Trade Receivables,asset,header,0,0,0,,STM
+1131,ลูกหนี้การค้า-ในประเทศ,Trade AR - Domestic,asset,trade_receivable,1,0,1,operating,STM
+1132,ลูกหนี้การค้า-ต่างประเทศ,Trade AR - Overseas,asset,trade_receivable,1,0,1,operating,STM
+1133,ลูกหนี้การค้า-กิจการที่เกี่ยวข้องกัน,Trade AR - Related Parties,asset,trade_receivable_related,1,0,1,operating,STM
+1134,เช็ครับลงวันที่ล่วงหน้า,Post-dated Cheques Receivable,asset,trade_receivable,1,0,1,operating,STM
+1139,ค่าเผื่อผลขาดทุนด้านเครดิต,Allowance for Expected Credit Loss,asset,ar_allowance,1,1,0,operating,STM
+1140,ลูกหนี้อื่น,Other Receivables,asset,header,0,0,0,,STM
+1141,เงินทดรองจ่าย,Advances to Employees,asset,other_receivable,1,0,0,operating,STM
+1142,ลูกหนี้กรรมการและพนักงาน,Receivable - Directors and Employees,asset,other_receivable,1,0,0,operating,STM
+1143,รายได้ค้างรับ,Accrued Income,asset,accrued_income,1,0,0,operating,STM
+1144,เงินให้กู้ยืมระยะสั้น,Short-term Loans Receivable,asset,other_receivable,1,0,0,investing,STM
+1150,สินค้าคงเหลือ,Inventories,asset,header,0,0,0,,TM
+1151,วัตถุดิบ,Raw Materials,asset,inventory,1,0,0,operating,M
+1152,งานระหว่างทำ,Work in Process,asset,inventory,1,0,0,operating,M
+1153,สินค้าสำเร็จรูป,Finished Goods,asset,inventory,1,0,0,operating,M
+1154,สินค้าซื้อมาเพื่อขาย,Merchandise Inventory,asset,inventory,1,0,0,operating,T
+1155,วัสดุสิ้นเปลือง,Supplies,asset,inventory,1,0,0,operating,TM
+1156,สินค้าระหว่างทาง,Goods in Transit,asset,inventory,1,0,0,operating,TM
+1159,ค่าเผื่อการลดมูลค่าสินค้า,Allowance for Inventory Devaluation,asset,inventory_allowance,1,1,0,operating,TM
+1160,สินทรัพย์ทางภาษี,Tax Assets,asset,header,0,0,0,,STM
+1161,ภาษีซื้อ,Input VAT,asset,input_vat,1,0,0,operating,STM
+1162,ภาษีซื้อรอเรียกคืน,Deferred Input VAT,asset,deferred_input_vat,1,0,0,operating,STM
+1163,ภาษีซื้อต้องห้าม,Non-claimable Input VAT,asset,non_claimable_vat,1,0,0,operating,STM
+1164,ภาษีมูลค่าเพิ่มรอขอคืน,VAT Refundable,asset,vat_receivable,1,0,0,operating,STM
+1165,ภาษีเงินได้ถูกหัก ณ ที่จ่าย,Withholding Tax Deducted at Source,asset,wht_asset,1,0,0,operating,STM
+1166,ภาษีเงินได้นิติบุคคลจ่ายล่วงหน้า,Prepaid Corporate Income Tax,asset,prepaid_cit,1,0,0,operating,STM
+1170,ค่าใช้จ่ายจ่ายล่วงหน้า,Prepaid Expenses,asset,header,0,0,0,,STM
+1171,ค่าเช่าจ่ายล่วงหน้า,Prepaid Rent,asset,prepaid_expense,1,0,0,operating,STM
+1172,ค่าเบี้ยประกันจ่ายล่วงหน้า,Prepaid Insurance,asset,prepaid_expense,1,0,0,operating,STM
+1173,ค่าใช้จ่ายจ่ายล่วงหน้าอื่น,Other Prepaid Expenses,asset,prepaid_expense,1,0,0,operating,STM
+1180,เงินมัดจำและเงินประกันจ่าย,Deposits Paid,asset,deposit_paid,1,0,0,operating,STM
+1200,สินทรัพย์ไม่หมุนเวียน,Non-current Assets,asset,header,0,0,0,,STM
+1210,เงินลงทุนระยะยาว,Long-term Investments,asset,long_term_investment,1,0,0,investing,STM
+1220,เงินลงทุนในบริษัทย่อยและบริษัทร่วม,Investment in Subsidiaries and Associates,asset,investment_subsidiary,1,0,0,investing,STM
+1230,เงินให้กู้ยืมระยะยาว,Long-term Loans Receivable,asset,long_term_receivable,1,0,0,investing,STM
+1240,อสังหาริมทรัพย์เพื่อการลงทุน,Investment Property,asset,investment_property,1,0,0,investing,STM
+1300,ที่ดิน อาคารและอุปกรณ์,"Property, Plant and Equipment",asset,header,0,0,0,,STM
+1301,ที่ดิน,Land,asset,ppe_land,1,0,0,investing,STM
+1302,อาคารและสิ่งปลูกสร้าง,Buildings,asset,ppe,1,0,0,investing,STM
+1303,ส่วนปรับปรุงอาคารและสถานที่เช่า,Leasehold Improvements,asset,ppe,1,0,0,investing,STM
+1304,เครื่องจักรและอุปกรณ์,Machinery and Equipment,asset,ppe,1,0,0,investing,M
+1305,เครื่องใช้สำนักงานและอุปกรณ์,Office Equipment,asset,ppe,1,0,0,investing,STM
+1306,คอมพิวเตอร์และอุปกรณ์,Computer Equipment,asset,ppe,1,0,0,investing,STM
+1307,ยานพาหนะ,Vehicles,asset,ppe,1,0,0,investing,STM
+1308,เครื่องตกแต่งและติดตั้ง,Furniture and Fixtures,asset,ppe,1,0,0,investing,STM
+1309,งานระหว่างก่อสร้าง,Construction in Progress,asset,cip,1,0,0,investing,STM
+1312,ค่าเสื่อมราคาสะสม-อาคาร,Accumulated Depreciation - Buildings,asset,accum_depreciation,1,1,0,none,STM
+1313,ค่าเสื่อมราคาสะสม-ส่วนปรับปรุงอาคาร,Accumulated Depreciation - Leasehold Improvements,asset,accum_depreciation,1,1,0,none,STM
+1314,ค่าเสื่อมราคาสะสม-เครื่องจักร,Accumulated Depreciation - Machinery,asset,accum_depreciation,1,1,0,none,M
+1315,ค่าเสื่อมราคาสะสม-เครื่องใช้สำนักงาน,Accumulated Depreciation - Office Equipment,asset,accum_depreciation,1,1,0,none,STM
+1316,ค่าเสื่อมราคาสะสม-คอมพิวเตอร์,Accumulated Depreciation - Computer,asset,accum_depreciation,1,1,0,none,STM
+1317,ค่าเสื่อมราคาสะสม-ยานพาหนะ,Accumulated Depreciation - Vehicles,asset,accum_depreciation,1,1,0,none,STM
+1318,ค่าเสื่อมราคาสะสม-เครื่องตกแต่ง,Accumulated Depreciation - Furniture,asset,accum_depreciation,1,1,0,none,STM
+1400,สินทรัพย์ไม่มีตัวตน,Intangible Assets,asset,header,0,0,0,,STM
+1401,โปรแกรมคอมพิวเตอร์,Computer Software,asset,intangible,1,0,0,investing,STM
+1402,ค่าลิขสิทธิ์และสิทธิบัตร,Licenses and Patents,asset,intangible,1,0,0,investing,STM
+1403,ค่าความนิยม,Goodwill,asset,goodwill,1,0,0,investing,STM
+1409,ค่าตัดจำหน่ายสะสม,Accumulated Amortization,asset,accum_amortization,1,1,0,none,STM
+1500,สินทรัพย์สิทธิการใช้,Right-of-use Assets,asset,rou_asset,1,0,0,investing,STM
+1600,สินทรัพย์ภาษีเงินได้รอการตัดบัญชี,Deferred Tax Assets,asset,deferred_tax_asset,1,0,0,none,STM
+1700,สินทรัพย์ไม่หมุนเวียนอื่น,Other Non-current Assets,asset,other_asset,1,0,0,investing,STM
+2000,หนี้สิน,Liabilities,liability,header,0,0,0,,STM
+2100,หนี้สินหมุนเวียน,Current Liabilities,liability,header,0,0,0,,STM
+2110,เงินเบิกเกินบัญชีธนาคาร,Bank Overdrafts,liability,bank_overdraft,1,0,0,financing,STM
+2111,เงินกู้ยืมระยะสั้นจากสถาบันการเงิน,Short-term Loans from Financial Institutions,liability,short_term_loan,1,0,0,financing,STM
+2112,ตั๋วเงินจ่าย,Notes Payable,liability,notes_payable,1,0,0,financing,STM
+2120,เจ้าหนี้การค้า,Trade Payables,liability,header,0,0,0,,STM
+2121,เจ้าหนี้การค้า-ในประเทศ,Trade AP - Domestic,liability,trade_payable,1,0,1,operating,STM
+2122,เจ้าหนี้การค้า-ต่างประเทศ,Trade AP - Overseas,liability,trade_payable,1,0,1,operating,STM
+2123,เจ้าหนี้การค้า-กิจการที่เกี่ยวข้องกัน,Trade AP - Related Parties,liability,trade_payable_related,1,0,1,operating,STM
+2124,เช็คจ่ายลงวันที่ล่วงหน้า,Post-dated Cheques Payable,liability,trade_payable,1,0,1,operating,STM
+2125,พักรับสินค้า,Goods Received Not Invoiced,liability,grni,1,0,0,operating,TM
+2130,เจ้าหนี้อื่นและค่าใช้จ่ายค้างจ่าย,Other Payables and Accruals,liability,header,0,0,0,,STM
+2131,ค่าใช้จ่ายค้างจ่าย,Accrued Expenses,liability,accrued_expense,1,0,0,operating,STM
+2132,เงินเดือนค้างจ่าย,Accrued Salaries,liability,accrued_payroll,1,0,0,operating,STM
+2133,โบนัสค้างจ่าย,Accrued Bonus,liability,accrued_payroll,1,0,0,operating,STM
+2134,ดอกเบี้ยค้างจ่าย,Accrued Interest,liability,accrued_expense,1,0,0,operating,STM
+2135,เจ้าหนี้กรรมการ,Payable - Directors,liability,other_payable,1,0,0,financing,STM
+2140,หนี้สินทางภาษี,Tax Liabilities,liability,header,0,0,0,,STM
+2141,ภาษีขาย,Output VAT,liability,output_vat,1,0,0,operating,STM
+2142,ภาษีขายรอเรียกเก็บ,Deferred Output VAT,liability,deferred_output_vat,1,0,0,operating,STM
+2143,ภาษีมูลค่าเพิ่มค้างชำระ,VAT Payable,liability,vat_payable,1,0,0,operating,STM
+2144,ภาษีหัก ณ ที่จ่ายค้างนำส่ง-ภ.ง.ด.1,WHT Payable - PND1,liability,wht_payable,1,0,0,operating,STM
+2145,ภาษีหัก ณ ที่จ่ายค้างนำส่ง-ภ.ง.ด.3,WHT Payable - PND3,liability,wht_payable,1,0,0,operating,STM
+2146,ภาษีหัก ณ ที่จ่ายค้างนำส่ง-ภ.ง.ด.53,WHT Payable - PND53,liability,wht_payable,1,0,0,operating,STM
+2147,ภาษีหัก ณ ที่จ่ายค้างนำส่ง-ภ.ง.ด.54,WHT Payable - PND54,liability,wht_payable,1,0,0,operating,STM
+2148,ภาษีเงินได้นิติบุคคลค้างจ่าย,Corporate Income Tax Payable,liability,cit_payable,1,0,0,operating,STM
+2149,ภาษีธุรกิจเฉพาะและอากรแสตมป์ค้างจ่าย,SBT and Stamp Duty Payable,liability,other_tax_payable,1,0,0,operating,STM
+2150,หนี้สินด้านบุคลากร,Employee-related Liabilities,liability,header,0,0,0,,STM
+2151,เงินสมทบประกันสังคมค้างนำส่ง,Social Security Payable,liability,sso_payable,1,0,0,operating,STM
+2152,เงินกองทุนสำรองเลี้ยงชีพค้างนำส่ง,Provident Fund Payable,liability,pvd_payable,1,0,0,operating,STM
+2153,เงินหักอื่นจากพนักงานค้างนำส่ง,Other Employee Deductions,liability,other_payable,1,0,0,operating,STM
+2160,เงินรับล่วงหน้า,Advances Received,liability,header,0,0,0,,STM
+2161,เงินมัดจำรับจากลูกค้า,Customer Deposits,liability,customer_deposit,1,0,1,operating,STM
+2162,รายได้รับล่วงหน้า,Unearned Revenue,liability,unearned_revenue,1,0,0,operating,STM
+2163,เงินประกันผลงานรับ,Retention Payable,liability,retention_payable,1,0,1,operating,S
+2170,ส่วนของหนี้สินระยะยาวที่ถึงกำหนดชำระใน 1 ปี,Current Portion of Long-term Debt,liability,current_portion_ltd,1,0,0,financing,STM
+2180,หนี้สินตามสัญญาเช่าที่ถึงกำหนดใน 1 ปี,Current Lease Liabilities,liability,lease_liability_current,1,0,0,financing,STM
+2200,หนี้สินไม่หมุนเวียน,Non-current Liabilities,liability,header,0,0,0,,STM
+2210,เงินกู้ยืมระยะยาวจากสถาบันการเงิน,Long-term Loans,liability,long_term_loan,1,0,0,financing,STM
+2220,เงินกู้ยืมจากกรรมการและบุคคลที่เกี่ยวข้อง,Loans from Directors and Related Parties,liability,related_party_loan,1,0,0,financing,STM
+2230,หนี้สินตามสัญญาเช่าระยะยาว,Lease Liabilities - Non-current,liability,lease_liability,1,0,0,financing,STM
+2240,ประมาณการหนี้สินผลประโยชน์พนักงาน,Employee Benefit Obligations,liability,employee_benefit_obligation,1,0,0,operating,STM
+2250,ประมาณการหนี้สินอื่น,Other Provisions,liability,provision,1,0,0,operating,STM
+2260,หนี้สินภาษีเงินได้รอการตัดบัญชี,Deferred Tax Liabilities,liability,deferred_tax_liability,1,0,0,none,STM
+3000,ส่วนของผู้ถือหุ้น,Shareholders Equity,equity,header,0,0,0,,STM
+3110,ทุนจดทะเบียน,Authorized Share Capital,equity,authorized_capital,0,0,0,,STM
+3120,ทุนที่ออกและชำระแล้ว,Issued and Paid-up Share Capital,equity,paid_up_capital,1,0,0,financing,STM
+3130,ส่วนเกินมูลค่าหุ้น,Share Premium,equity,share_premium,1,0,0,financing,STM
+3140,เงินรับล่วงหน้าค่าหุ้น,Share Subscription Received in Advance,equity,share_subscription,1,0,0,financing,STM
+3210,สำรองตามกฎหมาย,Legal Reserve,equity,legal_reserve,1,0,0,none,STM
+3220,สำรองอื่น,Other Reserves,equity,other_reserve,1,0,0,none,STM
+3230,ส่วนเกินทุนจากการตีราคาสินทรัพย์,Revaluation Surplus,equity,revaluation_surplus,1,0,0,none,STM
+3310,กำไรสะสมยังไม่ได้จัดสรร,Retained Earnings - Unappropriated,equity,retained_earnings,1,0,0,none,STM
+3320,กำไรสุทธิสำหรับงวด,Current Year Profit,equity,current_year_earnings,1,0,0,none,STM
+3330,เงินปันผลจ่าย,Dividends Paid,equity,dividend,1,1,0,financing,STM
+3340,ผลสะสมจากการแก้ไขข้อผิดพลาด,Prior Period Adjustments,equity,prior_period_adjustment,1,0,0,none,STM
+4000,รายได้,Revenue,revenue,header,0,0,0,,STM
+4110,รายได้จากการขายสินค้า,Sales Revenue,revenue,header,0,0,0,,TM
+4111,รายได้จากการขาย-ในประเทศ,Sales - Domestic,revenue,sales_revenue,1,0,0,operating,TM
+4112,รายได้จากการขาย-ส่งออก,Sales - Export,revenue,sales_revenue_export,1,0,0,operating,TM
+4113,รายได้จากการขาย-กิจการที่เกี่ยวข้องกัน,Sales - Related Parties,revenue,sales_revenue_related,1,0,0,operating,TM
+4120,รายได้จากการให้บริการ,Service Revenue,revenue,header,0,0,0,,STM
+4121,รายได้ค่าบริการ,Service Income,revenue,service_revenue,1,0,0,operating,STM
+4122,รายได้ค่ารับเหมาและงานตามสัญญา,Contract Revenue,revenue,contract_revenue,1,0,0,operating,S
+4123,รายได้ค่าเช่า,Rental Income,revenue,rental_revenue,1,0,0,operating,STM
+4124,รายได้ค่านายหน้าและคอมมิชชั่น,Commission Income,revenue,commission_revenue,1,0,0,operating,STM
+4130,รับคืนสินค้า,Sales Returns,revenue,sales_return,1,1,0,operating,TM
+4131,ส่วนลดจ่าย,Sales Discounts,revenue,sales_discount,1,1,0,operating,STM
+4200,รายได้อื่น,Other Income,revenue,header,0,0,0,,STM
+4210,ดอกเบี้ยรับ,Interest Income,revenue,interest_income,1,0,0,investing,STM
+4220,เงินปันผลรับ,Dividend Income,revenue,dividend_income,1,0,0,investing,STM
+4230,กำไรจากอัตราแลกเปลี่ยน,Gain on Foreign Exchange,revenue,fx_gain,1,0,0,operating,STM
+4240,กำไรจากการจำหน่ายสินทรัพย์,Gain on Disposal of Assets,revenue,gain_on_disposal,1,0,0,investing,STM
+4250,หนี้สูญได้รับคืน,Bad Debt Recovery,revenue,bad_debt_recovery,1,0,0,operating,STM
+4260,รายได้เบ็ดเตล็ด,Miscellaneous Income,revenue,other_income,1,0,0,operating,STM
+5000,ค่าใช้จ่าย,Expenses,expense,header,0,0,0,,STM
+5100,ต้นทุนขายและต้นทุนบริการ,Cost of Sales and Services,expense,header,0,0,0,,STM
+5110,ต้นทุนขายสินค้า,Cost of Goods Sold,expense,cogs,1,0,0,operating,TM
+5111,ซื้อสินค้า,Purchases,expense,purchases,1,0,0,operating,T
+5112,ส่งคืนสินค้าและส่วนลดรับ,Purchase Returns and Discounts,expense,purchase_return,1,1,0,operating,TM
+5113,ค่าขนส่งเข้า,Freight In,expense,cogs,1,0,0,operating,TM
+5114,อากรขาเข้าและค่าใช้จ่ายนำเข้า,Import Duty and Charges,expense,cogs,1,0,0,operating,TM
+5120,ต้นทุนการให้บริการ,Cost of Services,expense,cost_of_service,1,0,0,operating,S
+5130,ต้นทุนการผลิต,Manufacturing Costs,expense,header,0,0,0,,M
+5131,วัตถุดิบใช้ไป,Raw Materials Used,expense,manufacturing_cost,1,0,0,operating,M
+5132,ค่าแรงงานทางตรง,Direct Labor,expense,manufacturing_cost,1,0,0,operating,M
+5133,ค่าใช้จ่ายการผลิต,Manufacturing Overhead,expense,manufacturing_cost,1,0,0,operating,M
+5134,ผลต่างต้นทุนมาตรฐาน,Standard Cost Variance,expense,cost_variance,1,0,0,operating,M
+5140,ผลขาดทุนจากสินค้าเสื่อมสภาพและสูญหาย,Inventory Write-off,expense,inventory_writeoff,1,0,0,operating,TM
+5200,ค่าใช้จ่ายในการขาย,Selling Expenses,expense,header,0,0,0,,STM
+5210,เงินเดือนและค่าจ้าง-ฝ่ายขาย,Salaries - Sales,expense,selling_expense,1,0,0,operating,STM
+5211,ค่าคอมมิชชั่นการขาย,Sales Commission,expense,selling_expense,1,0,0,operating,STM
+5220,ค่าโฆษณาและส่งเสริมการขาย,Advertising and Promotion,expense,selling_expense,1,0,0,operating,STM
+5230,ค่าขนส่งออก,Freight Out,expense,selling_expense,1,0,0,operating,STM
+5240,ค่าใช้จ่ายในการเดินทาง-ฝ่ายขาย,Travelling - Sales,expense,selling_expense,1,0,0,operating,STM
+5250,ค่ารับรอง,Entertainment Expense,expense,selling_expense,1,0,0,operating,STM
+5260,ค่าใช้จ่ายในการขายอื่น,Other Selling Expenses,expense,selling_expense,1,0,0,operating,STM
+5300,ค่าใช้จ่ายในการบริหาร,Administrative Expenses,expense,header,0,0,0,,STM
+5310,เงินเดือนและผลตอบแทนพนักงาน,Salaries and Employee Benefits,expense,header,0,0,0,,STM
+5311,เงินเดือนและค่าจ้าง,Salaries and Wages,expense,admin_expense,1,0,0,operating,STM
+5312,ค่าล่วงเวลา,Overtime,expense,admin_expense,1,0,0,operating,STM
+5313,โบนัสและเงินรางวัล,Bonus,expense,admin_expense,1,0,0,operating,STM
+5314,ค่าตอบแทนกรรมการ,Directors Remuneration,expense,admin_expense,1,0,0,operating,STM
+5315,เงินสมทบประกันสังคม-ส่วนนายจ้าง,SSO Contribution - Employer,expense,admin_expense,1,0,0,operating,STM
+5316,เงินสมทบกองทุนสำรองเลี้ยงชีพ-ส่วนนายจ้าง,Provident Fund - Employer,expense,admin_expense,1,0,0,operating,STM
+5317,สวัสดิการพนักงาน,Employee Welfare,expense,admin_expense,1,0,0,operating,STM
+5320,ค่าใช้จ่ายสำนักงาน,Office Expenses,expense,header,0,0,0,,STM
+5321,ค่าเช่าสำนักงาน,Office Rent,expense,admin_expense,1,0,0,operating,STM
+5322,ค่าสาธารณูปโภค,Utilities,expense,admin_expense,1,0,0,operating,STM
+5323,ค่าโทรศัพท์และอินเทอร์เน็ต,Telephone and Internet,expense,admin_expense,1,0,0,operating,STM
+5324,ค่าวัสดุสิ้นเปลืองสำนักงาน,Office Supplies,expense,admin_expense,1,0,0,operating,STM
+5325,ค่าซ่อมแซมและบำรุงรักษา,Repairs and Maintenance,expense,admin_expense,1,0,0,operating,STM
+5326,ค่าเบี้ยประกันภัย,Insurance,expense,admin_expense,1,0,0,operating,STM
+5327,ค่าน้ำมันเชื้อเพลิงและยานพาหนะ,Fuel and Vehicle Expenses,expense,admin_expense,1,0,0,operating,STM
+5330,ค่าบริการวิชาชีพ,Professional Fees,expense,header,0,0,0,,STM
+5331,ค่าสอบบัญชี,Audit Fee,expense,admin_expense,1,0,0,operating,STM
+5332,ค่าทำบัญชี,Bookkeeping Fee,expense,admin_expense,1,0,0,operating,STM
+5333,ค่าที่ปรึกษากฎหมายและภาษี,Legal and Tax Advisory,expense,admin_expense,1,0,0,operating,STM
+5334,ค่าธรรมเนียมวิชาชีพอื่น,Other Professional Fees,expense,admin_expense,1,0,0,operating,STM
+5340,ค่าเสื่อมราคาและค่าตัดจำหน่าย,Depreciation and Amortization,expense,header,0,0,0,,STM
+5341,ค่าเสื่อมราคา,Depreciation,expense,depreciation,1,0,0,none,STM
+5342,ค่าตัดจำหน่ายสินทรัพย์ไม่มีตัวตน,Amortization,expense,amortization,1,0,0,none,STM
+5350,ค่าใช้จ่ายอื่นในการบริหาร,Other Administrative Expenses,expense,header,0,0,0,,STM
+5351,หนี้สงสัยจะสูญและหนี้สูญ,Doubtful Accounts and Bad Debts,expense,bad_debt,1,0,0,none,STM
+5352,ขาดทุนจากอัตราแลกเปลี่ยน,Loss on Foreign Exchange,expense,fx_loss,1,0,0,operating,STM
+5353,ขาดทุนจากการจำหน่ายสินทรัพย์,Loss on Disposal of Assets,expense,loss_on_disposal,1,0,0,investing,STM
+5354,ภาษีซื้อต้องห้าม,Non-claimable Input VAT Expense,expense,non_claimable_vat_expense,1,0,0,operating,STM
+5355,ค่าธรรมเนียมและภาษีอากรอื่น,Fees Duties and Other Taxes,expense,admin_expense,1,0,0,operating,STM
+5356,เงินบริจาค,Donations,expense,donation,1,0,0,operating,STM
+5357,ค่าใช้จ่ายฝึกอบรม,Training Expenses,expense,admin_expense,1,0,0,operating,STM
+5358,ค่าใช้จ่ายเบ็ดเตล็ด,Miscellaneous Expenses,expense,admin_expense,1,0,0,operating,STM
+5359,รายจ่ายต้องห้ามทางภาษี,Non-deductible Expenses,expense,non_deductible,1,0,0,operating,STM
+5400,ต้นทุนทางการเงิน,Finance Costs,expense,header,0,0,0,,STM
+5410,ดอกเบี้ยจ่าย,Interest Expense,expense,finance_cost,1,0,0,financing,STM
+5420,ค่าธรรมเนียมธนาคาร,Bank Charges,expense,finance_cost,1,0,0,operating,STM
+5430,ค่าธรรมเนียมทางการเงินอื่น,Other Finance Costs,expense,finance_cost,1,0,0,financing,STM
+5500,ภาษีเงินได้,Income Tax,expense,header,0,0,0,,STM
+5510,ภาษีเงินได้นิติบุคคล,Corporate Income Tax Expense,expense,income_tax_expense,1,0,0,operating,STM
+5520,ภาษีเงินได้รอการตัดบัญชี,Deferred Tax Expense,expense,deferred_tax_expense,1,0,0,none,STM
+9910,บัญชีพัก-รายการที่ยังไม่ระบุ,Suspense Account,asset,suspense,1,0,0,none,STM
+9920,ผลต่างจากการปัดเศษ,Rounding Difference,expense,rounding,1,0,0,operating,STM
+9930,บัญชีปรับปรุงยอดยกมา,Opening Balance Equity,equity,opening_balance,1,0,0,none,STM
+9940,บัญชีระหว่างกัน,Intercompany Clearing,asset,intercompany,1,0,0,none,STM
