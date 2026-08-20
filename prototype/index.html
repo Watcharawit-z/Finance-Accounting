@@ -1,0 +1,695 @@
+<title>DULY</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+
+<style>
+/* ============ TOKENS ============ */
+:root{
+  --paper:#FFFFFF;
+  --canvas:#F6F7F9;
+  --sunken:#EFF2F5;
+  --ink-900:#14181F;
+  --ink-700:#3A424E;
+  --ink-500:#6B7480;
+  --ink-300:#A2ABB6;
+  --line-200:#E1E6EB;
+  --line-100:#EDF0F4;
+  --brand-700:#0F3A4D;
+  --brand-600:#14556F;
+  --brand-500:#1C6F8F;
+  --brand-100:#E4EFF4;
+  --on-brand:#FFFFFF;
+  --pos-600:#17694A; --pos-100:#E6F2ED;
+  --neg-600:#A32B2B; --neg-100:#FAEAEA;
+  --warn-600:#8A5A10; --warn-100:#FBF1DE;
+  --shadow-1:0 1px 2px rgba(20,24,31,.06);
+  --shadow-2:0 6px 20px rgba(20,24,31,.09);
+  --radius:6px;
+  --sans:"IBM Plex Sans Thai","IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --paper:#171B21; --canvas:#0F1216; --sunken:#1D222A;
+    --ink-900:#E9ECF0; --ink-700:#B7BFC9; --ink-500:#8A939E; --ink-300:#5E6773;
+    --line-200:#282E37; --line-100:#22272F;
+    --brand-700:#8FC4DA; --brand-600:#6FB0CB; --brand-500:#8FC4DA; --brand-100:#1B2C36;
+    --on-brand:#0F1216;
+    --pos-600:#5FBF95; --pos-100:#152A22;
+    --neg-600:#E08585; --neg-100:#2E1B1B;
+    --warn-600:#DCAE62; --warn-100:#2C2417;
+    --shadow-1:0 1px 2px rgba(0,0,0,.4);
+    --shadow-2:0 6px 20px rgba(0,0,0,.5);
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#171B21; --canvas:#0F1216; --sunken:#1D222A;
+  --ink-900:#E9ECF0; --ink-700:#B7BFC9; --ink-500:#8A939E; --ink-300:#5E6773;
+  --line-200:#282E37; --line-100:#22272F;
+  --brand-700:#8FC4DA; --brand-600:#6FB0CB; --brand-500:#8FC4DA; --brand-100:#1B2C36;
+  --on-brand:#0F1216;
+  --pos-600:#5FBF95; --pos-100:#152A22;
+  --neg-600:#E08585; --neg-100:#2E1B1B;
+  --warn-600:#DCAE62; --warn-100:#2C2417;
+  --shadow-1:0 1px 2px rgba(0,0,0,.4);
+  --shadow-2:0 6px 20px rgba(0,0,0,.5);
+}
+
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--canvas); color:var(--ink-900);
+  font-family:var(--sans); font-size:14px; line-height:1.55;
+  -webkit-font-smoothing:antialiased;
+}
+h1,h2,h3,h4{margin:0; font-weight:600; text-wrap:balance; letter-spacing:-.015em}
+p{margin:0}
+a{color:inherit}
+.num{font-variant-numeric:tabular-nums; text-align:right; letter-spacing:-.01em}
+.mono{font-family:var(--mono); font-size:.92em}
+.wrap{max-width:1160px; margin:0 auto; padding:0 24px}
+
+/* ============ TOP NAV ============ */
+.nav{
+  position:sticky; top:0; z-index:50; background:var(--paper);
+  border-bottom:1px solid var(--line-200);
+}
+.nav-in{display:flex; align-items:center; gap:28px; height:56px}
+.brand{display:flex; align-items:center; gap:9px; font-weight:700; letter-spacing:.02em; font-size:16px}
+.brand-mark{
+  width:22px; height:22px; border:1.5px solid var(--brand-600); border-radius:3px;
+  display:grid; place-items:center; color:var(--brand-600); font-size:11px; font-weight:700;
+  font-family:var(--mono);
+}
+.nav a.link{color:var(--ink-700); text-decoration:none; font-size:13.5px}
+.nav a.link:hover{color:var(--ink-900)}
+.nav-links{display:flex; gap:22px; margin-inline-start:8px}
+.nav-right{margin-inline-start:auto; display:flex; align-items:center; gap:14px}
+
+.btn{
+  display:inline-flex; align-items:center; gap:7px; height:34px; padding:0 14px;
+  border-radius:var(--radius); border:1px solid var(--line-200); background:var(--paper);
+  color:var(--ink-900); font:inherit; font-size:13.5px; font-weight:500; cursor:pointer;
+  text-decoration:none; white-space:nowrap;
+}
+.btn:hover{background:var(--sunken)}
+.btn-primary{background:var(--brand-600); border-color:var(--brand-600); color:var(--on-brand)}
+.btn-primary:hover{background:var(--brand-700); border-color:var(--brand-700)}
+.btn:focus-visible{outline:2px solid var(--brand-600); outline-offset:2px}
+
+/* ============ HERO ============ */
+.hero{border-bottom:1px solid var(--line-200); background:var(--paper); padding:60px 0 0}
+.hero-grid{display:grid; grid-template-columns:minmax(0,420px) minmax(0,1fr); gap:56px; align-items:start}
+.eyebrow{
+  font-family:var(--mono); font-size:11px; letter-spacing:.09em; text-transform:uppercase;
+  color:var(--ink-500); margin-bottom:14px;
+}
+.hero h1{font-size:36px; line-height:1.25; margin-bottom:16px}
+.hero p.lede{color:var(--ink-700); font-size:15.5px; max-width:44ch}
+.hero-actions{display:flex; gap:10px; margin-top:24px; flex-wrap:wrap}
+.hero-note{margin-top:16px; font-size:12.5px; color:var(--ink-500)}
+.facts{display:flex; gap:0; margin-top:34px; border-top:1px solid var(--line-200)}
+.fact{flex:1; padding:14px 16px 0 0}
+.fact b{display:block; font-size:20px; font-weight:600; font-variant-numeric:tabular-nums}
+.fact span{font-size:11.5px; color:var(--ink-500)}
+
+/* ============ APP WINDOW ============ */
+.win{
+  border:1px solid var(--line-200); border-radius:8px; overflow:hidden;
+  background:var(--paper); box-shadow:var(--shadow-2);
+}
+.win-bar{
+  display:flex; align-items:center; gap:10px; height:36px; padding:0 12px;
+  background:var(--sunken); border-bottom:1px solid var(--line-200);
+  font-size:11.5px; color:var(--ink-500);
+}
+.dots{display:flex; gap:5px}
+.dots i{width:9px; height:9px; border-radius:50%; background:var(--line-200); display:block}
+.win-url{font-family:var(--mono); font-size:11px}
+
+.app{display:grid; grid-template-columns:180px minmax(0,1fr); min-height:430px}
+.side{border-inline-end:1px solid var(--line-200); background:var(--paper); padding:10px 8px}
+.side-h{font-size:10.5px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink-300); padding:8px 8px 6px}
+.side a{
+  display:flex; align-items:center; justify-content:space-between; gap:8px;
+  padding:6px 8px; border-radius:4px; text-decoration:none; color:var(--ink-700); font-size:13px;
+}
+.side a:hover{background:var(--sunken)}
+.side a.on{background:var(--brand-100); color:var(--brand-700); font-weight:600}
+.side .badge{font-size:10.5px; color:var(--neg-600); background:var(--neg-100); padding:1px 6px; border-radius:10px; font-variant-numeric:tabular-nums}
+
+.main{min-width:0; display:flex; flex-direction:column}
+.topbar{
+  display:flex; align-items:center; gap:12px; padding:10px 16px;
+  border-bottom:1px solid var(--line-200);
+}
+.topbar h3{font-size:15px}
+.crumb{font-size:11.5px; color:var(--ink-500)}
+.spacer{margin-inline-start:auto}
+.chip{
+  display:inline-flex; align-items:center; gap:6px; height:26px; padding:0 9px;
+  border:1px solid var(--line-200); border-radius:4px; font-size:12px; color:var(--ink-700);
+  background:var(--paper); cursor:pointer;
+}
+.chip.on{border-color:var(--brand-600); color:var(--brand-700); background:var(--brand-100)}
+.filters{display:flex; gap:7px; padding:9px 16px; border-bottom:1px solid var(--line-200); background:var(--paper); flex-wrap:wrap}
+
+/* KPI row */
+.kpis{display:grid; grid-template-columns:repeat(4,1fr); border-bottom:1px solid var(--line-200)}
+.kpi{padding:13px 16px; border-inline-end:1px solid var(--line-200)}
+.kpi:last-child{border-inline-end:0}
+.kpi .lbl{font-size:11.5px; color:var(--ink-500); display:flex; align-items:center; gap:5px}
+.kpi .val{font-size:21px; font-weight:600; font-variant-numeric:tabular-nums; margin-top:3px; letter-spacing:-.02em}
+.kpi .delta{font-size:11.5px; margin-top:2px; font-variant-numeric:tabular-nums}
+.up{color:var(--pos-600)} .down{color:var(--neg-600)}
+.spark{margin-top:6px; display:block; width:100%; height:26px}
+
+/* tables */
+.tbl{width:100%; border-collapse:collapse; font-size:12.5px}
+.tbl th{
+  text-align:left; font-weight:500; color:var(--ink-500); font-size:11px;
+  letter-spacing:.03em; text-transform:uppercase;
+  padding:7px 12px; background:var(--line-100); border-bottom:1px solid var(--line-200);
+  position:sticky; top:0;
+}
+.tbl th.r{text-align:right}
+.tbl td{padding:7px 12px; border-bottom:1px solid var(--line-100); white-space:nowrap}
+.tbl tbody tr:hover{background:var(--sunken)}
+.tbl tfoot td{
+  padding:9px 12px; border-top:1.5px solid var(--line-200); font-weight:600;
+  background:var(--paper); position:sticky; bottom:0;
+}
+.scroll{overflow-x:auto; flex:1}
+.st{display:inline-flex; align-items:center; gap:5px; font-size:11.5px; white-space:nowrap}
+.st::before{content:""; width:6px; height:6px; border-radius:50%; background:currentColor}
+.st.paid{color:var(--pos-600)} .st.open{color:var(--brand-600)}
+.st.late{color:var(--neg-600)} .st.draft{color:var(--ink-500)} .st.wait{color:var(--warn-600)}
+.rowbar{
+  display:flex; align-items:center; justify-content:space-between; gap:12px;
+  padding:8px 16px; border-top:1px solid var(--line-200); font-size:12px; color:var(--ink-500);
+}
+
+/* ============ SECTIONS ============ */
+section{padding:76px 0; border-bottom:1px solid var(--line-200)}
+.sec-h{max-width:62ch; margin-bottom:32px}
+.sec-h h2{font-size:26px; margin-bottom:10px}
+.sec-h p{color:var(--ink-700); font-size:15px}
+.kicker{
+  font-family:var(--mono); font-size:11px; letter-spacing:.09em; text-transform:uppercase;
+  color:var(--brand-600); margin-bottom:10px;
+}
+
+/* screen tabs */
+.tabs{display:flex; gap:4px; flex-wrap:wrap; margin-bottom:18px; border-bottom:1px solid var(--line-200)}
+.tab{
+  appearance:none; border:0; background:none; font:inherit; font-size:13.5px; cursor:pointer;
+  padding:9px 13px; color:var(--ink-500); border-bottom:2px solid transparent; margin-bottom:-1px;
+}
+.tab:hover{color:var(--ink-900)}
+.tab[aria-selected="true"]{color:var(--brand-700); border-bottom-color:var(--brand-600); font-weight:600}
+.screen[hidden]{display:none}
+
+/* compliance grid */
+.comp{display:grid; grid-template-columns:repeat(auto-fill,minmax(228px,1fr)); gap:0; border:1px solid var(--line-200); border-radius:var(--radius); overflow:hidden; background:var(--paper)}
+.comp div{padding:14px 16px; border-inline-end:1px solid var(--line-100); border-bottom:1px solid var(--line-100)}
+.comp b{display:block; font-size:13.5px; font-weight:600}
+.comp span{font-size:12px; color:var(--ink-500)}
+.comp .ok{color:var(--pos-600); font-size:11.5px; font-weight:600; display:block; margin-top:5px; font-family:var(--mono)}
+
+/* form screen */
+.form{display:grid; grid-template-columns:minmax(0,1fr) 244px; gap:0; flex:1}
+.form-main{padding:14px 16px; min-width:0}
+.form-side{border-inline-start:1px solid var(--line-200); padding:14px 16px; background:var(--sunken)}
+.fgrid{display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-bottom:14px}
+label.f{display:block; font-size:11px; color:var(--ink-500); margin-bottom:4px; letter-spacing:.02em}
+.fld{
+  height:30px; border:1px solid var(--line-200); border-radius:4px; background:var(--paper);
+  display:flex; align-items:center; padding:0 9px; font-size:12.5px; color:var(--ink-900);
+}
+.fld.warnf{border-color:var(--warn-600); background:var(--warn-100)}
+.hint{font-size:11px; color:var(--warn-600); margin-top:4px}
+.sum{display:flex; justify-content:space-between; font-size:12.5px; padding:5px 0}
+.sum.total{border-top:1px solid var(--line-200); margin-top:6px; padding-top:9px; font-weight:600; font-size:14px}
+.keys{margin-top:16px; padding-top:12px; border-top:1px solid var(--line-200); font-size:11.5px; color:var(--ink-500)}
+.keys div{display:flex; justify-content:space-between; padding:3px 0}
+kbd{
+  font-family:var(--mono); font-size:10.5px; border:1px solid var(--line-200);
+  border-bottom-width:2px; border-radius:3px; padding:1px 5px; background:var(--paper); color:var(--ink-700);
+}
+
+/* pricing */
+.price{display:grid; grid-template-columns:repeat(auto-fit,minmax(216px,1fr)); gap:14px}
+.card{border:1px solid var(--line-200); border-radius:var(--radius); background:var(--paper); padding:20px}
+.card.hi{border-color:var(--brand-600); box-shadow:var(--shadow-1)}
+.card h4{font-size:14px; margin-bottom:4px}
+.card .amt{font-size:26px; font-weight:600; font-variant-numeric:tabular-nums; letter-spacing:-.02em}
+.card .amt small{font-size:12px; font-weight:400; color:var(--ink-500); letter-spacing:0}
+.card ul{margin:14px 0 0; padding:0; list-style:none; font-size:12.5px; color:var(--ink-700)}
+.card li{padding:4px 0 4px 18px; position:relative}
+.card li::before{content:"—"; position:absolute; left:0; color:var(--ink-300); font-family:var(--mono)}
+
+/* foot */
+footer{padding:44px 0; color:var(--ink-500); font-size:12.5px}
+.foot-grid{display:flex; gap:40px; flex-wrap:wrap; justify-content:space-between}
+.disclaimer{
+  margin-top:28px; padding:14px 16px; border:1px solid var(--line-200);
+  border-radius:var(--radius); background:var(--paper); font-size:12px; color:var(--ink-700);
+}
+
+@media (max-width:940px){
+  .hero-grid{grid-template-columns:1fr; gap:34px}
+  .app{grid-template-columns:1fr}
+  .side{display:none}
+  .form{grid-template-columns:1fr}
+  .form-side{border-inline-start:0; border-top:1px solid var(--line-200)}
+  .kpis{grid-template-columns:repeat(2,1fr)}
+  .kpi:nth-child(2){border-inline-end:0}
+  .hero h1{font-size:29px}
+}
+@media (prefers-reduced-motion:reduce){*{animation:none!important; transition:none!important}}
+</style>
+
+<nav class="nav">
+  <div class="wrap nav-in">
+    <span class="brand"><span class="brand-mark">D</span>DULY</span>
+    <span class="nav-links">
+      <a class="link" href="#screens">ผลิตภัณฑ์</a>
+      <a class="link" href="#compliance">กฎหมายไทย</a>
+      <a class="link" href="#pricing">ราคา</a>
+    </span>
+    <span class="nav-right">
+      <a class="link" href="#">เข้าสู่ระบบ</a>
+      <a class="btn btn-primary" href="#pricing">ทดลองใช้ 30 วัน</a>
+    </span>
+  </div>
+</nav>
+
+<header class="hero">
+  <div class="wrap hero-grid">
+    <div>
+      <div class="eyebrow">ระบบบัญชีและการเงิน · สำหรับธุรกิจไทย</div>
+      <h1>ออกใบกำกับภาษี ยื่น ภ.พ.30 และปิดงบ<br>อยู่ในระบบเดียวกัน</h1>
+      <p class="lede">
+        DULY บันทึกทุกเอกสารเป็นรายการบัญชีคู่ตั้งแต่วินาทีที่ออก
+        แบบภาษีทุกฉบับจึงสร้างจากตัวเลขจริง ไม่ต้องคีย์ซ้ำใน Excel อีกรอบ
+      </p>
+      <div class="hero-actions">
+        <a class="btn btn-primary" href="#screens">ดูหน้าจอจริง</a>
+        <a class="btn" href="#compliance">รายการที่รองรับตามกฎหมาย</a>
+      </div>
+      <p class="hero-note">ไม่ต้องใช้บัตรเครดิต · ย้ายข้อมูลจากระบบเดิมให้ฟรี · เซิร์ฟเวอร์อยู่ในประเทศไทย</p>
+      <div class="facts">
+        <div class="fact"><b>5 วัน</b><span>ปิดงบเดือนโดยเฉลี่ย</span></div>
+        <div class="fact"><b>13</b><span>แบบภาษีที่สร้างอัตโนมัติ</span></div>
+        <div class="fact"><b>100%</b><span>ทุกยอดคลิกดูที่มาได้</span></div>
+      </div>
+    </div>
+
+    <div class="win" style="margin-bottom:-1px">
+      <div class="win-bar">
+        <span class="dots"><i></i><i></i><i></i></span>
+        <span class="win-url">app.duly.co.th/dashboard</span>
+      </div>
+      <div class="app">
+        <aside class="side">
+          <div class="side-h">บจก. ศรีวัฒนาการค้า</div>
+          <a class="on" href="#">ภาพรวม</a>
+          <a href="#">ขายและลูกหนี้ <span class="badge">7</span></a>
+          <a href="#">ซื้อและเจ้าหนี้</a>
+          <a href="#">ธนาคาร <span class="badge">3</span></a>
+          <a href="#">บัญชีแยกประเภท</a>
+          <a href="#">ภาษี</a>
+          <a href="#">สินค้าคงคลัง</a>
+          <a href="#">ทรัพย์สินถาวร</a>
+          <a href="#">รายงาน</a>
+        </aside>
+        <div class="main">
+          <div class="topbar">
+            <div>
+              <div class="crumb">ภาพรวม</div>
+              <h3>งวด มกราคม 2569</h3>
+            </div>
+            <span class="spacer"></span>
+            <button class="chip on">งวด: ม.ค. 2569</button>
+            <button class="chip">สาขา: ทั้งหมด</button>
+          </div>
+          <div class="kpis">
+            <div class="kpi">
+              <div class="lbl">เงินสดคงเหลือ</div>
+              <div class="val">4,182,650</div>
+              <div class="delta up">+318,400 จากเดือนก่อน</div>
+              <svg class="spark" viewBox="0 0 120 26" preserveAspectRatio="none" aria-hidden="true">
+                <polyline points="0,20 15,18 30,19 45,14 60,15 75,11 90,12 105,7 120,5"
+                  fill="none" stroke="var(--pos-600)" stroke-width="1.5"/>
+                <circle cx="120" cy="5" r="2" fill="var(--pos-600)"/>
+              </svg>
+            </div>
+            <div class="kpi">
+              <div class="lbl">ลูกหนี้คงค้าง</div>
+              <div class="val">6,940,120</div>
+              <div class="delta down">เกินกำหนด 1,284,000</div>
+              <svg class="spark" viewBox="0 0 120 26" preserveAspectRatio="none" aria-hidden="true">
+                <polyline points="0,10 15,12 30,9 45,13 60,11 75,16 90,14 105,18 120,17"
+                  fill="none" stroke="var(--neg-600)" stroke-width="1.5"/>
+                <circle cx="120" cy="17" r="2" fill="var(--neg-600)"/>
+              </svg>
+            </div>
+            <div class="kpi">
+              <div class="lbl">ภาษีที่ต้องชำระ (ภ.พ.30)</div>
+              <div class="val">184,372</div>
+              <div class="delta">ครบกำหนด 15 ก.พ. 2569</div>
+              <svg class="spark" viewBox="0 0 120 26" preserveAspectRatio="none" aria-hidden="true">
+                <rect x="4"  y="14" width="9" height="12" fill="var(--line-200)"/>
+                <rect x="20" y="10" width="9" height="16" fill="var(--line-200)"/>
+                <rect x="36" y="16" width="9" height="10" fill="var(--line-200)"/>
+                <rect x="52" y="8"  width="9" height="18" fill="var(--line-200)"/>
+                <rect x="68" y="12" width="9" height="14" fill="var(--line-200)"/>
+                <rect x="84" y="6"  width="9" height="20" fill="var(--line-200)"/>
+                <rect x="100" y="3" width="9" height="23" fill="var(--brand-600)"/>
+              </svg>
+            </div>
+            <div class="kpi">
+              <div class="lbl">กำไรขั้นต้นสะสม</div>
+              <div class="val">28.4%</div>
+              <div class="delta up">+1.2 จุด เทียบปีก่อน</div>
+              <svg class="spark" viewBox="0 0 120 26" preserveAspectRatio="none" aria-hidden="true">
+                <polyline points="0,16 15,15 30,13 45,14 60,11 75,10 90,11 105,8 120,7"
+                  fill="none" stroke="var(--brand-600)" stroke-width="1.5"/>
+                <circle cx="120" cy="7" r="2" fill="var(--brand-600)"/>
+              </svg>
+            </div>
+          </div>
+          <div class="scroll">
+            <table class="tbl">
+              <thead>
+                <tr>
+                  <th>งานที่ต้องทำก่อนปิดงวด</th>
+                  <th>ผู้รับผิดชอบ</th>
+                  <th>กำหนด</th>
+                  <th class="r">จำนวน</th>
+                  <th>สถานะ</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr><td>รายการธนาคารที่ยังไม่กระทบยอด</td><td>สุนิสา ป.</td><td>5 ก.พ. 2569</td><td class="num">3 รายการ</td><td><span class="st late">ค้าง</span></td></tr>
+                <tr><td>ใบกำกับภาษีซื้อที่ยังไม่แนบไฟล์</td><td>ธนกร ว.</td><td>7 ก.พ. 2569</td><td class="num">12 ใบ</td><td><span class="st wait">รอดำเนินการ</span></td></tr>
+                <tr><td>ตั้งค่าเสื่อมราคาประจำเดือน</td><td>ระบบ</td><td>31 ม.ค. 2569</td><td class="num">84,210.00</td><td><span class="st paid">เสร็จแล้ว</span></td></tr>
+                <tr><td>ยื่น ภ.ง.ด.3 / ภ.ง.ด.53</td><td>สุนิสา ป.</td><td>7 ก.พ. 2569</td><td class="num">46,880.00</td><td><span class="st open">พร้อมยื่น</span></td></tr>
+                <tr><td>กระทบยอดภาษีขายกับบัญชีแยกประเภท</td><td>ระบบ</td><td>10 ก.พ. 2569</td><td class="num">ต่างกัน 0.00</td><td><span class="st paid">ตรงกัน</span></td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="rowbar"><span>อัปเดตล่าสุด 20 ส.ค. 2569 09:41 น.</span><span>ปิดงวดได้เมื่อทุกงานเสร็จ</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div style="height:60px"></div>
+</header>
+
+<section id="screens">
+  <div class="wrap">
+    <div class="sec-h">
+      <div class="kicker">หน้าจอจริงในระบบ</div>
+      <h2>หน้าตาแบบที่คนทำบัญชีใช้ได้ทั้งวัน</h2>
+      <p>ความหนาแน่นของข้อมูลสำคัญกว่าพื้นที่ว่าง ตัวเลขทุกตัวชิดขวาและใช้ฟอนต์ที่หลักตรงกัน
+         ทุกยอดคลิกลงไปดูใบสำคัญต้นทางได้ และทำงานได้ด้วยคีย์บอร์ดล้วนตั้งแต่ต้นจนจบ</p>
+    </div>
+
+    <div class="tabs" role="tablist">
+      <button class="tab" role="tab" aria-selected="true"  data-t="s1">ทะเบียนใบกำกับภาษีขาย</button>
+      <button class="tab" role="tab" aria-selected="false" data-t="s2">คีย์ใบกำกับภาษี</button>
+      <button class="tab" role="tab" aria-selected="false" data-t="s3">รายงานภาษีขาย · ภ.พ.30</button>
+    </div>
+
+    <!-- S1 -->
+    <div class="win screen" id="s1" role="tabpanel">
+      <div class="win-bar"><span class="dots"><i></i><i></i><i></i></span><span class="win-url">app.duly.co.th/sales/tax-invoices</span></div>
+      <div class="app">
+        <aside class="side">
+          <div class="side-h">ขายและลูกหนี้</div>
+          <a href="#">ใบเสนอราคา</a>
+          <a href="#">ใบสั่งขาย</a>
+          <a class="on" href="#">ใบกำกับภาษี</a>
+          <a href="#">ใบเสร็จรับเงิน</a>
+          <a href="#">ใบลดหนี้ / เพิ่มหนี้</a>
+          <a href="#">อายุลูกหนี้</a>
+          <a href="#">ทะเบียนลูกค้า</a>
+        </aside>
+        <div class="main">
+          <div class="topbar">
+            <div><div class="crumb">ขายและลูกหนี้ › ใบกำกับภาษี</div><h3>ใบกำกับภาษีขาย</h3></div>
+            <span class="spacer"></span>
+            <button class="chip">ส่งออก Excel</button>
+            <button class="btn btn-primary" style="height:30px">สร้างใบกำกับภาษี</button>
+          </div>
+          <div class="filters">
+            <button class="chip on">งวด: ม.ค. 2569</button>
+            <button class="chip">สาขา: สำนักงานใหญ่</button>
+            <button class="chip">สถานะ: ทั้งหมด</button>
+            <button class="chip">e-Tax: ทั้งหมด</button>
+            <button class="chip">มุมมองที่บันทึกไว้: ค้างชำระเกิน 30 วัน</button>
+          </div>
+          <div class="scroll">
+            <table class="tbl">
+              <thead>
+                <tr>
+                  <th>เลขที่</th><th>วันที่</th><th>ลูกค้า</th><th>เลขผู้เสียภาษี</th>
+                  <th class="r">มูลค่า (฿)</th><th class="r">VAT 7%</th><th class="r">รวม (฿)</th>
+                  <th>สถานะ</th><th>e-Tax</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr><td class="mono">INV2601-00118</td><td>28 ม.ค. 2569</td><td>บจก. เอ็นเอส เอ็นจิเนียริ่ง</td><td class="mono">0105548021447</td><td class="num">842,000.00</td><td class="num">58,940.00</td><td class="num">900,940.00</td><td><span class="st open">ค้างชำระ</span></td><td><span class="st paid">ส่งแล้ว</span></td></tr>
+                <tr><td class="mono">INV2601-00117</td><td>27 ม.ค. 2569</td><td>หจก. ทวีทรัพย์ ซัพพลาย</td><td class="mono">0103539004112</td><td class="num">128,500.00</td><td class="num">8,995.00</td><td class="num">137,495.00</td><td><span class="st paid">ชำระแล้ว</span></td><td><span class="st paid">ส่งแล้ว</span></td></tr>
+                <tr><td class="mono">INV2601-00116</td><td>26 ม.ค. 2569</td><td>บมจ. ไทยพัฒนาโลจิสติกส์</td><td class="mono">0107536000234</td><td class="num">1,455,000.00</td><td class="num">101,850.00</td><td class="num">1,556,850.00</td><td><span class="st late">เกินกำหนด 12 วัน</span></td><td><span class="st paid">ส่งแล้ว</span></td></tr>
+                <tr><td class="mono">INV2601-00115</td><td>24 ม.ค. 2569</td><td>บจก. สยามกรีนแพค</td><td class="mono">0105551078922</td><td class="num">96,300.00</td><td class="num">6,741.00</td><td class="num">103,041.00</td><td><span class="st paid">ชำระแล้ว</span></td><td><span class="st wait">รอส่ง</span></td></tr>
+                <tr><td class="mono">INV2601-00114</td><td>23 ม.ค. 2569</td><td>Nakamura Trading Co., Ltd.</td><td class="mono">—</td><td class="num">2,140,000.00</td><td class="num">0.00</td><td class="num">2,140,000.00</td><td><span class="st open">ค้างชำระ</span></td><td><span class="st draft">ส่งออก 0%</span></td></tr>
+                <tr><td class="mono">INV2601-00113</td><td>22 ม.ค. 2569</td><td>บจก. ศรีเจริญ ก่อสร้าง</td><td class="mono">0105546012388</td><td class="num">318,700.00</td><td class="num">22,309.00</td><td class="num">341,009.00</td><td><span class="st paid">ชำระแล้ว</span></td><td><span class="st paid">ส่งแล้ว</span></td></tr>
+                <tr><td class="mono">INV2601-00112</td><td>21 ม.ค. 2569</td><td>บจก. ยูนิเวอร์แซล ฟู้ดส์</td><td class="mono">0105559001772</td><td class="num">74,900.00</td><td class="num">5,243.00</td><td class="num">80,143.00</td><td><span class="st draft">ยกเลิก</span></td><td><span class="st draft">—</span></td></tr>
+              </tbody>
+              <tfoot>
+                <tr><td colspan="4">รวม 118 ใบในงวดนี้</td><td class="num">18,942,300.00</td><td class="num">1,255,061.00</td><td class="num">20,197,361.00</td><td colspan="2"></td></tr>
+              </tfoot>
+            </table>
+          </div>
+          <div class="rowbar"><span>แสดง 1–7 จาก 118 รายการ</span><span>ยอดในตารางนี้ตรงกับบัญชี 4111 และ 2141 ณ 09:41 น.</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- S2 -->
+    <div class="win screen" id="s2" role="tabpanel" hidden>
+      <div class="win-bar"><span class="dots"><i></i><i></i><i></i></span><span class="win-url">app.duly.co.th/sales/tax-invoices/new</span></div>
+      <div class="app">
+        <aside class="side">
+          <div class="side-h">ขายและลูกหนี้</div>
+          <a href="#">ใบเสนอราคา</a><a href="#">ใบสั่งขาย</a><a class="on" href="#">ใบกำกับภาษี</a>
+          <a href="#">ใบเสร็จรับเงิน</a><a href="#">ใบลดหนี้ / เพิ่มหนี้</a><a href="#">อายุลูกหนี้</a>
+        </aside>
+        <div class="main">
+          <div class="topbar">
+            <div><div class="crumb">ใบกำกับภาษี › สร้างใหม่</div><h3>ใบกำกับภาษีเต็มรูป <span style="font-weight:400;color:var(--ink-500);font-size:12px">· ฉบับร่าง บันทึกอัตโนมัติเมื่อ 09:39 น.</span></h3></div>
+            <span class="spacer"></span>
+            <button class="chip">ดูตัวอย่างพิมพ์</button>
+            <button class="btn btn-primary" style="height:30px">ออกเลขและลงบัญชี</button>
+          </div>
+          <div class="form">
+            <div class="form-main">
+              <div class="fgrid">
+                <div><label class="f">ลูกค้า</label><div class="fld">บจก. เอ็นเอส เอ็นจิเนียริ่ง</div></div>
+                <div><label class="f">เลขประจำตัวผู้เสียภาษี</label><div class="fld mono">0105548021447</div></div>
+                <div><label class="f">สาขา</label><div class="fld">สำนักงานใหญ่ (00000)</div></div>
+                <div><label class="f">วันที่ใบกำกับภาษี</label><div class="fld">28 ม.ค. 2569</div></div>
+                <div><label class="f">เงื่อนไขชำระ</label><div class="fld">เครดิต 30 วัน · ครบ 27 ก.พ. 2569</div></div>
+                <div><label class="f">เลขที่</label><div class="fld mono" style="color:var(--ink-500)">ออกให้เมื่อลงบัญชี</div></div>
+              </div>
+
+              <table class="tbl" style="border:1px solid var(--line-200); border-radius:4px; overflow:hidden">
+                <thead><tr><th style="width:34px">#</th><th>รายการ</th><th class="r">จำนวน</th><th class="r">ราคา/หน่วย</th><th>ภาษี</th><th class="r">จำนวนเงิน</th></tr></thead>
+                <tbody>
+                  <tr><td class="mono">1</td><td>ชุดควบคุมมอเตอร์ รุ่น MC-450 พร้อมติดตั้ง</td><td class="num">4</td><td class="num">158,000.00</td><td>VAT 7%</td><td class="num">632,000.00</td></tr>
+                  <tr><td class="mono">2</td><td>ค่าบริการออกแบบระบบไฟฟ้าโรงงาน</td><td class="num">1</td><td class="num">180,000.00</td><td>VAT 7%</td><td class="num">180,000.00</td></tr>
+                  <tr><td class="mono">3</td><td>ค่าขนส่งและติดตั้งหน้างาน จ.ระยอง</td><td class="num">1</td><td class="num">30,000.00</td><td>VAT 7%</td><td class="num">30,000.00</td></tr>
+                  <tr><td class="mono" style="color:var(--ink-300)">4</td><td colspan="5" style="color:var(--ink-300)">พิมพ์รหัสสินค้าหรือชื่อ แล้วกด Enter เพื่อเพิ่มบรรทัด</td></tr>
+                </tbody>
+              </table>
+
+              <div class="fld warnf" style="margin-top:14px; height:auto; padding:9px 11px; display:block">
+                <b style="font-size:12.5px">ยังแนบเอกสารประกอบไม่ครบ</b>
+                <div class="hint" style="margin-top:2px">ใบสั่งซื้อจากลูกค้า (PO) ยังไม่ถูกแนบ — ระบบยังออกใบกำกับได้ แต่จะขึ้นเป็นงานค้างก่อนปิดงวด</div>
+              </div>
+            </div>
+
+            <aside class="form-side">
+              <div class="sum"><span>มูลค่าสินค้า/บริการ</span><span class="num">842,000.00</span></div>
+              <div class="sum"><span>ส่วนลด</span><span class="num">0.00</span></div>
+              <div class="sum"><span>ฐานภาษี</span><span class="num">842,000.00</span></div>
+              <div class="sum"><span>ภาษีมูลค่าเพิ่ม 7%</span><span class="num">58,940.00</span></div>
+              <div class="sum total"><span>รวมทั้งสิ้น</span><span class="num">900,940.00</span></div>
+
+              <div style="margin-top:16px; font-size:11.5px; color:var(--ink-500)">คู่บัญชีที่จะลง</div>
+              <table class="tbl" style="margin-top:6px; font-size:11.5px">
+                <tbody>
+                  <tr><td class="mono">1131</td><td class="num">900,940.00</td><td class="num" style="color:var(--ink-300)">—</td></tr>
+                  <tr><td class="mono">4111</td><td class="num" style="color:var(--ink-300)">—</td><td class="num">842,000.00</td></tr>
+                  <tr><td class="mono">2141</td><td class="num" style="color:var(--ink-300)">—</td><td class="num">58,940.00</td></tr>
+                </tbody>
+              </table>
+
+              <div class="keys">
+                <div><span>เพิ่มบรรทัด</span><kbd>Enter</kbd></div>
+                <div><span>บันทึกร่าง</span><kbd>Ctrl S</kbd></div>
+                <div><span>ออกเลขและลงบัญชี</span><kbd>Ctrl ⇧ P</kbd></div>
+                <div><span>ค้นหาทุกอย่าง</span><kbd>Ctrl K</kbd></div>
+              </div>
+            </aside>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- S3 -->
+    <div class="win screen" id="s3" role="tabpanel" hidden>
+      <div class="win-bar"><span class="dots"><i></i><i></i><i></i></span><span class="win-url">app.duly.co.th/tax/vat/output?period=2569-01</span></div>
+      <div class="app">
+        <aside class="side">
+          <div class="side-h">ภาษี</div>
+          <a class="on" href="#">รายงานภาษีขาย</a>
+          <a href="#">รายงานภาษีซื้อ</a>
+          <a href="#">แบบ ภ.พ.30</a>
+          <a href="#">ภ.ง.ด.3 / 53</a>
+          <a href="#">หนังสือรับรอง 50 ทวิ</a>
+          <a href="#">ภ.ง.ด.51 / 50</a>
+          <a href="#">ปฏิทินภาษี <span class="badge">4</span></a>
+        </aside>
+        <div class="main">
+          <div class="topbar">
+            <div><div class="crumb">ภาษี › รายงานภาษีขาย</div><h3>รายงานภาษีขาย เดือนภาษี มกราคม 2569</h3></div>
+            <span class="spacer"></span>
+            <button class="chip">พิมพ์ตามแบบกรมสรรพากร</button>
+            <button class="btn btn-primary" style="height:30px">สร้างแบบ ภ.พ.30</button>
+          </div>
+          <div class="filters">
+            <button class="chip on">สาขา: สำนักงานใหญ่ (00000)</button>
+            <button class="chip">รวมใบลดหนี้</button>
+            <button class="chip">เรียงตามวันที่</button>
+          </div>
+          <div class="scroll">
+            <table class="tbl">
+              <thead>
+                <tr><th>ลำดับ</th><th>วัน/เดือน/ปี</th><th>เลขที่ใบกำกับ</th><th>ชื่อผู้ซื้อ</th><th>เลขผู้เสียภาษี</th><th>สาขา</th><th class="r">มูลค่าสินค้า</th><th class="r">ภาษีมูลค่าเพิ่ม</th></tr>
+              </thead>
+              <tbody>
+                <tr><td class="num">114</td><td>21/01/2569</td><td class="mono">INV2601-00112</td><td>บจก. ยูนิเวอร์แซล ฟู้ดส์</td><td class="mono">0105559001772</td><td class="mono">00000</td><td class="num">74,900.00</td><td class="num">5,243.00</td></tr>
+                <tr><td class="num">115</td><td>22/01/2569</td><td class="mono">INV2601-00113</td><td>บจก. ศรีเจริญ ก่อสร้าง</td><td class="mono">0105546012388</td><td class="mono">00000</td><td class="num">318,700.00</td><td class="num">22,309.00</td></tr>
+                <tr><td class="num">116</td><td>23/01/2569</td><td class="mono">INV2601-00114</td><td>Nakamura Trading Co., Ltd.</td><td class="mono">—</td><td class="mono">—</td><td class="num">2,140,000.00</td><td class="num">0.00</td></tr>
+                <tr><td class="num">117</td><td>24/01/2569</td><td class="mono">INV2601-00115</td><td>บจก. สยามกรีนแพค</td><td class="mono">0105551078922</td><td class="mono">00000</td><td class="num">96,300.00</td><td class="num">6,741.00</td></tr>
+                <tr><td class="num">118</td><td>26/01/2569</td><td class="mono">INV2601-00116</td><td>บมจ. ไทยพัฒนาโลจิสติกส์</td><td class="mono">0107536000234</td><td class="mono">00001</td><td class="num">1,455,000.00</td><td class="num">101,850.00</td></tr>
+                <tr><td class="num">119</td><td>27/01/2569</td><td class="mono">CN2601-00006</td><td>หจก. ทวีทรัพย์ ซัพพลาย <span style="color:var(--ink-500)">(ใบลดหนี้ อ้าง INV2601-00089)</span></td><td class="mono">0103539004112</td><td class="mono">00000</td><td class="num" style="color:var(--neg-600)">(24,000.00)</td><td class="num" style="color:var(--neg-600)">(1,680.00)</td></tr>
+                <tr><td class="num">120</td><td>28/01/2569</td><td class="mono">INV2601-00118</td><td>บจก. เอ็นเอส เอ็นจิเนียริ่ง</td><td class="mono">0105548021447</td><td class="mono">00000</td><td class="num">842,000.00</td><td class="num">58,940.00</td></tr>
+              </tbody>
+              <tfoot>
+                <tr><td colspan="6">รวมยอดขายที่ต้องเสียภาษี 7% · 118 ฉบับ (รวมใบลดหนี้ 6 ฉบับ)</td><td class="num">18,918,300.00</td><td class="num">1,253,381.00</td></tr>
+              </tfoot>
+            </table>
+          </div>
+          <div class="rowbar">
+            <span>ยอดขายที่ได้รับยกเว้น 0.00 · ยอดขายอัตรา 0% 2,140,000.00</span>
+            <span style="color:var(--pos-600)">ตรงกับบัญชี 2141 ภาษีขาย · ผลต่าง 0.00</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="compliance">
+  <div class="wrap">
+    <div class="sec-h">
+      <div class="kicker">ออกแบบตามกฎหมายไทยตั้งแต่โครงสร้างข้อมูล</div>
+      <h2>สิ่งที่ระบบบัญชีจากต่างประเทศทำให้ไม่ได้</h2>
+      <p>อัตราภาษีทุกตัวเก็บเป็นข้อมูลที่มีวันเริ่มและวันสิ้นสุด เมื่อกรมสรรพากรออกประกาศใหม่
+         เราแก้ที่ตารางอัตรา ไม่ต้องรอรอบปล่อยเวอร์ชัน</p>
+    </div>
+    <div class="comp">
+      <div><b>ใบกำกับภาษีเต็มรูป</b><span>ครบทุกรายการตามมาตรา 86/4 พร้อมระบุสำนักงานใหญ่/สาขา</span><span class="ok">รองรับ</span></div>
+      <div><b>ใบเพิ่มหนี้ / ใบลดหนี้</b><span>บังคับอ้างอิงใบกำกับเดิมและเหตุผลตามกฎหมาย</span><span class="ok">รองรับ</span></div>
+      <div><b>รายงานภาษีซื้อ–ขาย</b><span>รูปแบบตามประกาศอธิบดี แยกตามสาขา</span><span class="ok">รองรับ</span></div>
+      <div><b>ภ.พ.30 · ภ.พ.36</b><span>สร้างจากรายการจริง กระทบยอดกับบัญชีแยกประเภทอัตโนมัติ</span><span class="ok">รองรับ</span></div>
+      <div><b>ภ.ง.ด.1 · 1ก · 2 · 3 · 53 · 54</b><span>สร้างไฟล์นำส่งกรมสรรพากรได้โดยตรง</span><span class="ok">รองรับ</span></div>
+      <div><b>หนังสือรับรองหัก ณ ที่จ่าย</b><span>50 ทวิ ฉบับที่ 1 และ 2 พร้อมเลขที่เล่ม/เลขที่</span><span class="ok">รองรับ</span></div>
+      <div><b>e-Tax Invoice &amp; e-Receipt</b><span>สร้าง XML ลงลายมือชื่อดิจิทัล และติดตามผลตอบกลับ</span><span class="ok">รองรับ</span></div>
+      <div><b>e-Withholding Tax</b><span>กันรายการที่ธนาคารนำส่งแทนออกจาก ภ.ง.ด.3/53 ไม่ให้ส่งซ้ำ</span><span class="ok">รองรับ</span></div>
+      <div><b>ภ.ง.ด.51</b><span>เตือนล่วงหน้าเมื่อประมาณการกำไรสุทธิเสี่ยงขาดเกิน 25%</span><span class="ok">รองรับ</span></div>
+      <div><b>ภ.ง.ด.50</b><span>กระดาษทำการกระทบยอดบัญชีกับภาษี รายจ่ายต้องห้าม ค่าเสื่อมทางภาษี</span><span class="ok">รองรับ</span></div>
+      <div><b>ประกันสังคม สปส.1-10</b><span>คำนวณตามเพดานค่าจ้างที่มีผลในเดือนนั้น</span><span class="ok">รองรับ</span></div>
+      <div><b>นำส่งงบการเงิน DBD</b><span>สร้างไฟล์ XBRL และเตือนกำหนด 5 เดือนหลังสิ้นรอบบัญชี</span><span class="ok">รองรับ</span></div>
+      <div><b>พ.ร.บ.การบัญชี 2543</b><span>สมุดรายวันครบ 5 เล่ม เก็บเอกสารขั้นต่ำ 5 ปี ห้ามแก้รายการที่ลงบัญชีแล้ว</span><span class="ok">รองรับ</span></div>
+      <div><b>TFRS for NPAEs (2565)</b><span>งบการเงินและหมายเหตุประกอบตามมาตรฐานที่บังคับใช้ปี 2566</span><span class="ok">รองรับ</span></div>
+      <div><b>PDPA</b><span>บันทึกการเข้าถึงและส่งออกข้อมูล จัดการคำขอใช้สิทธิของเจ้าของข้อมูล</span><span class="ok">รองรับ</span></div>
+      <div><b>ผู้สอบบัญชี</b><span>สิทธิ์อ่านอย่างเดียว เห็นร่องรอยการแก้ไขทุกบรรทัดพร้อมค่าเดิม–ค่าใหม่</span><span class="ok">รองรับ</span></div>
+    </div>
+  </div>
+</section>
+
+<section id="pricing">
+  <div class="wrap">
+    <div class="sec-h">
+      <div class="kicker">ราคา</div>
+      <h2>คิดตามขนาดทีม ไม่คิดตามจำนวนใบกำกับภาษี</h2>
+      <p>ออกเอกสารได้ไม่จำกัดทุกแพ็กเกจ ข้อมูลของคุณส่งออกได้ทั้งหมดตลอดเวลา ไม่มีการล็อกข้อมูลไว้กับเรา</p>
+    </div>
+    <div class="price">
+      <div class="card">
+        <h4>Core</h4>
+        <div class="amt">1,900 <small>บาท/เดือน</small></div>
+        <ul><li>ผู้ใช้ 3 คน</li><li>บัญชีแยกประเภท ลูกหนี้ เจ้าหนี้</li><li>ธนาคารและการกระทบยอด</li><li>VAT และภาษีหัก ณ ที่จ่าย</li><li>งบการเงินตามกฎหมาย</li></ul>
+      </div>
+      <div class="card hi">
+        <h4>Business <span style="font-weight:400;color:var(--brand-600);font-size:11.5px">· เหมาะกับบริษัทส่วนใหญ่</span></h4>
+        <div class="amt">4,900 <small>บาท/เดือน</small></div>
+        <ul><li>ผู้ใช้ 10 คน</li><li>ทุกอย่างใน Core</li><li>สินค้าคงคลังและต้นทุน</li><li>ทรัพย์สินถาวรและค่าเสื่อม</li><li>งบประมาณ มิติ และโครงการ</li><li>สายอนุมัติ และ e-Tax Invoice</li></ul>
+      </div>
+      <div class="card">
+        <h4>Enterprise</h4>
+        <div class="amt">12,900 <small>บาท/เดือนขึ้นไป</small></div>
+        <ul><li>ผู้ใช้ไม่จำกัด</li><li>หลายบริษัทและงบการเงินรวม</li><li>SSO และ API เต็มรูปแบบ</li><li>เชื่อมต่อธนาคารโดยตรง</li><li>SLA และผู้ดูแลเฉพาะราย</li></ul>
+      </div>
+      <div class="card">
+        <h4>สำนักงานบัญชี</h4>
+        <div class="amt">ตามจำนวนบริษัท</div>
+        <ul><li>พื้นที่ทำงานรวมทุกลูกค้า</li><li>สลับบริษัทในคลิกเดียว</li><li>ปฏิทินภาษีรวมทุกราย</li><li>ผังบัญชีมาตรฐานใช้ซ้ำได้</li></ul>
+      </div>
+    </div>
+
+    <div class="disclaimer">
+      <b>หมายเหตุ</b> — หน้านี้เป็นต้นแบบการออกแบบ (design prototype) ประกอบเอกสารการวางระบบ
+      ตัวเลข ชื่อบริษัท และเลขประจำตัวผู้เสียภาษีทั้งหมดเป็นข้อมูลสมมติ
+      ข้อมูลกฎหมายและอัตราภาษีอ้างอิงข้อมูลสาธารณะ ณ ปี 2569 และต้องให้ผู้สอบบัญชีหรือที่ปรึกษาภาษีตรวจสอบก่อนใช้งานจริง
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap foot-grid">
+    <div>
+      <span class="brand" style="font-size:14px"><span class="brand-mark" style="width:19px;height:19px;font-size:10px">D</span>DULY</span>
+      <p style="margin-top:8px">ระบบบัญชีและการเงินสำหรับธุรกิจไทย</p>
+    </div>
+    <div>ผลิตภัณฑ์<br>บัญชีแยกประเภท · ลูกหนี้ · เจ้าหนี้ · ภาษี · รายงาน</div>
+    <div>ทรัพยากร<br>คู่มือการใช้งาน · เอกสาร API · สถานะระบบ</div>
+    <div>บริษัท<br>เกี่ยวกับเรา · นโยบายความเป็นส่วนตัว · ข้อตกลงประมวลผลข้อมูล</div>
+  </div>
+</footer>
+
+<script>
+document.querySelectorAll('.tab').forEach(function (t) {
+  t.addEventListener('click', function () {
+    document.querySelectorAll('.tab').forEach(function (x) { x.setAttribute('aria-selected', 'false'); });
+    t.setAttribute('aria-selected', 'true');
+    document.querySelectorAll('.screen').forEach(function (s) { s.hidden = true; });
+    document.getElementById(t.dataset.t).hidden = false;
+  });
+});
+</script>
