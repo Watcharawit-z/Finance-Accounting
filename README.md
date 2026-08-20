@@ -29,11 +29,26 @@ DULY คือระบบบัญชี–การเงิน (Accounting & 
 | 08 | [AI Layer (เฟสหลัง)](docs/08-ai-layer.md) | สิ่งที่ต้องเตรียมไว้ตั้งแต่วันนี้ |
 | 09 | [Roadmap และแผนสร้าง](docs/09-roadmap.md) | เฟส 0–5, ทีม, ประมาณการเวลา |
 | 10 | [ผังบัญชีมาตรฐาน](docs/10-chart-of-accounts.md) | COA ไทย 5 หมวด พร้อมรหัส |
+| 11 | [แบบฟอร์มพิมพ์](docs/11-print-forms.md) | ใบกำกับภาษี ใบเสร็จ 50 ทวิ รายงานภาษี งบการเงิน |
+| 12 | [กฎการคำนวณภาษี](docs/12-tax-calculation-rules.md) | VAT, WHT, PIT, CIT, ค่าเสื่อม พร้อมสูตรและ test case |
+| 13 | [รูปแบบไฟล์นำส่งราชการ](docs/13-file-formats.md) | e-Tax XML, ไฟล์ ภ.ง.ด., XBRL, ไฟล์ธนาคาร |
+| 14 | [วงจรสถานะเอกสารและ Error Catalog](docs/14-document-states.md) | state machine ทุกเอกสาร + รหัสข้อผิดพลาด |
+| 15 | [แผนการทดสอบ](docs/15-test-plan.md) | golden test, property test, UAT, เกณฑ์ go-live |
+| 16 | [อภิธานศัพท์ไทย-อังกฤษ](docs/16-glossary.md) | มาตรฐานคำที่ใช้ทั้งระบบ |
 
-## โฟลเดอร์อื่น
+## ฐานข้อมูล
 
-- `db/schema.sql` — สคีมา PostgreSQL ของแกนหลัก (GL/AR/AP/Tax/Inventory)
-- `prototype/` — ต้นแบบหน้าเว็บ (landing + dashboard + หน้าใบกำกับภาษี) แบบ static HTML
+```bash
+createdb duly
+for f in db/migrations/*.sql; do psql -d duly -v ON_ERROR_STOP=1 -f "$f"; done
+psql -d duly -v ON_ERROR_STOP=1 -f db/seed/load_seed.sql
+db/tests/run.sh          # ชุดทดสอบกฎบัญชี 43 ข้อ
+```
+
+- `db/migrations/` — 15 ไฟล์ 152 ตาราง ครอบคลุมทุกโมดูล ([รายละเอียด](db/README.md))
+- `db/seed/` — ผังบัญชี 3 แม่แบบ, รหัสและอัตราภาษี, ขั้นภาษี, ค่าลดหย่อน, จังหวัด, วันหยุด
+- `db/tests/` — ชุดทดสอบที่พิสูจน์ว่าสคีมาบังคับกฎบัญชีได้จริง
+- `prototype/` — ต้นแบบหน้าเว็บแบบ static HTML
 
 ---
 
