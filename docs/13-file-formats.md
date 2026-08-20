@@ -62,7 +62,7 @@
       <ram:SellerTradeParty>
         <ram:Name>บริษัท ศรีวัฒนาการค้า จำกัด</ram:Name>
         <ram:SpecifiedTaxRegistration>
-          <ram:ID schemeID="TXID">0105548021447</ram:ID>
+          <ram:ID schemeID="TXID">0105548021442</ram:ID>
         </ram:SpecifiedTaxRegistration>
         <ram:PostalTradeAddress>...</ram:PostalTradeAddress>
         <!-- รหัสสาขา: 00000 = สำนักงานใหญ่ -->

@@ -35,7 +35,7 @@ INSERT INTO tenant (id,slug,name) VALUES
 
 INSERT INTO company (id,tenant_id,code,legal_name_th,tax_id) VALUES
   ('22222222-2222-2222-2222-222222222222','11111111-1111-1111-1111-111111111111',
-   'C01','บจก. ทดสอบระบบ','0105548021447');
+   'C01','บจก. ทดสอบระบบ','0105548021442');
 
 INSERT INTO branch (id,company_id,code,name_th,is_head_office) VALUES
   ('33333333-3333-3333-3333-333333333333','22222222-2222-2222-2222-222222222222',
@@ -64,7 +64,7 @@ INSERT INTO account (id,company_id,code,name_th,account_type,sub_type,is_postabl
 
 INSERT INTO partner (id,company_id,kind,code,legal_name_th,entity_type,tax_id) VALUES
   ('88888888-8888-8888-8888-888888888888','22222222-2222-2222-2222-222222222222',
-   'customer','CUS001','บจก. ลูกค้าทดสอบ','juristic','0105559001772');
+   'customer','CUS001','บจก. ลูกค้าทดสอบ','juristic','0105559001774');
 
 INSERT INTO document_sequence (company_id,branch_id,doc_type,period_key,prefix,padding) VALUES
   ('22222222-2222-2222-2222-222222222222','33333333-3333-3333-3333-333333333333',
@@ -224,7 +224,7 @@ INSERT INTO tax_transaction (id,company_id,branch_id,kind,tax_period,doc_date,do
                              partner_name,partner_tax_id,base_amount,tax_amount,filing_id)
 VALUES ('bbbbbbbb-0000-0000-0000-000000000001','22222222-2222-2222-2222-222222222222',
         '33333333-3333-3333-3333-333333333333','vat_output','2569-01','2026-01-15','INV2601-00001',
-        'tax_invoice','บจก. ลูกค้าทดสอบ','0105559001772',100000,7000,'aaaaaaaa-0000-0000-0000-000000000001');
+        'tax_invoice','บจก. ลูกค้าทดสอบ','0105559001774',100000,7000,'aaaaaaaa-0000-0000-0000-000000000001');
 
 DO $$ BEGIN
   PERFORM must_fail($q$UPDATE tax_transaction SET tax_amount=1 WHERE id='bbbbbbbb-0000-0000-0000-000000000001'$q$,
@@ -236,12 +236,12 @@ END $$;
 INSERT INTO tax_transaction (company_id,branch_id,kind,tax_period,doc_date,doc_no,doc_type,
                              partner_name,partner_tax_id,base_amount,tax_amount)
 VALUES ('22222222-2222-2222-2222-222222222222','33333333-3333-3333-3333-333333333333',
-        'vat_input','2569-01','2026-01-10','SUP-9001','tax_invoice','บจก. ผู้ขาย','0105546012388',50000,3500);
+        'vat_input','2569-01','2026-01-10','SUP-9001','tax_invoice','บจก. ผู้ขาย','0105546012381',50000,3500);
 DO $$ BEGIN PERFORM must_fail($q$
   INSERT INTO tax_transaction (company_id,branch_id,kind,tax_period,doc_date,doc_no,doc_type,
                                partner_name,partner_tax_id,base_amount,tax_amount)
   VALUES ('22222222-2222-2222-2222-222222222222','33333333-3333-3333-3333-333333333333',
-          'vat_input','2569-01','2026-01-10','SUP-9001','tax_invoice','บจก. ผู้ขาย','0105546012388',50000,3500);
+          'vat_input','2569-01','2026-01-10','SUP-9001','tax_invoice','บจก. ผู้ขาย','0105546012381',50000,3500);
 $q$, 'บันทึกใบกำกับภาษีซื้อใบเดิมซ้ำ'); END $$;
 
 \echo ''
@@ -396,7 +396,7 @@ DECLARE n integer; c text;
 BEGIN
   INSERT INTO company (id,tenant_id,code,legal_name_th,tax_id)
   VALUES ('12121212-1212-1212-1212-121212121212','11111111-1111-1111-1111-111111111111',
-          'C02','บจก. ทดสอบผังบัญชี','0105548021448') ON CONFLICT DO NOTHING;
+          'C02','บจก. ทดสอบผังบัญชี','0105559001774') ON CONFLICT DO NOTHING;
 
   n := seed_chart_of_accounts('12121212-1212-1212-1212-121212121212','T');
   IF n < 150 THEN RAISE EXCEPTION 'FAIL: ผังบัญชีโหลดได้แค่ % บัญชี', n; END IF;

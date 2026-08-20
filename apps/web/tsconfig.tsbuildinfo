@@ -1,0 +1,1 @@
+{"root":["./src/App.tsx","./src/api.ts","./src/main.tsx","./src/screens/InvoiceList.tsx","./src/screens/Journals.tsx","./src/screens/NewInvoice.tsx","./src/screens/Reconciliation.tsx","./src/screens/TrialBalance.tsx","./src/screens/VatReport.tsx"],"version":"5.9.3"}

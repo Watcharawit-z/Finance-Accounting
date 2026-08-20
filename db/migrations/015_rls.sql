@@ -27,9 +27,14 @@ BEGIN
   LOOP
     EXECUTE format('ALTER TABLE duly.%I ENABLE ROW LEVEL SECURITY', t);
     EXECUTE format('ALTER TABLE duly.%I FORCE ROW LEVEL SECURITY', t);
+    -- ★ USING ต้องยอมให้เห็นแถวที่ company_id IS NULL ด้วย
+    --   เพราะข้อมูลอ้างอิงระดับระบบ (รหัสภาษี อัตราภาษี เงื่อนไขชำระเงิน หน่วยนับ
+    --   นิยามรายงาน บทบาทมาตรฐาน) ใช้ company_id = NULL แทนความหมายว่า "ใช้ได้ทุกบริษัท"
+    --   ถ้าไม่ยอม NULL แอปจะมองไม่เห็นอัตราภาษีเลย และคำนวณ VAT ไม่ได้
+    -- WITH CHECK ไม่ยอมให้ NULL เพื่อกันไม่ให้แอปสร้างข้อมูลระดับระบบขึ้นเอง
     EXECUTE format($f$
       CREATE POLICY company_isolation ON duly.%I
-      USING (company_id = ANY (duly.current_company_ids()))
+      USING (company_id IS NULL OR company_id = ANY (duly.current_company_ids()))
       WITH CHECK (company_id = ANY (duly.current_company_ids()))
     $f$, t);
   END LOOP;

@@ -1,0 +1,24 @@
+# dependencies
+node_modules/
+.pnp.*
+
+# build output
+dist/
+build/
+*.tsbuildinfo
+
+# ผลลัพธ์ที่สร้างขึ้นระหว่าง build ต้นแบบ
+prototype/build/parts.py
+prototype/build/__pycache__/
+
+# logs และไฟล์ชั่วคราว
+*.log
+npm-debug.log*
+.DS_Store
+
+# ความลับ — ห้าม commit เด็ดขาด
+.env
+.env.*
+!.env.example
+*.pem
+*.key
