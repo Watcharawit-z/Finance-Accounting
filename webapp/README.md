@@ -10,6 +10,11 @@ xdg-open webapp/index.html      # Linux
 start webapp\index.html         # Windows
 ```
 
+ข้อมูลเก็บในเบราว์เซอร์เป็นค่าเริ่มต้น แต่ถ้า deploy ขึ้น Railway แล้วตั้ง `DATABASE_URL`
+กับ `APP_PASSCODE` ให้ ระบบจะเก็บสมุดบัญชีไว้บน PostgreSQL แทน ทุกเครื่องที่เปิด URL
+เดียวกันจะเห็นข้อมูลชุดเดียวกัน พร้อมกันการเขียนทับกันเมื่อแก้พร้อมกันหลายเครื่อง
+ดู [คู่มือการ deploy หัวข้อ A+](../docs/18-deploy-railway.md)
+
 อยากได้ URL จริงบนอินเทอร์เน็ต — โฟลเดอร์นี้ deploy ขึ้น Railway ได้เลย
 ตั้ง Root Directory เป็น `webapp` แล้วกด Generate Domain
 รายละเอียดที่ [คู่มือการ deploy](../docs/18-deploy-railway.md)
@@ -69,7 +74,8 @@ start webapp\index.html         # Windows
 
 ```bash
 node webapp/test.js      # ทดสอบเครื่องบัญชี 58 ข้อ (ไม่ต้องมีเบราว์เซอร์)
-node webapp/uitest.js    # ทดสอบหน้าเว็บจริงใน Chromium 87 ข้อ
+node webapp/uitest.js    # ทดสอบหน้าเว็บจริงใน Chromium 95 ข้อ
+DATABASE_URL=... node webapp/synctest.js   # 23 ข้อ — เก็บข้อมูลบนเซิร์ฟเวอร์ สองเบราว์เซอร์พร้อมกัน
 node webapp/build.js     # รวม src/*.js กลับเป็น index.html ไฟล์เดียว
 ```
 
@@ -82,6 +88,8 @@ node webapp/build.js     # รวม src/*.js กลับเป็น index.htm
 | `src/operations.js` | ธุรกรรมทางธุรกิจทั้งหมด — ขาย ซื้อ ภาษี ค่าเสื่อม เงินเดือน ปิดงวด |
 | `src/seed.js` | ผังบัญชี ข้อมูลหลัก และตัวสร้างรายการตัวอย่างย้อนหลัง |
 | `src/ui-core.js` | ส่วนประกอบหน้าจอ เมนู การเก็บข้อมูลในเครื่อง |
+| `src/sync.js` | ซิงก์ข้อมูลกับเซิร์ฟเวอร์เมื่อมีฐานข้อมูล |
+| `store.js` · `server.js` | ฝั่งเซิร์ฟเวอร์ — เก็บสมุดบัญชีลง PostgreSQL และเสิร์ฟหน้าเว็บ |
 | `src/import.js` | อ่านไฟล์ .xlsx และ .csv แล้วตั้งยอดยกมา |
 | `src/ui-charts.js` | กราฟบนแดชบอร์ด วาดเป็น SVG ล้วน |
 | `src/ui-screens.js` | 36 หน้าจอ |

@@ -138,6 +138,7 @@ const field = (o) =>
 /* ---------- เก็บข้อมูลไว้ในเครื่อง ---------- */
 const LS_KEY = 'duly.demo.v1';
 function save() {
+  if (SYNC.mode === 'server') { syncSave(); return; }
   try { localStorage.setItem(LS_KEY, JSON.stringify({ DB, STATE: { period: STATE.period } })); }
   catch (e) { /* โหมดส่วนตัวหรือปิดการเก็บข้อมูล — ใช้งานต่อได้ในหน่วยความจำ */ }
 }
@@ -155,6 +156,11 @@ function load() {
   } catch (e) { return false; }
 }
 function resetAll() {
+  if (SYNC.mode === 'server') {
+    buildSeed();
+    syncPush().then(() => location.reload());
+    return;
+  }
   try { localStorage.removeItem(LS_KEY); } catch (e) {}
   location.reload();
 }
@@ -232,6 +238,17 @@ function navGroups() {
 
 /* ---------- โครงหน้าจอ ---------- */
 function render() {
+  /* ★ ตอนที่ยังใส่รหัสผ่านไม่ผ่าน ยังไม่มีข้อมูลบริษัทให้วาดแถบบนและเมนู
+     ต้องออกก่อนแตะ DB.company ไม่งั้นหน้าจอขาวทั้งหน้า */
+  if (SYNC.status === 'locked') {
+    document.getElementById('nav').innerHTML = '';
+    document.getElementById('coName').innerHTML = '';
+    document.getElementById('periodSel').innerHTML = '';
+    document.getElementById('main').innerHTML = syncPasscodeScreen(STATE.passWrong);
+    const f = document.querySelector('[name="passcode"]');
+    if (f) f.focus();
+    return;
+  }
   const groups = navGroups();
   let nav = '';
   groups.forEach(function (g) {

@@ -256,6 +256,14 @@ table.fs thead th{background:transparent}
 }
 #tip.show{opacity:1}
 
+/* ---------- ป้ายสถานะการบันทึกขึ้นเซิร์ฟเวอร์ ---------- */
+.sync-tag{font-size:12px; color:var(--muted); white-space:nowrap}
+.sync-tag.saving{color:var(--warn)}
+.sync-tag.saved{color:var(--good)}
+.sync-tag.error{color:var(--neg); font-weight:600}
+.sync-tag:empty{display:none}
+@media (max-width:640px){ .sync-tag{display:none} }
+
 /* ---------- ป้ายบอกว่าเป็นข้อมูลตัวอย่าง ---------- */
 .demo-tag{
   margin-left:10px; font:inherit; font-size:11.5px; font-weight:600; cursor:pointer;
@@ -355,6 +363,7 @@ td select{font:inherit; font-size:13px; height:32px; padding:0 8px; border:1px s
   <div class="brand"><span class="brand-mark" aria-hidden="true">D</span>ดุลย์<span class="brand-sub">Duly</span></div>
   <div class="co" id="coName"></div>
   <span class="grow"></span>
+  <span id="syncTag" class="sync-tag" role="status" aria-live="polite"></span>
   <label class="periodwrap">งวดบัญชี <select id="periodSel" aria-label="เลือกงวดบัญชี"></select></label>
 </header>
 <div class="shell">

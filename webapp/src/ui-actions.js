@@ -302,6 +302,15 @@ function dispatch(act) {
   if (head === 'view')    { STATE.dashView = arg; render(); return; }
   if (head === 'pick')    { document.getElementById('file').click(); return; }
   if (head === 'blank')   { modalBlank(); return; }
+  if (head === 'pass') {
+    const code = val('passcode');
+    syncUnlock(code).then(function (ok) {
+      STATE.passWrong = !ok;
+      render();
+      if (ok) toast('เปิดสมุดบัญชีแล้ว', 'ok', 'ข้อมูลชุดนี้เก็บบนเซิร์ฟเวอร์');
+    });
+    return;
+  }
   if (head === 'imp') {
     if (arg === 'reset') { STATE.imp = null; render(); return; }
     if (arg === 'run') {
@@ -581,10 +590,32 @@ function runImportPackage(pkg) {
 }
 
 /* ---------- เริ่มระบบ ---------- */
-function boot() {
+async function boot() {
+  bindEvents();
+  const onServer = await syncConfig();
+
+  if (onServer) {
+    try { SYNC.passcode = localStorage.getItem('duly.passcode') || ''; } catch (e) { SYNC.passcode = ''; }
+    if (SYNC.needsPasscode && !SYNC.passcode) {
+      setStatus('locked');
+      render();
+      return;
+    }
+    const r = await syncPull();
+    if (r === 'locked') { render(); return; }
+    if (r === 'empty') { buildSeed(); render(); await syncPush(); }
+    else if (r === 'error') {
+      /* ต่อเซิร์ฟเวอร์ไม่ได้ อย่าให้หน้าจอว่างเปล่า — ใช้ของในเครื่องไปก่อนแล้วบอกให้รู้ */
+      SYNC.mode = 'browser';
+      if (!load()) buildSeed();
+      toast('ต่อเซิร์ฟเวอร์ไม่ได้', 'err', 'ใช้ข้อมูลในเบราว์เซอร์ไปก่อน ยังไม่บันทึกขึ้นเซิร์ฟเวอร์');
+    }
+    render();
+    return;
+  }
+
   const restored = load();
   if (!restored) buildSeed();
-  bindEvents();
   render();
   if (!restored) save();
   const el = document.getElementById('boot');
