@@ -1,0 +1,14 @@
+[
+  { "id": 11, "code": "EMP-0101", "prefix": "นาย", "firstName": "วิชัย", "lastName": "นำชัย",
+    "salary": 32000, "office": "ผลิต", "startDate": "2023-05-01T00:00:00+07:00",
+    "identitficationNumber": "3100900123455", "socialSecurityNumber": "3100900123455",
+    "employeeSocialSecurityRate": 5, "isActive": true },
+  { "id": 12, "code": "EMP-0102", "prefix": "นางสาว", "firstName": "สุนิสา", "lastName": "ประเสริฐ",
+    "salary": 45000, "office": "บัญชีและการเงิน", "startDate": "2022-01-10T00:00:00+07:00",
+    "employeeSocialSecurityRate": 5, "isActive": true },
+  { "id": 13, "code": "EMP-0900", "prefix": "นาย", "firstName": "ลาออก", "lastName": "ไปแล้ว",
+    "salary": 20000, "office": "คลัง", "startDate": "2021-03-01T00:00:00+07:00",
+    "endDate": "2026-03-31T00:00:00+07:00", "isActive": false },
+  { "id": 14, "code": "EMP-0103", "prefix": "นาง", "firstName": "ไม่มีเงินเดือน", "lastName": "ในระบบ",
+    "salary": 0, "office": "บริหาร", "isActive": true }
+]

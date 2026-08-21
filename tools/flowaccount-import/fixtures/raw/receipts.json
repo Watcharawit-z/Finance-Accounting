@@ -1,0 +1,6 @@
+[
+  { "recordId": 5501, "documentSerial": "RE690705-001", "publishedOn": "2026-07-05T00:00:00+07:00",
+    "contactCode": "C-001", "contactName": "บริษัท ไทยพัฒนาโลจิสติกส์ จำกัด",
+    "isVatInclusive": false, "subTotal": 5000, "totalAfterDiscount": 5000,
+    "vatAmount": 350, "grandTotal": 5350, "paidTotal": 5350 }
+]

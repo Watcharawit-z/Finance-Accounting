@@ -305,6 +305,20 @@ function upsertItem(i) {
   return 1;
 }
 
+function upsertEmployee(e) {
+  const rec = {
+    code: e.code, name: e.name, dept: e.dept || 'ไม่ระบุ',
+    salary: M(e.salary || '0'), otHours: Number(e.otHours || 0),
+    pvdRate: Number(e.pvdRate || 0), deductions: M(e.deductions || '0'),
+    active: e.active !== false, hired: e.hired || null,
+    nationalId: e.nationalId || null, ssoNumber: e.ssoNumber || null,
+  };
+  const at = DB.employees.findIndex((x) => x.code === rec.code);
+  if (at >= 0) { DB.employees[at] = { ...DB.employees[at], ...rec }; return 0; }
+  DB.employees.push(rec);
+  return 1;
+}
+
 /** เอกสารค้างยกมา — เป็นบัญชีย่อยเท่านั้น ไม่ลงบัญชีซ้ำ เพราะยอดอยู่ในงบทดลองแล้ว */
 function importOpenDocs(pkg, entryNo) {
   let inv = 0, bill = 0;
@@ -318,7 +332,8 @@ function importOpenDocs(pkg, entryNo) {
       snap: { name:d.partnerName, taxId:d.taxId || null, branch:d.branch || '00000', address:d.address || '' },
       lines: [{ desc:'ยอดค้างยกมาจากระบบเดิม', qty:1, price:base, amount:base, taxCode:'EXEMPT', uom:'', itemCode:null }],
       base: base, vat: vat, total: total,
-      paid: M(d.paid || '0'), bfPaid: M(d.paid || '0'), credited: M(d.credited || '0'),
+      paid: M(d.paid || '0'), credited: M(d.credited || '0'),
+      bfPaid: M(d.paid || '0') + M(d.credited || '0'),
       status: 'issued', entryNo: entryNo, etax: 'not_applicable', broughtForward: true,
     });
     inv++;
@@ -342,10 +357,12 @@ function importOpenDocs(pkg, entryNo) {
 
 function importPackage(pkg, overrides) {
   validatePackage(pkg);
-  const before = { partners: DB.partners.length, items: DB.items.length };
-  let newPartners = 0, newItems = 0;
+  const before = { partners: DB.partners.length, items: DB.items.length,
+    employees: DB.employees.length };
+  let newPartners = 0, newItems = 0, newEmployees = 0;
   (pkg.partners || []).forEach((p) => { newPartners += upsertPartner(p); });
   (pkg.items || []).forEach((i) => { newItems += upsertItem(i); });
+  (pkg.employees || []).forEach((e) => { newEmployees += upsertEmployee(e); });
 
   let opening = null;
   if (pkg.trialBalance && pkg.trialBalance.length) {
@@ -360,13 +377,16 @@ function importPackage(pkg, overrides) {
   const asOf = pkg.cutoff;
   const rec = reconciliationChecks(asOf);
   audit('import', 'package|' + pkg.cutoff, 'run', null, {
-    partners: newPartners, items: newItems, invoices: docs.inv, bills: docs.bill,
+    partners: newPartners, items: newItems, employees: newEmployees,
+    invoices: docs.inv, bills: docs.bill,
   });
   return {
     cutoff: pkg.cutoff, source: pkg.source || 'ไม่ระบุ',
     partners: newPartners, partnersSeen: (pkg.partners || []).length,
     items: newItems, itemsSeen: (pkg.items || []).length,
+    employees: newEmployees, employeesSeen: (pkg.employees || []).length,
     invoices: docs.inv, bills: docs.bill,
+    coverage: pkg.coverage || [],
     opening: opening,
     warnings: pkg.warnings || [],
     checks: rec.checks, allPassed: rec.allPassed,

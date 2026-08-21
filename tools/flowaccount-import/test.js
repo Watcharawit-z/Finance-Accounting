@@ -76,7 +76,27 @@ ok('★ บรรทัด "รวม" ถูกข้าม ไม่ถูก�
 const dr = tb.rows.reduce((s, r) => s + r.debit, 0);
 const cr = tb.rows.reduce((s, r) => s + r.credit, 0);
 ok('เดบิตรวม = เครดิตรวม', dr === cr, B(dr) + ' = ' + B(cr));
-ok('อ่านตัวเลขที่มีคอมม่าและอัญประกาศได้', dr === core.M('1461890'), B(dr));
+ok('อ่านตัวเลขที่มีคอมม่าและอัญประกาศได้', dr === core.M('1493990'), B(dr));
+
+console.log('\n=== 3.1 พนักงาน ===');
+const emps = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures/raw/employees.json'), 'utf8'));
+const e1 = map.mapEmployee(emps[0]);
+ok('ประกอบคำนำหน้ากับชื่อสกุลเป็นชื่อเต็ม', e1.employee.name === 'นาย วิชัย นำชัย', e1.employee.name);
+ok('เงินเดือนเป็นสตริงทศนิยม', e1.employee.salary === '32000.0000');
+ok('วันเริ่มงานตัดเหลือแค่วัน', e1.employee.hired === '2023-05-01');
+ok('คนที่มีวันสิ้นสุดถือว่าพ้นสภาพ', map.mapEmployee(emps[2]).employee.active === false);
+ok('★ ไม่มีเงินเดือนในระบบเดิมต้องเตือน ไม่ปล่อยให้ทำเงินเดือนด้วยศูนย์',
+   map.mapEmployee(emps[3]).warnings.some((w) => w.message.indexOf('เงินเดือน') >= 0));
+
+console.log('\n=== 3.2 ยอดรวมที่เป็นยอดหลังหักภาษี ณ ที่จ่าย ===');
+const pur = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures/raw/purchases.json'), 'utf8'));
+const wnet = map.mapDocument(pur[2], 'bill');
+ok('★ บวกภาษีหัก ณ ที่จ่ายกลับเป็นยอดหนี้ ไม่ตีกลับทั้งใบ',
+   wnet.ok && core.M(wnet.doc.total) === core.M('53500'), wnet.ok ? wnet.doc.total : wnet.error.why);
+ok('★ ไม่ถูกเข้าใจผิดว่าเป็นราคารวมภาษี ฐานภาษีจึงยังถูก',
+   core.M(wnet.doc.base) === core.M('50000'), wnet.doc.base);
+ok('★ ยอดที่ชำระแล้วคิดบนฐานเดียวกับระบบเดิม จึงไม่กลายเป็นจ่ายบางส่วน',
+   core.M(wnet.doc.paid) === 0, wnet.doc.paid);
 
 console.log('\n=== 4. แปลงทั้งชุดแล้วนำเข้าระบบจริง ===');
 const outDir = fs.mkdtempSync('/tmp/fa-test-');
@@ -92,6 +112,24 @@ ok('แฟ้มข้อมูลมีรูปแบบที่ระบบ�
 ok('★ ใบที่แปลงไม่ได้ถูกเขียนลง errors.csv ไม่หายเงียบ',
    errCsv.indexOf('IV690720-004') > 0, errCsv.trim().split('\n').length - 1 + ' บรรทัด');
 ok('คู่ค้าที่โผล่เฉพาะบนเอกสารถูกสร้างให้ครบ', pkg.partners.length >= 4, pkg.partners.length + ' ราย');
+ok('พนักงานอยู่ในแฟ้มข้อมูล ไม่ถูกทิ้ง', pkg.employees.length === 4, pkg.employees.length + ' คน');
+
+const cov = Object.fromEntries((pkg.coverage || []).map((c) => [c.source, c]));
+ok('★ รายงานความครบถ้วนครอบคลุมทุกชุดข้อมูลที่ดึงมา',
+   ['tax-invoices','receivable-invoices','purchases','receipts','credit-notes','employees']
+     .every((k) => cov[k]), Object.keys(cov).join(', '));
+ok('★ เอกสารเลขซ้ำข้ามชุดข้อมูลถูกตัดออก ไม่นับยอดลูกหนี้สองรอบ',
+   cov['receivable-invoices'].duplicate === 1, 'ตัดซ้ำ ' + cov['receivable-invoices'].duplicate + ' ใบ');
+ok('เอกสารที่ปิดแล้วถูกนับไว้ ไม่ได้หายเงียบ',
+   cov['tax-invoices'].closed === 1 && cov['receipts'].closed === 1);
+const noDup = new Set(pkg.openInvoices.map((d) => d.no));
+ok('ไม่มีเลขที่ซ้ำในใบที่ยกมา', noDup.size === pkg.openInvoices.length, pkg.openInvoices.length + ' ใบ');
+
+const credited = pkg.openInvoices.find((d) => d.no === 'IN690725-009');
+ok('★ ใบลดหนี้ถูกหักออกจากใบกำกับที่ยังค้าง',
+   credited && core.M(credited.credited) === core.M('10700'), credited && credited.credited);
+ok('ใบลดหนี้ที่หาใบต้นทางไม่เจอถูกเตือน ไม่ถูกหักมั่ว',
+   pkg.warnings.some((w) => w.message.indexOf('ไม่อยู่ในใบที่ยังค้าง') >= 0));
 
 /* โหลดเครื่องบัญชีจริงแล้วนำเข้าเข้าไปในบริษัทเปล่า */
 const webapp = path.join(__dirname, '..', '..', 'webapp', 'src');
@@ -99,7 +137,7 @@ const src = ['engine.js', 'operations.js', 'seed.js', 'import.js']
   .map((f) => fs.readFileSync(path.join(webapp, f), 'utf8')).join('\n');
 const app = new Function(src + `
   return { DB, buildBlank, importPackage, reconciliationChecks, trialBalance, balanceSheet,
-           aging, fmt, M, receivePayment, DomainError };`)();
+           aging, fmt, M, receivePayment, runPayroll, DomainError };`)();
 
 app.buildBlank({ name: 'บริษัท ทดสอบย้ายข้อมูล จำกัด', year: 2026 });
 ok('บริษัทเปล่ามีผังบัญชีครบแต่ไม่มีรายการ',
@@ -109,8 +147,12 @@ const res = app.importPackage(pkg, {});
 ok('นำเข้าสำเร็จ', res.opening && res.opening.entry.no.startsWith('OB'), res.opening.entry.no);
 ok('คู่ค้าเข้าระบบครบ', res.partners === pkg.partners.length, res.partners + ' ราย');
 ok('สินค้าเข้าระบบครบ', res.items === pkg.items.length, res.items + ' รายการ');
-ok('ลูกหนี้ค้างยกมาเข้าเป็นบัญชีย่อย', res.invoices === 2, res.invoices + ' ใบ');
-ok('เจ้าหนี้ค้างยกมาเข้าเป็นบัญชีย่อย', res.bills === 1, res.bills + ' รายการ');
+ok('ลูกหนี้ค้างยกมาเข้าเป็นบัญชีย่อย', res.invoices === 3, res.invoices + ' ใบ');
+ok('เจ้าหนี้ค้างยกมาเข้าเป็นบัญชีย่อย', res.bills === 2, res.bills + ' รายการ');
+ok('★ พนักงานเข้าระบบครบ พร้อมทำเงินเดือนงวดแรก',
+   res.employees === 4 && app.DB.employees.length === 4, res.employees + ' คน');
+ok('คนที่พ้นสภาพไม่ถูกนับเป็นพนักงานปัจจุบัน',
+   app.DB.employees.filter((e) => e.active).length === 3);
 
 const tb2 = app.trialBalance('2026-01-01', '2026-12-31');
 ok('งบทดลองหลังนำเข้าสมดุล', tb2.balanced, 'เดบิต ' + app.fmt(tb2.totalDr));
@@ -121,7 +163,10 @@ res.checks.forEach((c) => ok('ยอดคุม: ' + c.label, c.ok, c.ok ? '' :
 ok('★ ยอดคุมผ่านครบทุกข้อหลังย้ายข้อมูล', res.allPassed);
 
 const ar = app.aging('ar', '2026-07-31');
-ok('อายุลูกหนี้ตรงกับบัญชีคุม', ar.totals.total === core.M('148730'), app.fmt(ar.totals.total));
+ok('อายุลูกหนี้ตรงกับบัญชีคุม', ar.totals.total === core.M('180830'), app.fmt(ar.totals.total));
+const ap = app.aging('ap', '2026-07-31');
+ok('★ อายุเจ้าหนี้ตรงกับบัญชีคุม แม้มีใบที่ยอดเป็นยอดหลังหักภาษี',
+   ap.totals.total === core.M('147660'), app.fmt(ap.totals.total));
 
 console.log('\n=== 5. กันย้ายซ้ำและรับชำระต่อจากยอดยกมา ===');
 let dup = false;
@@ -131,10 +176,17 @@ ok('★ นำเข้าไฟล์เดิมซ้ำถูกปฏิเ
 app.receivePayment({ invoiceNo: 'IV690712-001', date: '2026-08-05', amount: '38030' });
 const ar2 = app.aging('ar', '2026-08-31');
 ok('★ รับชำระหลังย้ายแล้วยอดลูกหนี้ลดถูกต้อง ไม่นับซ้ำกับยอดที่ชำระก่อนตัดยอด',
-   ar2.totals.total === core.M('110700'), app.fmt(ar2.totals.total));
+   ar2.totals.total === core.M('142800'), app.fmt(ar2.totals.total));
 const rec2 = app.reconciliationChecks('2026-08-31');
 ok('ยอดคุมยังตรงหลังรับชำระ', rec2.allPassed,
    rec2.checks.filter((c) => !c.ok).map((c) => c.label).join(', ') || '');
+
+console.log('\n=== 6. ทำเงินเดือนงวดแรกด้วยพนักงานที่ย้ายมา ===');
+app.DB.employees.forEach(function (e) { if (e.salary === 0) e.salary = core.M('25000'); });
+const run = app.runPayroll('2026-08');
+ok('★ ทำเงินเดือนได้ทันทีโดยไม่ต้องกรอกพนักงานใหม่', run.count === 3, run.count + ' คน');
+ok('หักประกันสังคมตามเพดาน 875 บาท', run.slips.every((s) => s.sso <= core.M('875')));
+ok('ยอดคุมยังตรงหลังทำเงินเดือน', app.reconciliationChecks('2026-08-31').allPassed);
 
 fs.rmSync(outDir, { recursive: true, force: true });
 console.log('\n' + '═'.repeat(40));

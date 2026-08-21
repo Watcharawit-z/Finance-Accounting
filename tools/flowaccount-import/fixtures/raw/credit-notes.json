@@ -1,0 +1,12 @@
+[
+  { "recordId": 6601, "documentSerial": "CN690728-001", "publishedOn": "2026-07-28T00:00:00+07:00",
+    "contactCode": "C-001", "contactName": "บริษัท ไทยพัฒนาโลจิสติกส์ จำกัด",
+    "documentReference": [{ "referenceDocumentSerial": "IN690725-009", "referenceDocumentType": 3 }],
+    "isVatInclusive": false, "subTotal": 10000, "totalAfterDiscount": 10000,
+    "vatAmount": 700, "grandTotal": 10700, "paidTotal": 0 },
+  { "recordId": 6602, "documentSerial": "CN690729-002", "publishedOn": "2026-07-29T00:00:00+07:00",
+    "contactCode": "C-001", "contactName": "บริษัท ไทยพัฒนาโลจิสติกส์ จำกัด",
+    "documentReference": [{ "referenceDocumentSerial": "IV690101-999", "referenceDocumentType": 3 }],
+    "isVatInclusive": false, "subTotal": 500, "totalAfterDiscount": 500,
+    "vatAmount": 35, "grandTotal": 535, "paidTotal": 0 }
+]

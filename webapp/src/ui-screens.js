@@ -1250,6 +1250,7 @@ function scImportResult() {
     body: kpi([
       { label:'คู่ค้าที่เพิ่มใหม่', value: r.partners + ' / ' + r.partnersSeen + ' ราย' },
       { label:'สินค้าที่เพิ่มใหม่', value: r.items + ' / ' + r.itemsSeen + ' รายการ' },
+      { label:'พนักงานที่เพิ่มใหม่', value: (r.employees || 0) + ' / ' + (r.employeesSeen || 0) + ' คน' },
       { label:'ลูกหนี้ค้างยกมา', value: r.invoices + ' ใบ' },
       { label:'เจ้าหนี้ค้างยกมา', value: r.bills + ' รายการ' },
     ])
@@ -1261,6 +1262,19 @@ function scImportResult() {
         '<li><span class="dot ' + (c.ok ? 'good' : 'bad') + '"></span>' + esc(c.label)
         + '<span class="grow"></span><span class="' + (c.ok ? 'dim' : 'neg') + '">'
         + (c.ok ? 'ตรงกัน' : 'ต่าง ' + fmt(c.control - c.sub)) + '</span></li>').join('') + '</ul>'
+    + ((r.coverage && r.coverage.length)
+        ? '<div class="sub-h">ความครบถ้วนของแต่ละชุดข้อมูลที่ดึงมา</div>'
+          + tbl({
+              cols:[{t:'ชุดข้อมูล'},{t:'อ่านได้',a:'r'},{t:'ยกมาเป็นยอดค้าง',a:'r'},
+                {t:'ปิดแล้วไม่ยกมา',a:'r'},{t:'ซ้ำ',a:'r'},{t:'แปลงไม่ได้',a:'r'},{t:'หมายเหตุ'}],
+              rows: r.coverage.map((c) => [c.source, {c:String(c.rows)}, {c:String(c.open)},
+                {c:String(c.closed)}, {c:String(c.duplicate)},
+                c.error ? {st:['late', String(c.error)]} : {c:'0'},
+                {dim: c.note || ''}]),
+            })
+          + '<div class="note">แถวที่ "ปิดแล้วไม่ยกมา" คือเอกสารที่ชำระครบก่อนวันตัดยอด '
+          + 'ยอดของมันรวมอยู่ในงบทดลองแล้ว จึงไม่ต้องยกมาเป็นรายใบซ้ำอีก</div>'
+        : '')
     + (r.warnings.length
         ? '<div class="sub-h">ข้อสังเกตจากตัวดึงข้อมูล (' + r.warnings.length + ')</div>'
           + tbl({ cols:[{t:'เอกสาร'},{t:'เรื่อง'}],

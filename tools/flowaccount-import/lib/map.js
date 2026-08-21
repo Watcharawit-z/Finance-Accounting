@@ -87,9 +87,26 @@ function mapDocument(d, kind) {
   const total = num(d.grandTotal);
 
   if (base + vat !== total) {
-    // ราคารวมภาษีแล้ว ต้องถอดฐานออกมา ไม่ใช่คูณ 7% เข้าไปตรง ๆ
+    /* ★ ลำดับการตรวจสำคัญมาก — การถอดฐานจากราคารวมภาษีจะ "ลงตัว" เกือบเสมอ
+       ถ้าเอามาลองก่อน มันจะกลืนใบที่ยอดรวมเป็นยอดหลังหักภาษี ณ ที่จ่ายไปด้วย
+       แล้วได้ฐานภาษีผิดโดยไม่มีใครรู้ จึงต้องเชื่อธง isVatInclusive ก่อน
+       แล้วค่อยลองบวกภาษีหัก ณ ที่จ่ายกลับ แล้วจึงเดาว่าเป็นราคารวมภาษีเป็นทางสุดท้าย */
+    const wht = num(d.documentWithholdingTaxAmount) + num(d.documentDeductionAmount);
     const derived = baseFromIncl(total, '7');
-    if (derived + round2(pct(derived, '7')) === total) {
+    const inclusiveFits = derived + round2(pct(derived, '7')) === total;
+
+    if (d.isVatInclusive === true && inclusiveFits) {
+      warnings.push({ doc: no, message: 'ราคารวมภาษีแล้ว ถอดฐานภาษีให้เป็น ' + dec(derived) });
+      base = derived;
+    } else if (wht > 0 && base + vat === total + wht) {
+      warnings.push({ doc: no,
+        message: 'ยอดรวมในระบบเดิมเป็นยอดหลังหักภาษี ณ ที่จ่าย/หักเงินอื่น '
+          + dec(wht) + ' บาท ใช้ยอดก่อนหัก ' + dec(total + wht) + ' เป็นยอดหนี้' });
+      /* ★ remainingAmount ที่ระบบเดิมส่งมาก็เป็นยอดหลังหักเช่นกัน
+         ถ้าเอาไปลบจากยอดก่อนหัก จะกลายเป็นว่าจ่ายไปแล้วเท่ากับภาษีที่หัก ทั้งที่ยังไม่ได้จ่าย
+         จึงต้องคิดยอดที่ชำระแล้วบนฐานเดียวกับที่ระบบเดิมใช้ */
+      return finish(no, d, base, vat, total + wht, warnings, kind, total);
+    } else if (inclusiveFits) {
       warnings.push({ doc: no, message: 'ราคารวมภาษีแล้ว ถอดฐานภาษีให้เป็น ' + dec(derived) });
       base = derived;
     } else {
@@ -100,11 +117,16 @@ function mapDocument(d, kind) {
     }
   }
 
+  return finish(no, d, base, vat, total, warnings, kind);
+}
+
+function finish(no, d, base, vat, total, warnings, kind, paymentBase) {
+  const settleOn = paymentBase === undefined ? total : paymentBase;
   const has = (v) => v !== undefined && v !== null && v !== '';
   let paid = 0;
   if (has(d.paidTotal)) paid = num(d.paidTotal);
   else if (has(d.paidAmount)) paid = num(d.paidAmount);
-  else if (has(d.remainingAmount)) paid = total - num(d.remainingAmount);
+  else if (has(d.remainingAmount)) paid = settleOn - num(d.remainingAmount);
   else {
     warnings.push({ doc: no,
       message: 'ไม่พบยอดที่ชำระแล้วในข้อมูล ตั้งเป็น 0 ให้ — ตรวจกับรายงานอายุลูกหนี้/เจ้าหนี้อีกครั้ง' });
@@ -145,6 +167,49 @@ function mapDocument(d, kind) {
   return { ok: true, doc, warnings };
 }
 
+/* GenderPrefix ของ FlowAccount ไม่มีชื่อกำกับในสเปก จึงใช้ค่าที่ส่งมาตรง ๆ ถ้าเป็นข้อความ */
+function mapEmployee(e) {
+  const warnings = [];
+  const name = [s(e.prefix), s(e.firstName), s(e.lastName)].filter(Boolean).join(' ').trim()
+    || s(e.code) || ('พนักงานรหัส ' + e.id);
+  const code = s(e.code) || 'EMP-' + e.id;
+  const salary = num(e.salary);
+  if (salary === 0) {
+    warnings.push({ doc: code, message: 'ไม่มีเงินเดือนในข้อมูล ต้องกรอกเองก่อนทำเงินเดือนงวดแรก' });
+  }
+  const ssPct = Number(e.employeeSocialSecurityRate || 0);
+  if (ssPct && ssPct !== 5) {
+    warnings.push({ doc: code, message: 'อัตราประกันสังคมในระบบเดิมคือ ' + ssPct
+      + '% ระบบใหม่คิดตามกฎหมาย 5% ของค่าจ้างในเพดาน' });
+  }
+  return {
+    employee: {
+      code: code,
+      name: name,
+      dept: s(e.office) || s(e.title) || 'ไม่ระบุ',
+      salary: dec(salary),
+      hired: s(e.startDate).slice(0, 10) || null,
+      active: e.isActive !== false && e.isDelete !== true && !s(e.endDate),
+      nationalId: s(e.identitficationNumber).replace(/\D/g, '') || null,
+      ssoNumber: s(e.socialSecurityNumber).replace(/\D/g, '') || null,
+      otHours: 0, pvdRate: 0, deductions: '0',
+    },
+    warnings,
+  };
+}
+
+/** ใบลดหนี้/ใบเพิ่มหนี้อ้างถึงเอกสารเดิมเลขที่ใด */
+function referencedSerials(d) {
+  const out = [];
+  (d.documentReference || []).forEach(function (r) {
+    const v = s(r.referenceDocumentSerial);
+    if (v) out.push(v);
+  });
+  const direct = s(d.referenceDocumentSerial || d.reference);
+  if (direct) out.push(direct);
+  return out;
+}
+
 /** ตัดเฉพาะใบที่ยังค้าง ณ วันตัดยอด */
 function isOpenAt(doc, cutoff) {
   if (!doc.date || doc.date > cutoff) return false;
@@ -153,5 +218,6 @@ function isOpenAt(doc, cutoff) {
 
 module.exports = {
   CONTACT_KIND, ENTITY, PRODUCT_TYPE, VAT_TYPE,
-  branchCode, mapContact, mapProduct, mapDocument, isOpenAt,
+  branchCode, mapContact, mapProduct, mapDocument, mapEmployee,
+  referencedSerials, isOpenAt,
 };

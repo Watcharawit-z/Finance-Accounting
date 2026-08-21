@@ -1,0 +1,11 @@
+[
+  { "recordId": 8801, "documentSerial": "IV690712-001", "publishedOn": "2026-07-12T00:00:00+07:00",
+    "contactCode": "C-001", "contactName": "บริษัท ไทยพัฒนาโลจิสติกส์ จำกัด",
+    "isVatInclusive": false, "subTotal": 129000, "totalAfterDiscount": 129000,
+    "vatAmount": 9030, "grandTotal": 138030, "paidTotal": 0 },
+  { "recordId": 8802, "documentSerial": "IN690725-009", "publishedOn": "2026-07-25T00:00:00+07:00",
+    "dueDate": "2026-09-08T00:00:00+07:00", "contactCode": "C-001",
+    "contactName": "บริษัท ไทยพัฒนาโลจิสติกส์ จำกัด", "contactTaxId": "0107536000234",
+    "isVatInclusive": false, "subTotal": 40000, "totalAfterDiscount": 40000,
+    "vatAmount": 2800, "grandTotal": 42800, "paidTotal": 0 }
+]

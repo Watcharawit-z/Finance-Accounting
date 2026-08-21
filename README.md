@@ -56,6 +56,7 @@ start webapp\index.html         # Windows
 | 16 | [อภิธานศัพท์ไทย-อังกฤษ](docs/16-glossary.md) | มาตรฐานคำที่ใช้ทั้งระบบ |
 | 17 | [ย้ายข้อมูลจาก FlowAccount](docs/17-migration-flowaccount.md) | สิ่งที่ API ให้และไม่ให้ แผนตัดยอด ข้อควรระวัง |
 | 18 | [ขึ้นเว็บจริงด้วย Railway](docs/18-deploy-railway.md) | ขึ้นระบบไฟล์เดียวใน 5 นาที หรือขึ้นทั้งสามบริการพร้อม Postgres |
+| 19 | [ใบตรวจวันย้ายข้อมูลจริง](docs/19-migration-checklist.md) | ลำดับขั้นและจุดตรวจสำหรับผู้ทำบัญชี พิมพ์ไว้ข้างตัวได้ |
 
 ## การรันระบบเต็ม (หลายบริษัท)
 
@@ -77,7 +78,7 @@ cd apps/web && npm install && npm run dev    # http://localhost:5173
 ## การทดสอบ
 
 ```bash
-node tools/flowaccount-import/test.js  # 50 ข้อ — ย้ายข้อมูลจาก FlowAccount เข้าระบบจริง
+node tools/flowaccount-import/test.js  # 71 ข้อ — ย้ายข้อมูลจาก FlowAccount เข้าระบบจริง
 node webapp/test.js              # 61 ข้อ — เครื่องบัญชีในเบราว์เซอร์ (ไม่ต้องติดตั้งอะไร)
 node webapp/uitest.js            # 95 ข้อ — หน้าเว็บจริงใน Chromium ทุกหน้าจอทุกปุ่ม
 db/tests/run.sh                  # 43 ข้อ — กฎบัญชีที่บังคับในฐานข้อมูล
