@@ -9,7 +9,13 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { Client } = require('pg');
+let Client;
+try { ({ Client } = require('pg')); }
+catch (e) {
+  console.error('\nหาโมดูล pg ไม่เจอ — แปลว่า dependency ไม่ได้ติดตั้งมาในอิมเมจ');
+  console.error('ลองสั่ง npm install ที่รากของโปรเจกต์ แล้ว deploy ใหม่');
+  process.exit(1);
+}
 
 const ROOT = path.resolve(__dirname, '..', '..', '..');
 const log = (m) => process.stdout.write(m + '\n');
@@ -143,7 +149,28 @@ async function runCopy(client, c) {
 /* ---------- ตัวหลัก ---------- */
 async function main() {
   const url = process.env.DATABASE_URL;
-  if (!url) throw new Error('ต้องตั้ง DATABASE_URL ก่อน (Railway ใส่ให้อัตโนมัติเมื่อเชื่อมกับ Postgres)');
+  if (!url) {
+    /* ยังไม่ได้ต่อฐานข้อมูล — ไม่ใช่ความผิดพลาดของโค้ด แต่เป็นการตั้งค่าที่ยังไม่ครบ
+       ปล่อยให้แอปขึ้นมาแล้วรายงานที่ /health จะดีกว่าตายเงียบ ๆ
+       เพราะผู้ใช้จะเห็นแค่ "healthcheck failed" โดยไม่รู้สาเหตุ */
+    console.error('');
+    console.error('════════════════════════════════════════════════════════');
+    console.error(' ยังไม่ได้ตั้งค่าฐานข้อมูล — ข้ามการรัน migration');
+    console.error('════════════════════════════════════════════════════════');
+    console.error(' ต้องตั้งตัวแปรเหล่านี้ในบริการนี้:');
+    console.error('');
+    console.error('   DATABASE_URL      = ${{Postgres.DATABASE_URL}}');
+    console.error('   APP_DB_PASSWORD   = รหัสผ่านสุ่มยาวอย่างน้อย 16 ตัวอักษร');
+    console.error('   APP_DATABASE_URL  = URL เดียวกัน แต่เปลี่ยนผู้ใช้เป็น duly_app');
+    console.error('                       กับรหัสผ่านข้างต้น');
+    console.error('');
+    console.error(' ถ้ายังไม่มีฐานข้อมูล: New → Database → Add PostgreSQL');
+    console.error(' รายละเอียด: docs/18-deploy-railway.md');
+    console.error('════════════════════════════════════════════════════════');
+    console.error('');
+    console.error('แอปจะเปิดขึ้นมาในสถานะ degraded — ตรวจได้ที่ /health');
+    return;
+  }
   const ssl = /sslmode=require/.test(url) || process.env.DATABASE_SSL === 'require'
     ? { rejectUnauthorized: false } : undefined;
   const client = new Client({ connectionString: url, ssl });

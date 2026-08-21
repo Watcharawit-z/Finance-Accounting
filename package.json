@@ -4,10 +4,11 @@
   "private": true,
   "description": "DULY — ระบบบัญชีและการเงินสำหรับธุรกิจไทย",
   "engines": { "node": ">=20" },
+  "workspaces": ["apps/api"],
   "scripts": {
-    "build": "cd apps/api && npm ci --omit=dev --include=dev && npm run build",
-    "start": "cd apps/api && node scripts/migrate.js && node dist/main.js",
-    "migrate": "cd apps/api && node scripts/migrate.js",
+    "build": "npm run build --workspace @duly/api",
+    "start": "node apps/api/scripts/migrate.js && node apps/api/dist/main.js",
+    "migrate": "node apps/api/scripts/migrate.js",
     "test": "node webapp/test.js && node tools/flowaccount-import/test.js"
   }
 }
