@@ -90,13 +90,15 @@ const inv2 = ctx.issueInvoice({ date:'2026-07-11', partnerCode:'CUS-0012',
          {desc:'บริการ ค',qty:1,price:'33.33'}] });
 ok('★ ปัดเศษ VAT ที่ระดับเอกสาร (33.33×3 → 7.00 ไม่ใช่ 6.99)', inv2.vat === ctx.M('7'), ctx.fmt(inv2.vat));
 
+const seqBeforeFail = D.seq['invoice|2026-07'];
 throws('เลขผู้เสียภาษีผู้ซื้อไม่ถูกต้อง', function () {
   D.partners.push({ code:'CUS-BAD', name:'ลูกค้าเลขภาษีผิด', taxId:'0000000000000',
     branch:'00000', address:'ที่อยู่', entityType:'juristic', kind:'customer', termDays:0, active:true });
   ctx.issueInvoice({ date:'2026-07-12', partnerCode:'CUS-BAD', lines:[{desc:'สินค้า',qty:1,price:'1000'}] });
 }, 'TAX_ID_INVALID');
-const seqBefore = D.seq['invoice|2026-07'];
-ok('เลขที่เอกสารไม่ถูกใช้เมื่อออกใบกำกับล้มเหลว', seqBefore === 2, 'ใช้ไป ' + seqBefore + ' เลข');
+const seqAfterFail = D.seq['invoice|2026-07'];
+ok('เลขที่เอกสารไม่ถูกใช้เมื่อออกใบกำกับล้มเหลว', seqAfterFail === seqBeforeFail,
+  'ก่อน ' + seqBeforeFail + ' หลัง ' + seqAfterFail);
 
 const r3 = ctx.resolveRate('WHT_SERVICE','2026-07-01',{channel:'manual'});
 const r1 = ctx.resolveRate('WHT_SERVICE','2026-07-01',{channel:'e_wht'});

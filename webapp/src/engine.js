@@ -513,6 +513,22 @@ function cashFlow(from, to) {
   };
 }
 
+/* ---------- ยอดคงค้างของเอกสาร ณ วันที่ที่กำหนด ----------
+   ★ ต้องคิดจากใบเสร็จ/ใบสำคัญจ่ายที่เกิดก่อนวันนั้น ไม่ใช่ยอดชำระสะสมล่าสุด
+   ไม่งั้นรายงานย้อนหลังจะหักเงินที่รับหลังวันที่รายงานออกไปด้วย */
+function settledUpto(kind, docNo, asOf) {
+  if (kind === 'ar') {
+    let v = 0;
+    DB.docs.receipt.forEach((r) => { if (r.invoiceNo === docNo && r.date <= asOf) v += r.gross; });
+    DB.docs.creditNote.forEach((c) => { if (c.invoiceNo === docNo && c.date <= asOf) v += c.total; });
+    return v;
+  }
+  let v = 0;
+  DB.docs.payment.forEach((p) => { if (p.billNo === docNo && p.date <= asOf) v += p.gross; });
+  return v;
+}
+const outstandingAsOf = (kind, d, asOf) => d.total - settledUpto(kind, d.no, asOf);
+
 /* ---------- อายุหนี้ ---------- */
 function aging(kind, asOf) {
   const docs = kind === 'ar' ? DB.docs.invoice : DB.docs.bill;
@@ -520,7 +536,7 @@ function aging(kind, asOf) {
   docs.forEach(function (d) {
     if (d.status === 'draft' || d.status === 'void') return;
     if (d.date > asOf) return;
-    const out = d.total - (d.paid || 0) - (d.credited || 0);
+    const out = outstandingAsOf(kind, d, asOf);
     if (out <= 0) return;
     const days = Math.floor((new Date(asOf) - new Date(d.due)) / 86400000);
     const b = days <= 0 ? 'notDue' : days <= 30 ? 'b30' : days <= 60 ? 'b60' : days <= 90 ? 'b90' : 'over';
@@ -539,12 +555,12 @@ function reconciliationChecks(asOf) {
   const checks = [];
   const arControl = balBySub(['trade_receivable'], asOf);
   const arSub = DB.docs.invoice.filter((d) => d.status !== 'draft' && d.status !== 'void' && d.date <= asOf)
-    .reduce((s, d) => s + d.total - (d.paid || 0) - (d.credited || 0), 0);
+    .reduce((s, d) => s + outstandingAsOf('ar', d, asOf), 0);
   checks.push({ code:'AR_SUBLEDGER', label:'ลูกหนี้รายรายรวม = บัญชีคุมลูกหนี้', control:arControl, sub:arSub, ok:arControl === arSub });
 
   const apControl = -balBySub(['trade_payable'], asOf);
   const apSub = DB.docs.bill.filter((d) => d.status !== 'draft' && d.status !== 'void' && d.date <= asOf)
-    .reduce((s, d) => s + d.total - (d.paid || 0), 0);
+    .reduce((s, d) => s + outstandingAsOf('ap', d, asOf), 0);
   checks.push({ code:'AP_SUBLEDGER', label:'เจ้าหนี้รายรายรวม = บัญชีคุมเจ้าหนี้', control:apControl, sub:apSub, ok:apControl === apSub });
 
   const glDiff = balanceOf(() => true, asOf);
