@@ -22,3 +22,6 @@ npm-debug.log*
 !.env.example
 *.pem
 *.key
+
+# ภาพหน้าจอที่สร้างตอนทดสอบ
+webapp/shot-*.png
