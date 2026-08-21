@@ -41,6 +41,15 @@ ok('งบทดลองสมดุล', tb.balanced, 'เดบิต ' + ctx
 const bs = ctx.balanceSheet('2026-06-30');
 ok('งบแสดงฐานะการเงินสมดุล', bs.diff === 0,
    'สินทรัพย์ ' + ctx.fmt(bs.assets) + ' vs หนี้สินและทุน ' + ctx.fmt(bs.liabEquity));
+const liabSub = bs.lines.find((l) => l.section === 'le_sub');
+const liabParts = bs.lines.filter((l) => l.k === 's' && l.section === 'le').slice(0, 2)
+  .reduce((s2, l) => s2 + l.value, 0);
+ok('รวมหนี้สิน = หนี้สินหมุนเวียน + หนี้สินไม่หมุนเวียน',
+   liabSub && liabSub.value === liabParts && liabParts > 0,
+   ctx.fmt(liabSub ? liabSub.value : 0));
+ok('รวมหนี้สิน + ส่วนของผู้ถือหุ้น = รวมสินทรัพย์',
+   bs.liabilities + (bs.liabEquity - bs.liabilities) === bs.assets);
+
 const rec = ctx.reconciliationChecks('2026-06-30');
 rec.checks.forEach((c) => ok(c.label, c.ok, c.ok ? '' : 'ต่าง ' + ctx.fmt(c.control - c.sub)));
 

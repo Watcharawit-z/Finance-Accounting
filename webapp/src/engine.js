@@ -413,10 +413,11 @@ function balanceSheet(asOf) {
       running += v;
       out.push({ ...L, value: v });
     } else if (L.k === 's') {
+      // ★ "รวมหนี้สิน" ไม่ใช่ผลรวมของบรรทัดที่ค้างอยู่ แต่เป็นผลรวมของยอดรวมย่อยก่อนหน้า
+      if (L.section === 'le_sub') { out.push({ ...L, value: leSub }); return; }
       out.push({ ...L, value: running });
       if (L.section === 'asset') assetTotal += running;
-      if (L.section === 'le') leTotal += running;
-      if (L.section === 'le_sub') leSub = running;
+      if (L.section === 'le') { leTotal += running; leSub += running; }
       running = 0;
     } else if (L.k === 't') {
       const v = L.section === 'asset_total' ? assetTotal : leTotal;
