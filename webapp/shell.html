@@ -256,6 +256,22 @@ table.fs thead th{background:transparent}
 }
 #tip.show{opacity:1}
 
+/* ---------- ป้ายบอกว่าเป็นข้อมูลตัวอย่าง ---------- */
+.demo-tag{
+  margin-left:10px; font:inherit; font-size:11.5px; font-weight:600; cursor:pointer;
+  color:var(--warn); background:var(--warn-w); border:1px solid var(--warn);
+  border-radius:10px; padding:1px 9px; white-space:nowrap;
+}
+.demo-tag:hover{filter:brightness(1.05)}
+.demo-note{
+  display:flex; align-items:center; gap:14px; flex-wrap:wrap;
+  background:var(--warn-w); border:1px solid var(--warn); border-radius:var(--radius);
+  padding:14px 16px; margin-bottom:18px; font-size:13.5px; color:var(--warn);
+}
+.demo-note b{display:block; font-size:14.5px; margin-bottom:3px}
+.demo-note div div{color:var(--ink-2); line-height:1.55}
+@media (max-width:900px){ .demo-note .btn{margin-left:0} }
+
 /* ---------- นำเข้าไฟล์ ---------- */
 .drop{margin:16px; border:2px dashed var(--rule); border-radius:var(--radius); background:var(--paper); transition:border-color .15s,background .15s}
 .drop.over{border-color:var(--accent); background:var(--accent-w)}

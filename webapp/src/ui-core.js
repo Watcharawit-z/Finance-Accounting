@@ -149,6 +149,8 @@ function load() {
     if (!d || !d.DB || !d.DB.company) return false;
     Object.keys(d.DB).forEach((k) => { DB[k] = d.DB[k]; });
     if (d.STATE && d.STATE.period) STATE.period = d.STATE.period;
+    // ข้อมูลที่บันทึกไว้ก่อนมีธงนี้ ให้เดาจากชื่อบริษัทตัวอย่าง
+    if (DB.isDemo === undefined) DB.isDemo = DB.company.name === 'บริษัท ศรีวัฒนาการค้า จำกัด';
     return true;
   } catch (e) { return false; }
 }
@@ -245,6 +247,12 @@ function render() {
     '<option value="' + p.code + '"' + (p.code === STATE.period ? ' selected' : '') + '>'
     + thPeriod(p.code) + (p.status !== 'open' ? ' (ปิดแล้ว)' : '') + '</option>').join('');
   document.getElementById('periodSel').innerHTML = periods;
+
+  document.getElementById('coName').innerHTML = esc(DB.company.name)
+    + (DB.isDemo
+        ? '<button class="demo-tag" data-act="go:import" title="ข้อมูลชุดนี้ระบบสร้างขึ้นเพื่อให้ลองใช้">'
+          + 'ข้อมูลตัวอย่าง · เริ่มใช้ของจริง</button>'
+        : '');
 
   const fn = SCREENS[STATE.screen] || SCREENS.dashboard;
   let html;

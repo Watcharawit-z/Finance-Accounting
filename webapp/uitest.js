@@ -18,6 +18,7 @@ const fmtT = (v) => (v / 10000).toLocaleString();
   const browser = await chromium.launch();
   const page = await browser.newPage({ viewport: { width: 1440, height: 950 } });
   const errors = [];
+  page.on('dialog', (d) => d.accept());   // ยอมรับกล่องยืนยันทุกครั้ง ไม่ต้องลุ้นจังหวะ
   const ignore = (t) => /ERR_CONNECTION|ERR_NAME_NOT_RESOLVED|fonts\.googleapis|fonts\.gstatic|net::/.test(t);
   page.on('console', (m) => { if (m.type() === 'error' && !ignore(m.text())) errors.push(m.text()); });
   page.on('pageerror', (e) => { if (!ignore(e.message)) errors.push('pageerror: ' + e.message); });
@@ -243,14 +244,23 @@ const fmtT = (v) => (v / 10000).toLocaleString();
   ok('กดปุ่มเมนูแล้วลิ้นชักเปิด', await page.evaluate(() =>
     document.getElementById('nav').getBoundingClientRect().right > 100));
 
-  console.log('\n[12] นำเข้าข้อมูลจากระบบเดิม');
+  console.log('\n[12] บอกให้ชัดว่านี่คือข้อมูลตัวอย่าง');
+  await page.setViewportSize({ width: 1440, height: 950 });
+  await page.evaluate(() => { STATE.screen = 'dashboard'; render(); });
+  await page.waitForTimeout(150);
+  ok('ธงข้อมูลตัวอย่างถูกตั้งไว้', await page.evaluate(() => DB.isDemo === true));
+  ok('★ แดชบอร์ดเตือนว่าเป็นข้อมูลตัวอย่าง', await page.$('#main .demo-note') !== null);
+  ok('แถบบนมีป้ายพร้อมทางออกไปเริ่มของจริง', await page.$eval('#coName .demo-tag',
+    (e) => e.textContent.indexOf('เริ่มใช้ของจริง') > 0).catch(() => false));
+  ok('ปุ่มในแถบเตือนพาไปตั้งบริษัทเปล่าได้', await page.$('.demo-note [data-act="blank:new"]') !== null);
+
+  console.log('\n[13] นำเข้าข้อมูลจากระบบเดิม');
   await page.setViewportSize({ width: 1440, height: 950 });
   await page.evaluate(() => { STATE.screen = 'import'; STATE.imp = null; render(); });
   await page.waitForTimeout(150);
   ok('มีหน้านำเข้าข้อมูลและพื้นที่ลากไฟล์', await page.$('#drop') !== null);
 
   /* สร้างบริษัทเปล่าเพื่อไม่ให้ข้อมูลจริงปนกับข้อมูลตัวอย่าง */
-  page.once('dialog', (d) => d.accept());
   await page.click('[data-act="blank:new"]');
   await page.waitForSelector('#modal.show');
   await page.fill('[name="coname"]', 'บริษัท ทดสอบย้ายข้อมูล จำกัด');
@@ -260,13 +270,21 @@ const fmtT = (v) => (v / 10000).toLocaleString();
   await closed(page);
   const blank = await page.evaluate(() => ({
     name: DB.company.name, entries: DB.entries.length, accounts: DB.accounts.length,
-    invoices: DB.docs.invoice.length, periods: DB.periods.length,
+    invoices: DB.docs.invoice.length, periods: DB.periods.length, isDemo: DB.isDemo,
   }));
+  ok('★ เริ่มบริษัทเปล่าแล้วธงข้อมูลตัวอย่างถูกปลด', blank.isDemo === false);
+  await page.evaluate(() => { STATE.screen = 'dashboard'; render(); });
+  await page.waitForTimeout(120);
+  ok('แถบเตือนหายไปเมื่อเป็นข้อมูลจริงแล้ว', await page.$('#main .demo-note') === null);
+  ok('ป้ายบนแถบบนหายไปด้วย', await page.$('#coName .demo-tag') === null);
+  ok('แถบบนแสดงชื่อบริษัทของผู้ใช้', await page.$eval('#coName',
+    (e) => e.textContent.indexOf('ทดสอบย้ายข้อมูล') >= 0));
+  await page.evaluate(() => { STATE.screen = 'import'; render(); });
+  await page.waitForTimeout(120);
   ok('สร้างบริษัทเปล่าได้', blank.entries === 0 && blank.invoices === 0 && blank.accounts > 60,
     blank.name + ' · ผังบัญชี ' + blank.accounts + ' บัญชี · งวด ' + blank.periods);
 
   /* เลขผู้เสียภาษีผิดต้องถูกปฏิเสธ */
-  page.once('dialog', (d) => d.accept());
   await page.click('[data-act="blank:new"]');
   await page.waitForSelector('#modal.show');
   await page.fill('[name="coname"]', 'บริษัท เลขผิด จำกัด');

@@ -183,12 +183,26 @@ function loadPeriods(year) {
  */
 function buildBlank(o) {
   o = o || {};
-  const year = Number(o.year) || 2026;
+  /* ★ ตรวจให้ครบก่อนแตะข้อมูลเดิมแม้แต่ฟิลด์เดียว
+     ถ้าตรวจหลังจากเขียนทับไปแล้ว การกรอกผิดครั้งเดียวจะลบข้อมูลบริษัทเดิมทิ้ง */
+  const taxId = String(o.taxId || '').trim();
+  if (taxId && !validTaxId(taxId)) {
+    throw new DomainError('TAX_ID_INVALID',
+      'เลขประจำตัวผู้เสียภาษี ' + taxId + ' ไม่ผ่านการตรวจหลักที่ 13',
+      'ตรวจเลขกับหนังสือรับรองของบริษัท หรือเว้นว่างไว้ก่อนแล้วมาแก้ทีหลัง');
+  }
+  const year = Number(o.year);
+  if (!Number.isInteger(year) || year < 2000 || year > 2100) {
+    throw new DomainError('FISCAL_YEAR_INVALID',
+      'ปีของรอบบัญชีต้องเป็น ค.ศ. ระหว่าง 2000 ถึง 2100 (ได้รับ "' + o.year + '")',
+      'ปี พ.ศ. 2569 คือ ค.ศ. 2026');
+  }
+
   DB.company = {
     name: String(o.name || '').trim() || 'บริษัทของฉัน จำกัด',
     nameEn: '',
-    taxId: String(o.taxId || '').trim(),
-    regNo: String(o.taxId || '').trim(),
+    taxId: taxId,
+    regNo: taxId,
     address: String(o.address || '').trim(),
     branch: '00000', branchName: 'สำนักงานใหญ่', phone: '',
     fiscalYear: String(year + 543),
@@ -196,11 +210,6 @@ function buildBlank(o) {
     bookkeeper: '', auditor: '',
     paidUpCapital: 0, vatRegistered: true,
   };
-  if (DB.company.taxId && !validTaxId(DB.company.taxId)) {
-    throw new DomainError('TAX_ID_INVALID',
-      'เลขประจำตัวผู้เสียภาษี ' + DB.company.taxId + ' ไม่ผ่านการตรวจหลักที่ 13',
-      'ตรวจเลขกับหนังสือรับรองของบริษัท หรือเว้นว่างไว้ก่อนแล้วมาแก้ทีหลัง');
-  }
   loadChart();
   loadPeriods(year);
   DB.partners = []; DB.items = []; DB.employees = []; DB.assets = [];
@@ -212,6 +221,7 @@ function buildBlank(o) {
   };
   DB.seq = {}; DB.budget = []; DB.projects = []; DB.bankTxns = [];
   DB.audit = []; DB.settings = { hardLockDate: null };
+  DB.isDemo = false;
   audit('company', 'blank', 'create', null, { name: DB.company.name, year: DB.company.fiscalYear });
   return DB.company;
 }
@@ -287,6 +297,7 @@ function buildSeed() {
     ['5110', 'ต้นทุนขายสินค้า', '2400000'],
   ].map((b) => ({ account:b[0], name:b[1], monthly:M(b[2]) }));
 
+  DB.isDemo = true;              // ★ ทำเครื่องหมายไว้ให้ทุกหน้าจอรู้ว่านี่คือข้อมูลตัวอย่าง
   openingBalances();
   generateTransactions();
 }

@@ -256,6 +256,22 @@ table.fs thead th{background:transparent}
 }
 #tip.show{opacity:1}
 
+/* ---------- ป้ายบอกว่าเป็นข้อมูลตัวอย่าง ---------- */
+.demo-tag{
+  margin-left:10px; font:inherit; font-size:11.5px; font-weight:600; cursor:pointer;
+  color:var(--warn); background:var(--warn-w); border:1px solid var(--warn);
+  border-radius:10px; padding:1px 9px; white-space:nowrap;
+}
+.demo-tag:hover{filter:brightness(1.05)}
+.demo-note{
+  display:flex; align-items:center; gap:14px; flex-wrap:wrap;
+  background:var(--warn-w); border:1px solid var(--warn); border-radius:var(--radius);
+  padding:14px 16px; margin-bottom:18px; font-size:13.5px; color:var(--warn);
+}
+.demo-note b{display:block; font-size:14.5px; margin-bottom:3px}
+.demo-note div div{color:var(--ink-2); line-height:1.55}
+@media (max-width:900px){ .demo-note .btn{margin-left:0} }
+
 /* ---------- นำเข้าไฟล์ ---------- */
 .drop{margin:16px; border:2px dashed var(--rule); border-radius:var(--radius); background:var(--paper); transition:border-color .15s,background .15s}
 .drop.over{border-color:var(--accent); background:var(--accent-w)}
@@ -463,6 +479,7 @@ const DB = {
   bankTxns: [],        // รายการเดินบัญชีที่ยังไม่กระทบยอด
   audit: [],
   settings: { hardLockDate: null },
+  isDemo: false,      // true = ข้อมูลตัวอย่างที่ระบบสร้างให้ ไม่ใช่ข้อมูลจริงของผู้ใช้
 };
 
 /* ---------- อัตราภาษีตามช่วงเวลา (ข้อมูล ไม่ใช่โค้ด) ---------- */
@@ -1795,12 +1812,26 @@ function loadPeriods(year) {
  */
 function buildBlank(o) {
   o = o || {};
-  const year = Number(o.year) || 2026;
+  /* ★ ตรวจให้ครบก่อนแตะข้อมูลเดิมแม้แต่ฟิลด์เดียว
+     ถ้าตรวจหลังจากเขียนทับไปแล้ว การกรอกผิดครั้งเดียวจะลบข้อมูลบริษัทเดิมทิ้ง */
+  const taxId = String(o.taxId || '').trim();
+  if (taxId && !validTaxId(taxId)) {
+    throw new DomainError('TAX_ID_INVALID',
+      'เลขประจำตัวผู้เสียภาษี ' + taxId + ' ไม่ผ่านการตรวจหลักที่ 13',
+      'ตรวจเลขกับหนังสือรับรองของบริษัท หรือเว้นว่างไว้ก่อนแล้วมาแก้ทีหลัง');
+  }
+  const year = Number(o.year);
+  if (!Number.isInteger(year) || year < 2000 || year > 2100) {
+    throw new DomainError('FISCAL_YEAR_INVALID',
+      'ปีของรอบบัญชีต้องเป็น ค.ศ. ระหว่าง 2000 ถึง 2100 (ได้รับ "' + o.year + '")',
+      'ปี พ.ศ. 2569 คือ ค.ศ. 2026');
+  }
+
   DB.company = {
     name: String(o.name || '').trim() || 'บริษัทของฉัน จำกัด',
     nameEn: '',
-    taxId: String(o.taxId || '').trim(),
-    regNo: String(o.taxId || '').trim(),
+    taxId: taxId,
+    regNo: taxId,
     address: String(o.address || '').trim(),
     branch: '00000', branchName: 'สำนักงานใหญ่', phone: '',
     fiscalYear: String(year + 543),
@@ -1808,11 +1839,6 @@ function buildBlank(o) {
     bookkeeper: '', auditor: '',
     paidUpCapital: 0, vatRegistered: true,
   };
-  if (DB.company.taxId && !validTaxId(DB.company.taxId)) {
-    throw new DomainError('TAX_ID_INVALID',
-      'เลขประจำตัวผู้เสียภาษี ' + DB.company.taxId + ' ไม่ผ่านการตรวจหลักที่ 13',
-      'ตรวจเลขกับหนังสือรับรองของบริษัท หรือเว้นว่างไว้ก่อนแล้วมาแก้ทีหลัง');
-  }
   loadChart();
   loadPeriods(year);
   DB.partners = []; DB.items = []; DB.employees = []; DB.assets = [];
@@ -1824,6 +1850,7 @@ function buildBlank(o) {
   };
   DB.seq = {}; DB.budget = []; DB.projects = []; DB.bankTxns = [];
   DB.audit = []; DB.settings = { hardLockDate: null };
+  DB.isDemo = false;
   audit('company', 'blank', 'create', null, { name: DB.company.name, year: DB.company.fiscalYear });
   return DB.company;
 }
@@ -1899,6 +1926,7 @@ function buildSeed() {
     ['5110', 'ต้นทุนขายสินค้า', '2400000'],
   ].map((b) => ({ account:b[0], name:b[1], monthly:M(b[2]) }));
 
+  DB.isDemo = true;              // ★ ทำเครื่องหมายไว้ให้ทุกหน้าจอรู้ว่านี่คือข้อมูลตัวอย่าง
   openingBalances();
   generateTransactions();
 }
@@ -2267,6 +2295,8 @@ function load() {
     if (!d || !d.DB || !d.DB.company) return false;
     Object.keys(d.DB).forEach((k) => { DB[k] = d.DB[k]; });
     if (d.STATE && d.STATE.period) STATE.period = d.STATE.period;
+    // ข้อมูลที่บันทึกไว้ก่อนมีธงนี้ ให้เดาจากชื่อบริษัทตัวอย่าง
+    if (DB.isDemo === undefined) DB.isDemo = DB.company.name === 'บริษัท ศรีวัฒนาการค้า จำกัด';
     return true;
   } catch (e) { return false; }
 }
@@ -2363,6 +2393,12 @@ function render() {
     '<option value="' + p.code + '"' + (p.code === STATE.period ? ' selected' : '') + '>'
     + thPeriod(p.code) + (p.status !== 'open' ? ' (ปิดแล้ว)' : '') + '</option>').join('');
   document.getElementById('periodSel').innerHTML = periods;
+
+  document.getElementById('coName').innerHTML = esc(DB.company.name)
+    + (DB.isDemo
+        ? '<button class="demo-tag" data-act="go:import" title="ข้อมูลชุดนี้ระบบสร้างขึ้นเพื่อให้ลองใช้">'
+          + 'ข้อมูลตัวอย่าง · เริ่มใช้ของจริง</button>'
+        : '');
 
   const fn = SCREENS[STATE.screen] || SCREENS.dashboard;
   let html;
@@ -3037,7 +3073,17 @@ function scDashboard() {
       {n:S12.reduce((s,r)=>s+r.net,0)}, ''],
   });
 
-  return '<div class="kpis">' + tiles.map(function (k) {
+  const demoBanner = DB.isDemo
+    ? '<section class="demo-note"><div><b>ตัวเลขทั้งหมดในหน้านี้เป็นข้อมูลตัวอย่าง</b>'
+      + '<div>ระบบสร้างบริษัทสมมุติ ' + esc(DB.company.name) + ' ที่เดินมา 7 เดือนไว้ให้ลองกดใช้ทุกปุ่ม '
+      + 'ไม่ใช่ข้อมูลจริงของคุณ พร้อมใช้งานจริงเมื่อไหร่ให้ล้างทิ้งแล้วเริ่มจากบริษัทเปล่า</div></div>'
+      + '<span class="grow"></span>'
+      + btn('blank:new', 'เริ่มจากบริษัทเปล่า', 'primary')
+      + btn('go:import', 'นำเข้าข้อมูลเดิม')
+      + '</section>'
+    : '';
+
+  return demoBanner + '<div class="kpis">' + tiles.map(function (k) {
       return '<div class="kpi' + (k.tone ? ' ' + k.tone : '') + (k.act ? ' clickable" data-act="' + k.act : '') + '">'
         + '<div class="kpi-l">' + esc(k.label) + '</div>'
         + '<div class="kpi-v">' + esc(k.value) + '</div>'
@@ -4016,9 +4062,13 @@ function scAbout() {
       + '<p>อัตราภาษีทุกตัวเก็บเป็นข้อมูลพร้อมช่วงวันที่มีผลบังคับ ระบบเลือกอัตราตาม<b>วันที่ของเอกสาร</b> '
       + 'ไม่ใช่วันที่ปัจจุบัน การออกเอกสารย้อนหลังจึงได้อัตราที่ถูกต้องเสมอ เช่น เพดานค่าจ้างประกันสังคม '
       + 'ที่เปลี่ยนจาก 15,000 เป็น 17,500 บาทตั้งแต่ 1 มกราคม 2569</p>'
-      + '<p class="dim">ข้อมูลในหน้านี้เป็นข้อมูลตัวอย่างที่สร้างขึ้นทั้งหมด เก็บไว้ในเบราว์เซอร์ของคุณเครื่องเดียว '
-      + 'ไม่ได้ส่งออกไปที่ใด กดปุ่มด้านล่างเพื่อล้างและเริ่มใหม่</p></div>',
-    foot: btn('reset', 'ล้างข้อมูลและเริ่มใหม่'),
+      + '<p class="dim">' + (DB.isDemo
+          ? 'ตอนนี้ระบบใช้ข้อมูลตัวอย่างที่สร้างขึ้นทั้งหมด ไม่ใช่ข้อมูลจริง '
+          : 'ข้อมูลของคุณ ')
+      + 'เก็บไว้ในเบราว์เซอร์เครื่องนี้เครื่องเดียว ไม่ได้ส่งออกไปที่ใด '
+      + 'เปิดคนละเครื่องหรือคนละเบราว์เซอร์คือคนละชุดข้อมูล</p></div>',
+    foot: btn('blank:new', 'เริ่มจากบริษัทเปล่า', 'primary')
+      + btn('reset', 'ล้างและสร้างข้อมูลตัวอย่างใหม่'),
   });
 }
 
@@ -4071,10 +4121,12 @@ function scImport() {
   });
 
   const blank = card({
-    title:'เริ่มจากบริษัทเปล่า',
+    title: DB.isDemo ? 'เริ่มจากบริษัทเปล่า — ทำขั้นนี้ก่อน' : 'เริ่มจากบริษัทเปล่า',
     sub:'ล้างข้อมูลตัวอย่างทิ้ง เหลือแต่ผังบัญชีและงวดบัญชี พร้อมรับข้อมูลจริงของคุณ',
     actions: btn('blank:new', 'ตั้งค่าบริษัทใหม่'),
-    body:'<div class="prose"><p>ก่อนย้ายข้อมูลจริงเข้ามา ควรเริ่มจากบริษัทเปล่าก่อน '
+    body:(DB.isDemo ? '<div class="note warn">ตอนนี้ระบบยังใช้ข้อมูลตัวอย่างอยู่ '
+        + 'ถ้านำเข้าข้อมูลจริงทับไปเลย ตัวเลขจะปนกันและยอดคุมจะไม่มีทางตรง</div>' : '')
+      + '<div class="prose"><p>ก่อนย้ายข้อมูลจริงเข้ามา ควรเริ่มจากบริษัทเปล่าก่อน '
       + 'ไม่งั้นตัวเลขของคุณจะปนกับข้อมูลตัวอย่างที่ระบบสร้างไว้ให้ลอง '
       + 'และยอดคุมจะไม่มีทางตรง</p>'
       + '<p class="dim">ตอนนี้กำลังใช้ข้อมูลของ <b>' + esc(DB.company.name) + '</b> '

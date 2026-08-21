@@ -4,7 +4,7 @@ const src = ['engine','operations','seed'].map(f => fs.readFileSync(__dirname + 
 const ctx = new Function(src + '\nreturn {DB,buildSeed,trialBalance,balanceSheet,incomeStatement,cashFlow,' +
   'reconciliationChecks,aging,issueInvoice,receivePayment,issueCreditNote,recordBill,payBill,' +
   'runPayroll,runDepreciation,fileVat,fileWht,post,reverse,fmt,M,validTaxId,DomainError,' +
-  'closeChecklist,closePeriod,resolveRate,round2,pct,periodOf,computePit,ssoRate,divRound};')();
+  'closeChecklist,closePeriod,resolveRate,round2,pct,periodOf,computePit,ssoRate,divRound,buildBlank};')();
 
 let pass = 0, fail = 0;
 function ok(label, cond, extra) {
@@ -87,6 +87,14 @@ throws('ใบกำกับภาษีซื้อซ้ำ', () => ctx.recor
   lines:[{desc:'ซ้ำ',qty:1,price:'100'}] }), 'DUPLICATE_VENDOR_INVOICE');
 throws('ยื่น ภ.พ.30 ซ้ำ', () => ctx.fileVat('2026-01'), 'ALREADY_FILED');
 throws('ตั้งค่าเสื่อมซ้ำ', () => ctx.runDepreciation('2026-01'), 'DEPRECIATION_ALREADY_RUN');
+
+console.log('\n=== 3.1 ตั้งบริษัทเปล่า ===');
+const coBefore = D.company.name, entriesBefore = D.entries.length;
+throws('เลขผู้เสียภาษีของบริษัทผิดหลักที่ 13', () => ctx.buildBlank({ name:'ทดสอบ', taxId:'1234567890123', year:2026 }), 'TAX_ID_INVALID');
+throws('ปีรอบบัญชีไม่ถูกต้อง', () => ctx.buildBlank({ name:'ทดสอบ', year:'' }), 'FISCAL_YEAR_INVALID');
+ok('★ ตั้งบริษัทไม่สำเร็จต้องไม่แตะข้อมูลเดิมเลย',
+   D.company.name === coBefore && D.entries.length === entriesBefore,
+   D.company.name);
 
 console.log('\n=== 4. ภาษีมูลค่าเพิ่มและหัก ณ ที่จ่าย ===');
 const inv = ctx.issueInvoice({ date:'2026-07-10', partnerCode:'CUS-0012',
