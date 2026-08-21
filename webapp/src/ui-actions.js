@@ -299,6 +299,7 @@ function dispatch(act) {
   if (head === 'drill')   { STATE.drill = arg; STATE.screen = 'ledger'; STATE.filter = ''; render(); return; }
   if (head === 'entry')   { STATE.screen = 'journals'; STATE.sel = arg; render(); return; }
   if (head === 'print')   { window.print(); return; }
+  if (head === 'view')    { STATE.dashView = arg; render(); return; }
   if (head === 'reset')   {
     if (window.confirm('ล้างข้อมูลตัวอย่างทั้งหมดและสร้างใหม่?')) resetAll();
     return;
@@ -406,6 +407,22 @@ function bindEvents() {
       ev.preventDefault(); modalSubmit();
     }
   });
+
+  /* คำอธิบายจุดข้อมูลบนกราฟ */
+  const ttEl = document.getElementById('tip');
+  document.addEventListener('mousemove', function (ev) {
+    const m = ev.target.closest ? ev.target.closest('[data-tip]') : null;
+    if (!m) { ttEl.classList.remove('show'); return; }
+    ttEl.textContent = m.getAttribute('data-tip');
+    ttEl.classList.add('show');
+    const w = ttEl.offsetWidth, h = ttEl.offsetHeight;
+    let x = ev.clientX + 14, y = ev.clientY - h - 12;
+    if (x + w > window.innerWidth - 8) x = ev.clientX - w - 14;
+    if (y < 8) y = ev.clientY + 18;
+    ttEl.style.left = x + 'px';
+    ttEl.style.top = y + 'px';
+  });
+  document.addEventListener('mouseleave', function () { ttEl.classList.remove('show'); });
 
   document.getElementById('menuBtn').addEventListener('click', function () {
     document.body.classList.toggle('nav-open');

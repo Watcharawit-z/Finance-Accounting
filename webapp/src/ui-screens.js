@@ -53,6 +53,36 @@ function scDashboard() {
   const chk = closeChecklist(STATE.period);
   const todo = chk.items.filter((i) => !i.ok);
   const rec = reconciliationChecks(to);
+  const S12 = monthlySeries();
+  const prev = S12.length > 1 ? S12[S12.length - 2] : null;
+  const cur = S12[S12.length - 1] || { revenue:0, expense:0, net:0, cash:0, ar:0 };
+
+  const delta = (now, was, invert) => {
+    if (was === null || was === undefined) return '';
+    const d = now - was;
+    if (d === 0) return 'เท่ากับเดือนก่อน';
+    const up = d > 0;
+    const good = invert ? !up : up;
+    return '<span class="' + (good ? 'up' : 'down') + '">' + (up ? '▲' : '▼') + ' ' + fmt(Math.abs(d), 0)
+      + '</span> จากเดือนก่อน';
+  };
+
+  const tiles = [
+    { label:'รายได้เดือนนี้', value: fmt(cur.revenue), spark: S12.map((r) => r.revenue),
+      sub: prev ? delta(cur.revenue, prev.revenue) : 'เดือนแรกของรอบบัญชี' },
+    { label:'กำไรสุทธิเดือนนี้', value: fmt(cur.net), tone: cur.net < 0 ? 'bad' : 'good',
+      spark: S12.map((r) => r.net),
+      sub:'อัตรากำไร ' + (cur.revenue ? (cur.net / cur.revenue * 100).toFixed(1) : '0.0') + '% · สะสม ' + fmt(ytd.net, 0) + ' บาท' },
+    { label:'เงินสดและเงินฝาก', value: fmt(cash), act:'go:cashflow', spark: S12.map((r) => r.cash),
+      sub: prev ? delta(cash, prev.cash) : 'ณ ' + thDate(to) },
+    { label:'ลูกหนี้คงค้าง', value: fmt(ar.totals.total), act:'go:ar', tone: overdue > 0 ? 'warn' : '',
+      spark: S12.map((r) => r.ar),
+      sub: overdue > 0 ? 'เกินกำหนดชำระ ' + fmt(overdue, 0) : 'ไม่มีรายการเกินกำหนด' },
+    { label:'เจ้าหนี้คงค้าง', value: fmt(ap.totals.total), act:'go:ap', spark: S12.map((r) => r.ap),
+      sub: prev ? delta(ap.totals.total, prev.ap, true) : 'ตามเทอมที่ตกลงกับผู้ขาย' },
+    { label:'สินทรัพย์รวม', value: fmt(bs.assets), act:'go:bs', spark: S12.map((r) => r.assets),
+      sub: bs.diff === 0 ? 'งบสมดุล · หนี้สิน ' + fmt(bs.liabilities, 0) + ' บาท' : 'ผลต่าง ' + fmt(bs.diff) },
+  ];
 
   const actMap = {
     depreciation: ['run:deprec', 'ตั้งค่าเสื่อมราคา'],
@@ -61,18 +91,57 @@ function scDashboard() {
     bank: ['go:bank', 'ไปกระทบยอด'],
   };
 
-  const body = kpi([
-    { label:'รายได้งวด ' + thPeriod(STATE.period), value: fmt(mo.revenue), sub:'สะสมทั้งปี ' + fmt(ytd.revenue) },
-    { label:'กำไรสุทธิงวดนี้', value: fmt(mo.net), tone: mo.net < 0 ? 'bad' : 'good',
-      sub:'อัตรากำไร ' + (mo.revenue ? (mo.net / mo.revenue * 100).toFixed(1) : '0.0') + '%' },
-    { label:'เงินสดและเงินฝาก', value: fmt(cash), act:'go:cashflow', sub:'ณ ' + thDate(to) },
-    { label:'ลูกหนี้คงค้าง', value: fmt(ar.totals.total), act:'go:ar',
-      tone: overdue > 0 ? 'warn' : '', sub: overdue > 0 ? 'เกินกำหนด ' + fmt(overdue) : 'ไม่มีรายการเกินกำหนด' },
-    { label:'เจ้าหนี้คงค้าง', value: fmt(ap.totals.total), act:'go:ap', sub:'ครบกำหนดจ่ายตามเทอม' },
-    { label:'สินทรัพย์รวม', value: fmt(bs.assets), act:'go:bs',
-      sub: bs.diff === 0 ? 'งบสมดุล' : 'ผลต่าง ' + fmt(bs.diff) },
-  ])
-  + '<div class="split">'
+  const AGE = [
+    { label:'ยังไม่ครบกำหนด', value: ar.totals.notDue, color:'--s1' },
+    { label:'เกินกำหนด 1–30 วัน', value: ar.totals.b30, color:'--c-warn' },
+    { label:'เกินกำหนด 31–60 วัน', value: ar.totals.b60, color:'--c-warn' },
+    { label:'เกินกำหนด 61–90 วัน', value: ar.totals.b90, color:'--c-neg' },
+    { label:'เกินกำหนดเกิน 90 วัน', value: ar.totals.over, color:'--c-neg' },
+  ].filter((r) => r.value > 0);
+
+  const revTable = tbl({
+    cols:[{t:'เดือน'},{t:'รายได้รวม',a:'r'},{t:'ค่าใช้จ่ายรวม',a:'r'},{t:'กำไรสุทธิ',a:'r'},{t:'อัตรากำไร',a:'r'}],
+    rows: S12.map((r) => [thPeriod(r.code), {n:r.revenue}, {n:r.expense}, {n:r.net},
+      {c: r.revenue ? (r.net / r.revenue * 100).toFixed(1) + '%' : '—'}]),
+    foot: ['รวม', {n:S12.reduce((s,r)=>s+r.revenue,0)}, {n:S12.reduce((s,r)=>s+r.expense,0)},
+      {n:S12.reduce((s,r)=>s+r.net,0)}, ''],
+  });
+
+  return '<div class="kpis">' + tiles.map(function (k) {
+      return '<div class="kpi' + (k.tone ? ' ' + k.tone : '') + (k.act ? ' clickable" data-act="' + k.act : '') + '">'
+        + '<div class="kpi-l">' + esc(k.label) + '</div>'
+        + '<div class="kpi-v">' + esc(k.value) + '</div>'
+        + '<div class="kpi-s">' + (k.sub || '') + '</div>'
+        + (k.spark ? sparkline(k.spark) : '') + '</div>';
+    }).join('') + '</div>'
+  + '<div class="dash-2">'
+  + card({ title:'รายได้และค่าใช้จ่ายรายเดือน',
+      sub:'รอบบัญชี ' + DB.company.fiscalYear + ' ถึง ' + thPeriod(STATE.period),
+      actions: chip('view:chart', 'กราฟ', STATE.dashView !== 'table')
+             + chip('view:table', 'ตาราง', STATE.dashView === 'table'),
+      body: STATE.dashView === 'table' ? revTable
+        : chartGrouped(S12, [
+            { key:'revenue', name:'รายได้รวม', color:'--s1' },
+            { key:'expense', name:'ค่าใช้จ่ายรวม', color:'--s2' },
+          ], 'หน่วย: ล้านบาท'),
+      foot:'ระยะห่างระหว่างสองแท่งในแต่ละเดือนคือกำไรสุทธิของเดือนนั้น' })
+  + card({ title:'เงินสดและเงินฝากปลายเดือน', sub:'รวมเงินสดย่อย บัญชีกระแสรายวัน และบัญชีออมทรัพย์',
+      body: chartLine(S12, 'cash', 'เงินสดคงเหลือ', 'หน่วย: ล้านบาท'),
+      foot:'ตัวเลขดึงจากบัญชีแยกประเภทโดยตรง ไม่ได้กรอกซ้ำ' })
+  + '</div>'
+  + '<div class="dash-2">'
+  + card({ title:'ค่าใช้จ่ายสูงสุดของงวด', sub: thPeriod(STATE.period),
+      body: chartBarsH(topExpenses(from, to, 6), 'หน่วย: บาท'),
+      foot:'คลิกหัวข้อในผังบัญชีเพื่อเจาะดูรายการที่ประกอบเป็นยอดนี้' })
+  + card({ title:'ลูกหนี้แยกตามอายุหนี้', sub:'ณ ' + thDate(to) + ' · รวม ' + fmt(ar.totals.total) + ' บาท',
+      actions: btn('go:ar', 'ดูรายลูกค้า'),
+      body: AGE.length ? chartBarsH(AGE, 'หน่วย: บาท') : '<div class="empty">ไม่มียอดลูกหนี้คงค้าง</div>',
+      foot: overdue > 0
+        ? 'เกินกำหนดชำระรวม ' + fmt(overdue) + ' บาท คิดเป็น '
+          + (ar.totals.total ? (overdue / ar.totals.total * 100).toFixed(1) : '0') + '% ของลูกหนี้ทั้งหมด'
+        : 'ลูกหนี้ทั้งหมดยังอยู่ในกำหนดชำระ' })
+  + '</div>'
+  + '<div class="dash-2">'
   + '<section class="card"><div class="card-h"><div><h2>งานค้างของงวดนี้</h2>'
     + '<div class="card-sub">' + thPeriod(STATE.period) + ' — ' + (todo.length ? todo.length + ' รายการ' : 'เคลียร์ครบแล้ว') + '</div></div></div>'
     + (todo.length
@@ -95,10 +164,10 @@ function scDashboard() {
       actions: btn('go:journals', 'ดูสมุดรายวันทั้งหมด'),
       body: tbl({
         cols:[{t:'เลขที่'},{t:'วันที่'},{t:'คำอธิบาย'},{t:'ยอด',a:'r'},{t:'สถานะ'}],
-        rows: DB.entries.slice().reverse().slice(0, 12).map((e) =>
+        rows: DB.entries.slice().reverse().slice(0, 10).map((e) =>
           [{mono:e.no}, thDateNum(e.date), e.desc, {n:e.total}, statusPill(e.status)]),
+        rowAttr: (r) => 'class="row-link" data-act="entry:' + r[0].mono + '"',
       }) });
-  return body;
 }
 
 /* ===================================================================

@@ -47,8 +47,10 @@ const liabParts = bs.lines.filter((l) => l.k === 's' && l.section === 'le').slic
 ok('รวมหนี้สิน = หนี้สินหมุนเวียน + หนี้สินไม่หมุนเวียน',
    liabSub && liabSub.value === liabParts && liabParts > 0,
    ctx.fmt(liabSub ? liabSub.value : 0));
-ok('รวมหนี้สิน + ส่วนของผู้ถือหุ้น = รวมสินทรัพย์',
-   bs.liabilities + (bs.liabEquity - bs.liabilities) === bs.assets);
+ok('หนี้สิน + ส่วนของผู้ถือหุ้น = สินทรัพย์', bs.liabilities + bs.equity === bs.assets,
+   'หนี้สิน ' + ctx.fmt(bs.liabilities) + ' + ทุน ' + ctx.fmt(bs.equity));
+ok('ยอดหนี้สินที่รายงานออกไปไม่รวมส่วนของผู้ถือหุ้น',
+   bs.liabilities > 0 && bs.liabilities < bs.assets && bs.equity > 0);
 
 const rec = ctx.reconciliationChecks('2026-06-30');
 rec.checks.forEach((c) => ok(c.label, c.ok, c.ok ? '' : 'ต่าง ' + ctx.fmt(c.control - c.sub)));

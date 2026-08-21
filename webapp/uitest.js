@@ -207,7 +207,28 @@ const closed = (p) => p.waitForFunction(
   ok('เปิดใหม่แล้วข้อมูลยังอยู่', await page.evaluate(() =>
     DB.periods.find((p) => p.code === '2026-07').status === 'closed'));
 
+  console.log('\n[11] กราฟบนแดชบอร์ด');
+  await page.evaluate(() => { STATE.screen = 'dashboard'; STATE.dashView = 'chart'; render(); });
+  await page.waitForTimeout(150);
+  const charts = await page.$$eval('#main svg.chart', (els) => els.length);
+  const sparks = await page.$$eval('#main svg.spark', (els) => els.length);
+  ok('วาดกราฟครบทุกใบ', charts === 4, charts + ' กราฟ');
+  ok('มีเส้นแนวโน้มในกล่องตัวเลขสรุป', sparks >= 5, sparks + ' เส้น');
+  const marks = await page.$$eval('#main svg.chart [data-tip]', (els) => els.length);
+  ok('ทุกจุดข้อมูลมีคำอธิบายเมื่อชี้', marks > 20, marks + ' จุด');
+  await page.click('[data-act="view:table"]');
+  await page.waitForTimeout(150);
+  ok('สลับดูเป็นตารางได้', await page.evaluate(() =>
+    STATE.dashView === 'table' && document.querySelector('#main table') !== null));
+  await page.click('[data-act="view:chart"]');
+  await page.waitForTimeout(150);
+
   await page.setViewportSize({ width: 390, height: 844 });
+  await page.waitForTimeout(250);
+  const dashOver = await page.evaluate(() =>
+    document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  ok('แดชบอร์ดบนจอ 390px ไม่ล้นแนวนอน', dashOver <= 1, 'ล้น ' + dashOver + 'px');
+
   await page.evaluate(() => { STATE.screen = 'invoices'; STATE.sel = null; render(); });
   await page.waitForTimeout(200);
   const overflow = await page.evaluate(() =>

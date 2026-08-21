@@ -402,7 +402,7 @@ const BS_LINES = [
 
 function balanceSheet(asOf) {
   const out = [];
-  let running = 0, assetTotal = 0, leTotal = 0, leSub = 0;
+  let running = 0, assetTotal = 0, leTotal = 0, leSub = 0, liabTotal = 0;
   BS_LINES.forEach(function (L) {
     if (L.k === 'd') {
       let v = balBySub(L.sub, asOf) * L.sign;
@@ -414,7 +414,7 @@ function balanceSheet(asOf) {
       out.push({ ...L, value: v });
     } else if (L.k === 's') {
       // ★ "รวมหนี้สิน" ไม่ใช่ผลรวมของบรรทัดที่ค้างอยู่ แต่เป็นผลรวมของยอดรวมย่อยก่อนหน้า
-      if (L.section === 'le_sub') { out.push({ ...L, value: leSub }); return; }
+      if (L.section === 'le_sub') { liabTotal = leSub; out.push({ ...L, value: leSub }); return; }
       out.push({ ...L, value: running });
       if (L.section === 'asset') assetTotal += running;
       if (L.section === 'le') { leTotal += running; leSub += running; }
@@ -426,7 +426,8 @@ function balanceSheet(asOf) {
       out.push({ ...L });
     }
   });
-  return { lines: out, assets: assetTotal, liabEquity: leTotal, diff: assetTotal - leTotal, liabilities: leSub };
+  return { lines: out, assets: assetTotal, liabEquity: leTotal, diff: assetTotal - leTotal,
+    liabilities: liabTotal, equity: leTotal - liabTotal };
 }
 
 const PL_LINES = [

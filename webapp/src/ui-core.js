@@ -8,6 +8,7 @@ const STATE = {
   sel: null,          // เอกสารที่เลือกดูรายละเอียด
   filter: '',
   drill: null,        // บัญชีที่กำลังเจาะดู
+  dashView: 'chart',  // แดชบอร์ด: กราฟ หรือ ตาราง
 };
 const TODAY = '2026-07-31';
 
