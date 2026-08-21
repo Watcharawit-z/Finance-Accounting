@@ -529,7 +529,11 @@ function settledUpto(kind, docNo, asOf) {
   DB.docs.payment.forEach((p) => { if (p.billNo === docNo && p.date <= asOf) v += p.gross; });
   return v;
 }
-const outstandingAsOf = (kind, d, asOf) => d.total - settledUpto(kind, d.no, asOf);
+/* bfPaid = ยอดที่ชำระไปแล้วก่อนวันตัดยอด ตอนย้ายข้อมูลเข้ามา
+   ในระบบเราไม่มีใบเสร็จรองรับส่วนนั้น จึงต้องหักแยกจากใบเสร็จที่เกิดหลังย้าย
+   ไม่งั้นถ้าใช้ d.paid ตรง ๆ จะถูกนับซ้ำเมื่อมีการรับชำระเพิ่มภายหลัง */
+const outstandingAsOf = (kind, d, asOf) =>
+  d.total - (d.bfPaid || 0) - settledUpto(kind, d.no, asOf);
 
 /* ---------- อายุหนี้ ---------- */
 function aging(kind, asOf) {
@@ -568,11 +572,12 @@ function reconciliationChecks(asOf) {
   const glDiff = balanceOf(() => true, asOf);
   checks.push({ code:'GL_BALANCED', label:'เดบิตรวม = เครดิตรวม ทั้งฐานข้อมูล', control:glDiff, sub:0, ok:glDiff === 0 });
 
-  // ★ เทียบเฉพาะรายการที่มาจากเอกสาร ไม่รวมใบสำคัญปิดภาษีสิ้นเดือน
-  //   ไม่งั้นหลังยื่นแบบแล้วบัญชีจะถูกเคลียร์เป็นศูนย์ และการเทียบจะไม่มีความหมาย
+  // ★ เทียบเฉพาะรายการที่มาจากเอกสารของงวดนี้จริง ๆ
+  //   - ไม่รวมใบสำคัญปิดภาษีสิ้นเดือน ไม่งั้นหลังยื่นแบบบัญชีจะถูกเคลียร์เป็นศูนย์ แล้วการเทียบไม่มีความหมาย
+  //   - ไม่รวมยอดยกมาจากระบบเดิม เพราะเป็นยอดสะสมก่อนเริ่มใช้ระบบ ไม่มีเอกสารในทะเบียนภาษีรองรับ
   const period = periodOf(asOf);
   const start = period + '-01', end = endOfMonth(start);
-  const notFiling = (e) => e.src !== 'filing';
+  const notFiling = (e) => e.src !== 'filing' && e.type !== 'opening';
 
   const vatOutReport = DB.taxTx.filter((t) => t.kind === 'vat_output' && t.period === period)
     .reduce((s, t) => s + t.tax, 0);

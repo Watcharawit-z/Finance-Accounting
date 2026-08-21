@@ -300,6 +300,29 @@ function dispatch(act) {
   if (head === 'entry')   { STATE.screen = 'journals'; STATE.sel = arg; render(); return; }
   if (head === 'print')   { window.print(); return; }
   if (head === 'view')    { STATE.dashView = arg; render(); return; }
+  if (head === 'pick')    { document.getElementById('file').click(); return; }
+  if (head === 'blank')   { modalBlank(); return; }
+  if (head === 'imp') {
+    if (arg === 'reset') { STATE.imp = null; render(); return; }
+    if (arg === 'run') {
+      const I = STATE.imp;
+      if (!I || !I.tb) return;
+      runAction(function () {
+        const r = importOpeningBalances(I.tb.rows, val('cutoff') || pStart(), I.overrides || {});
+        STATE.impResult = {
+          cutoff: val('cutoff') || pStart(), source: 'ไฟล์ ' + I.name,
+          partners: 0, partnersSeen: 0, items: 0, itemsSeen: 0, invoices: 0, bills: 0,
+          opening: r, warnings: [],
+          checks: reconciliationChecks(val('cutoff') || pStart()).checks,
+          allPassed: reconciliationChecks(val('cutoff') || pStart()).allPassed,
+        };
+        STATE.screen = 'importResult';
+        STATE.imp = null;
+        toast('ตั้งยอดยกมา ' + r.accounts + ' บัญชีแล้ว', 'ok', 'ใบสำคัญ ' + r.entry.no);
+      });
+    }
+    return;
+  }
   if (head === 'reset')   {
     if (window.confirm('ล้างข้อมูลตัวอย่างทั้งหมดและสร้างใหม่?')) resetAll();
     return;
@@ -382,6 +405,25 @@ function bindEvents() {
     const t = ev.target;
     if (t.id === 'periodSel') { STATE.period = t.value; STATE.sel = null; save(); render(); return; }
     if (t.id === 'accSel')    { STATE.drill = t.value; render(); return; }
+    if (t.id === 'file') {
+      if (t.files && t.files[0]) handleFile(t.files[0]);
+      return;
+    }
+    if (t.classList.contains('impcol')) {
+      const I = STATE.imp;
+      if (I) { I.map[t.getAttribute('data-k')] = t.value === '' ? undefined : Number(t.value); refreshImportPreview(); render(); }
+      return;
+    }
+    if (t.classList.contains('impmap')) {
+      const I = STATE.imp;
+      if (I) {
+        I.overrides = I.overrides || {};
+        if (t.value) I.overrides[t.getAttribute('data-key')] = t.value;
+        else delete I.overrides[t.getAttribute('data-key')];
+        render();
+      }
+      return;
+    }
     if (t.classList.contains('itemsel')) {
       const i = t.getAttribute('data-i');
       const it = DB.items.find((x) => x.code === t.value);
@@ -424,11 +466,117 @@ function bindEvents() {
   });
   document.addEventListener('mouseleave', function () { ttEl.classList.remove('show'); });
 
+  ['dragenter', 'dragover'].forEach(function (ev) {
+    document.addEventListener(ev, function (e) {
+      const d = document.getElementById('drop');
+      if (!d) return;
+      e.preventDefault();
+      d.classList.add('over');
+    });
+  });
+  ['dragleave', 'drop'].forEach(function (ev) {
+    document.addEventListener(ev, function (e) {
+      const d = document.getElementById('drop');
+      if (!d) return;
+      e.preventDefault();
+      if (ev === 'dragleave' && e.relatedTarget) return;
+      d.classList.remove('over');
+      if (ev === 'drop' && e.dataTransfer && e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+    });
+  });
+
   document.getElementById('menuBtn').addEventListener('click', function () {
     document.body.classList.toggle('nav-open');
   });
   document.getElementById('nav').addEventListener('click', function () {
     document.body.classList.remove('nav-open');
+  });
+}
+
+
+function modalBlank() {
+  const yr = new Date().getFullYear();
+  modal({
+    title:'เริ่มจากบริษัทเปล่า',
+    sub:'ข้อมูลปัจจุบันทั้งหมดจะถูกลบถาวร',
+    body:'<div class="flds">'
+      + field({ name:'coname', label:'ชื่อผู้ประกอบการ', wide:true, placeholder:'บริษัท ... จำกัด' })
+      + field({ name:'cotax', label:'เลขประจำตัวผู้เสียภาษี 13 หลัก', placeholder:'เว้นว่างไว้ก่อนได้',
+          hint:'ถ้าใส่ ระบบจะตรวจหลักที่ 13 ให้ทันที' })
+      + field({ name:'coyear', label:'ปีของรอบบัญชี (ค.ศ.)', value: String(yr),
+          hint:'ระบบจะสร้างงวดรายเดือน 12 งวดให้' })
+      + field({ name:'coaddr', label:'ที่อยู่สถานประกอบการ', wide:true,
+          placeholder:'ที่อยู่ที่จะพิมพ์ลงใบกำกับภาษีทุกใบ' })
+      + '</div>',
+    submitLabel:'ลบข้อมูลเดิมและเริ่มใหม่',
+    note:'กดแล้วย้อนกลับไม่ได้',
+    onSubmit: function () {
+      if (!window.confirm('ลบข้อมูลทั้งหมดของ "' + DB.company.name + '" และเริ่มจากบริษัทเปล่า?')) return;
+      submitAction(function () {
+        const c = buildBlank({ name: val('coname'), taxId: val('cotax'),
+          address: val('coaddr'), year: val('coyear') });
+        STATE.period = DB.periods[0].code;
+        STATE.imp = null; STATE.impResult = null; STATE.sel = null;
+        toast('สร้างบริษัท ' + c.name + ' แล้ว', 'ok', 'ผังบัญชี ' + DB.accounts.length + ' บัญชี · ยังไม่มีรายการใด ๆ');
+        return c;
+      });
+    },
+  });
+}
+
+/* ===================================================================
+   นำเข้าไฟล์
+   =================================================================== */
+async function handleFile(file) {
+  STATE.imp = { name: file.name };
+  try {
+    const lower = file.name.toLowerCase();
+    if (lower.endsWith('.json')) {
+      const pkg = JSON.parse(await file.text());
+      validatePackage(pkg);
+      STATE.imp = { name: file.name, pkg: pkg };
+      runImportPackage(pkg);
+      return;
+    }
+    let rows;
+    if (lower.endsWith('.xlsx')) rows = await readXlsx(await file.arrayBuffer());
+    else rows = parseCsv(await file.text());
+    if (!rows.length) throw new DomainError('EMPTY_FILE', 'ไฟล์นี้ไม่มีข้อมูล');
+
+    const det = detectColumns(rows);
+    if (!det.ok) {
+      throw new DomainError('COLUMNS_NOT_FOUND',
+        'หาหัวตารางไม่เจอ ต้องมีคอลัมน์รหัสบัญชี ชื่อบัญชี เดบิต และเครดิต',
+        'ถ้าไฟล์มีหัวรายงานหลายบรรทัด ให้ลบบรรทัดบนออกแล้วบันทึกใหม่');
+    }
+    STATE.imp = {
+      name: file.name, rows: rows, headerRow: det.headerRow, map: det.map,
+      overrides: {}, cutoff: null,
+    };
+    refreshImportPreview();
+  } catch (e) {
+    STATE.imp = { name: file.name, error: (e.message || String(e)) + (e.hint ? ' — ' + e.hint : '') };
+    if (!(e instanceof DomainError)) console.error(e);
+  }
+  render();
+}
+
+function refreshImportPreview() {
+  const I = STATE.imp;
+  if (!I || !I.rows) return;
+  const m = I.map;
+  if (m.code === undefined || m.debit === undefined || m.credit === undefined) { I.tb = null; return; }
+  I.tb = readTrialBalance(I.rows, m, I.headerRow);
+}
+
+function runImportPackage(pkg) {
+  runAction(function () {
+    const r = importPackage(pkg, {});
+    STATE.impResult = r;
+    STATE.screen = 'importResult';
+    STATE.imp = null;
+    toast('นำเข้าข้อมูลจาก ' + (pkg.source || 'ระบบเดิม') + ' แล้ว', 'ok',
+      r.allPassed ? 'ยอดคุมผ่านครบทุกข้อ' : 'มียอดคุมที่ยังไม่ตรง ตรวจในหน้าสรุป');
   });
 }
 

@@ -1111,4 +1111,147 @@ const SCREENS = {
   projects: scProjects, budget: scBudget,
   bs: scBalanceSheet, pl: scIncomeStatement,
   audit: scAudit, about: scAbout,
+  import: scImport, importResult: scImportResult,
 };
+
+/* ===================================================================
+   นำเข้าข้อมูลจากระบบเดิม
+   =================================================================== */
+function scImport() {
+  const IMP = STATE.imp || {};
+  const accOptions = '<option value="">— เลือกบัญชีปลายทาง —</option>'
+    + DB.accounts.filter((a) => a.postable)
+      .map((a) => '<option value="' + a.code + '">' + esc(a.code + ' ' + a.name) + '</option>').join('');
+
+  const step1 = card({
+    title:'นำเข้าข้อมูลจากระบบบัญชีเดิม',
+    sub:'รองรับไฟล์ .xlsx และ .csv ที่ส่งออกจากโปรแกรมบัญชีเดิม และแฟ้ม .json จากตัวดึงข้อมูล FlowAccount',
+    body:'<div class="drop" id="drop">'
+      + '<input type="file" id="file" accept=".xlsx,.csv,.txt,.json" hidden>'
+      + '<div class="drop-in">'
+      + '<b>ลากไฟล์มาวางที่นี่</b>'
+      + '<div class="dim">หรือ</div>'
+      + btn('pick:file', 'เลือกไฟล์จากเครื่อง', 'primary')
+      + '<div class="dim" style="margin-top:14px">'
+      + 'งบทดลอง — FlowAccount: รายงานด้านบัญชี → งบทดลอง → เลือกรอบระยะเวลา → ดาวน์โหลด Excel<br>'
+      + 'ผังบัญชี — บริหารบัญชี → ผังบัญชี → เพิ่มเติม → ดาวน์โหลด Excel</div>'
+      + '</div></div>'
+      + (IMP.error ? '<div class="note warn">' + esc(IMP.error) + '</div>' : ''),
+    foot:'ไฟล์ถูกอ่านในเครื่องคุณเท่านั้น ไม่ได้อัปโหลดไปที่ใด',
+  });
+
+  const blank = card({
+    title:'เริ่มจากบริษัทเปล่า',
+    sub:'ล้างข้อมูลตัวอย่างทิ้ง เหลือแต่ผังบัญชีและงวดบัญชี พร้อมรับข้อมูลจริงของคุณ',
+    actions: btn('blank:new', 'ตั้งค่าบริษัทใหม่'),
+    body:'<div class="prose"><p>ก่อนย้ายข้อมูลจริงเข้ามา ควรเริ่มจากบริษัทเปล่าก่อน '
+      + 'ไม่งั้นตัวเลขของคุณจะปนกับข้อมูลตัวอย่างที่ระบบสร้างไว้ให้ลอง '
+      + 'และยอดคุมจะไม่มีทางตรง</p>'
+      + '<p class="dim">ตอนนี้กำลังใช้ข้อมูลของ <b>' + esc(DB.company.name) + '</b> '
+      + 'มีใบสำคัญ ' + DB.entries.length + ' ใบ · ใบกำกับภาษี ' + DB.docs.invoice.length + ' ฉบับ</p></div>',
+    foot:'ข้อมูลเดิมทั้งหมดจะหายถาวร ระบบจะถามยืนยันอีกครั้งก่อนทำ',
+  });
+
+  if (!IMP.rows) return step1 + blank;
+
+  /* ---- อ่านไฟล์ได้แล้ว ให้เลือกคอลัมน์ ---- */
+  const head = IMP.rows[IMP.headerRow] || [];
+  const colOpts = (sel) => '<option value="">— ไม่ใช้ —</option>'
+    + head.map((h, i) => '<option value="' + i + '"' + (String(i) === String(sel) ? ' selected' : '') + '>'
+        + esc((h || '').trim() || 'คอลัมน์ที่ ' + (i + 1)) + '</option>').join('');
+
+  const preview = IMP.tb ? previewOpening(IMP.tb.rows, IMP.overrides || {}) : null;
+
+  const step2 = card({
+    title:'ตรวจไฟล์ก่อนนำเข้า',
+    sub: esc(IMP.name) + ' · ' + IMP.rows.length + ' แถว · หัวตารางอยู่แถวที่ ' + (IMP.headerRow + 1),
+    actions: btn('imp:reset', 'เลือกไฟล์ใหม่'),
+    body:'<div class="flds">'
+      + '<div class="fld-w"><label for="c_code">คอลัมน์รหัสบัญชี</label><select id="c_code" class="impcol" data-k="code">' + colOpts(IMP.map.code) + '</select></div>'
+      + '<div class="fld-w"><label for="c_name">คอลัมน์ชื่อบัญชี</label><select id="c_name" class="impcol" data-k="name">' + colOpts(IMP.map.name) + '</select></div>'
+      + '<div class="fld-w"><label for="c_debit">คอลัมน์เดบิต</label><select id="c_debit" class="impcol" data-k="debit">' + colOpts(IMP.map.debit) + '</select></div>'
+      + '<div class="fld-w"><label for="c_credit">คอลัมน์เครดิต</label><select id="c_credit" class="impcol" data-k="credit">' + colOpts(IMP.map.credit) + '</select></div>'
+      + field({ name:'cutoff', label:'วันตัดยอด (ยอดยกมาจะลงบัญชีวันนี้)', type:'date',
+          value: IMP.cutoff || pStart(), hint:'ต้องอยู่ในงวดที่ยังเปิดอยู่' })
+      + '</div>'
+      + '<div class="sub-h">ตัวอย่าง 8 แถวแรกที่อ่านได้</div>'
+      + tbl({
+          cols:[{t:'รหัส'},{t:'ชื่อบัญชี'},{t:'เดบิต',a:'r'},{t:'เครดิต',a:'r'},{t:'จับคู่กับ'}],
+          rows: (IMP.tb ? IMP.tb.rows.slice(0, 8) : []).map(function (r) {
+            const t = (IMP.overrides || {})[r.code || r.name] || matchAccount(r.code, r.name);
+            return [{mono:r.code}, r.name, {n:r.debit}, {n:r.credit},
+              t ? {dim: t + ' ' + acc(t).name} : {st:['late','ยังไม่จับคู่']}];
+          }),
+          empty:'อ่านบรรทัดที่มียอดไม่ได้เลย ลองเลือกคอลัมน์ใหม่',
+        })
+      + (IMP.tb && IMP.tb.skipped.length
+          ? '<div class="note">ข้ามไป ' + IMP.tb.skipped.length + ' แถว: '
+            + esc(IMP.tb.skipped.slice(0, 4).map((s) => 'แถว ' + s.line + ' (' + s.why + ')').join(', '))
+            + (IMP.tb.skipped.length > 4 ? ' และอื่น ๆ' : '') + '</div>'
+          : ''),
+  });
+
+  if (!preview) return step1 + step2 + blank;
+
+  const step3 = card({
+    title:'สรุปสิ่งที่จะเกิดขึ้น',
+    sub:'ยังไม่มีอะไรถูกบันทึกจนกว่าจะกดปุ่มนำเข้า',
+    actions: btn('imp:run', 'นำเข้ายอดยกมา', preview.ready ? 'primary' : 'disabled'),
+    body:'<div class="reco">'
+      + '<div><span>บัญชีที่จับคู่ได้</span><b>' + preview.matched.length + ' บัญชี</b></div>'
+      + '<div><span>บัญชีที่ยังจับคู่ไม่ได้</span><b class="' + (preview.unmatched.length ? 'neg' : '') + '">'
+        + preview.unmatched.length + ' บัญชี</b></div>'
+      + '<div><span>เดบิตรวม</span><b>' + fmt(preview.totalDr) + '</b></div>'
+      + '<div><span>เครดิตรวม</span><b>' + fmt(preview.totalCr) + '</b></div>'
+      + '<div class="gt"><span>ผลต่าง</span><b class="' + (preview.balanced ? '' : 'neg') + '">'
+        + fmt(preview.diff) + '</b></div></div>'
+      + (preview.unmatched.length
+          ? '<div class="sub-h">เลือกบัญชีปลายทางให้ครบก่อนนำเข้า</div>'
+            + tbl({
+                cols:[{t:'รหัสเดิม'},{t:'ชื่อบัญชีเดิม'},{t:'เดบิต',a:'r'},{t:'เครดิต',a:'r'},{t:'ลงบัญชีของเราที่'}],
+                rows: preview.unmatched.map((r) => [{mono:r.code}, r.name, {n:r.debit}, {n:r.credit},
+                  {html:'<select class="impmap" data-key="' + esc(r.code || r.name) + '">' + accOptions + '</select>'}]),
+              })
+          : '')
+      + (preview.balanced ? '' : '<div class="note warn">เดบิตรวมไม่เท่ากับเครดิตรวม '
+          + 'มักเกิดจากเลือกคอลัมน์ผิดคู่ — งบทดลองมักมีทั้งคู่ยอดยกมา คู่เคลื่อนไหว และคู่ยอดคงเหลือ '
+          + 'ให้เลือกคู่ยอดคงเหลือปลายงวด</div>'),
+    foot: preview.ready
+      ? 'ระบบจะสร้างใบสำคัญ "ยอดยกมา" หนึ่งใบ ลงวันที่ตามที่เลือก แก้ไม่ได้ ถ้าผิดต้องกลับรายการ'
+      : 'ยังนำเข้าไม่ได้ — ' + (!preview.balanced ? 'งบทดลองไม่สมดุล' : 'ยังจับคู่บัญชีไม่ครบ'),
+  });
+
+  return step1 + step2 + step3 + blank;
+}
+
+function scImportResult() {
+  const r = STATE.impResult;
+  if (!r) { STATE.screen = 'import'; return scImport(); }
+  return card({
+    title:'นำเข้าข้อมูลเรียบร้อย',
+    sub:'จากระบบ ' + r.source + ' ตัดยอด ณ ' + thDate(r.cutoff),
+    actions: btn('go:tb', 'ดูงบทดลอง', 'primary') + btn('go:import', 'นำเข้าไฟล์อื่นต่อ'),
+    body: kpi([
+      { label:'คู่ค้าที่เพิ่มใหม่', value: r.partners + ' / ' + r.partnersSeen + ' ราย' },
+      { label:'สินค้าที่เพิ่มใหม่', value: r.items + ' / ' + r.itemsSeen + ' รายการ' },
+      { label:'ลูกหนี้ค้างยกมา', value: r.invoices + ' ใบ' },
+      { label:'เจ้าหนี้ค้างยกมา', value: r.bills + ' รายการ' },
+    ])
+    + (r.opening ? '<div class="reco"><div><span>ใบสำคัญยอดยกมา</span><b>' + esc(r.opening.entry.no) + '</b></div>'
+        + '<div><span>จำนวนบัญชี</span><b>' + r.opening.accounts + '</b></div>'
+        + '<div class="gt"><span>ยอดรวมด้านเดบิต</span><b>' + fmt(r.opening.total) + '</b></div></div>' : '')
+    + '<div class="sub-h">ตรวจยอดคุมหลังนำเข้า</div>'
+    + '<ul class="checks">' + r.checks.map((c) =>
+        '<li><span class="dot ' + (c.ok ? 'good' : 'bad') + '"></span>' + esc(c.label)
+        + '<span class="grow"></span><span class="' + (c.ok ? 'dim' : 'neg') + '">'
+        + (c.ok ? 'ตรงกัน' : 'ต่าง ' + fmt(c.control - c.sub)) + '</span></li>').join('') + '</ul>'
+    + (r.warnings.length
+        ? '<div class="sub-h">ข้อสังเกตจากตัวดึงข้อมูล (' + r.warnings.length + ')</div>'
+          + tbl({ cols:[{t:'เอกสาร'},{t:'เรื่อง'}],
+                  rows: r.warnings.slice(0, 50).map((w) => [{mono:w.doc || '—'}, w.message || String(w)]) })
+        : ''),
+    foot: r.allPassed
+      ? 'ยอดคุมผ่านครบทุกข้อ ข้อมูลที่ย้ายมาสอดคล้องกันทั้งบัญชีคุมและบัญชีย่อย'
+      : 'มียอดคุมที่ยังไม่ตรง — แปลว่าย้ายมาไม่ครบ ตรวจรายการข้างต้นก่อนใช้งานจริง',
+  });
+}

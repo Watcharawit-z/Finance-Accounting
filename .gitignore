@@ -25,3 +25,9 @@ npm-debug.log*
 
 # ภาพหน้าจอที่สร้างตอนทดสอบ
 webapp/shot-*.png
+
+# ความลับของตัวย้ายข้อมูล
+config.json
+tools/flowaccount-import/config.json
+tools/flowaccount-import/out/
+out/

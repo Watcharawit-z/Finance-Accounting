@@ -1,0 +1,15 @@
+[
+  { "id": 101, "contactType": 3, "contactGroup": 3, "code": "C-001",
+    "name": "บริษัท ไทยพัฒนาโลจิสติกส์ จำกัด", "taxId": "0107536000234",
+    "branch": "สำนักงานใหญ่", "branchCode": "", "addressLocal": "1 อาคารทีดีแอล ถนนสาทรใต้",
+    "addressLocalLine2": "แขวงยานนาวา เขตสาทร กรุงเทพมหานคร", "zipCode": "10120", "defaultCreditDays": 45 },
+  { "id": 102, "contactType": 5, "contactGroup": 3, "code": "V-001",
+    "name": "บริษัท เอเชียสตีล จำกัด", "taxId": "0105533001823",
+    "branch": "สาขา 2", "branchCode": "", "addressLocal": "300 นิคมอุตสาหกรรมบางปู",
+    "zipCode": "10280", "defaultCreditDays": 30 },
+  { "id": 103, "contactType": 5, "contactGroup": 1, "code": "V-002",
+    "name": "นางสาวมาลี ดีงาม", "taxId": "3100900123455",
+    "addressLocal": "120/5 ถนนงามวงศ์วาน จังหวัดนนทบุรี", "zipCode": "11000", "defaultCreditDays": 7 },
+  { "id": 104, "contactType": 3, "contactGroup": 3, "code": "C-BAD",
+    "name": "บริษัท เลขภาษีผิด จำกัด", "taxId": "0000000000000", "defaultCreditDays": 30 }
+]

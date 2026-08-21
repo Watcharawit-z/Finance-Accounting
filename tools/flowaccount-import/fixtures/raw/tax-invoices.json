@@ -1,0 +1,21 @@
+[
+  { "recordId": 9001, "documentSerial": "IV690712-001", "publishedOn": "2026-07-12T00:00:00+07:00",
+    "dueDate": "2026-08-26T00:00:00+07:00", "contactCode": "C-001",
+    "contactName": "บริษัท ไทยพัฒนาโลจิสติกส์ จำกัด", "contactTaxId": "0107536000234",
+    "contactBranch": "สำนักงานใหญ่", "contactAddress": "1 อาคารทีดีแอล ถนนสาทรใต้",
+    "isVatInclusive": false, "subTotal": 129000, "totalAfterDiscount": 129000,
+    "vatAmount": 9030, "grandTotal": 138030, "paidTotal": 0 },
+  { "recordId": 9002, "documentSerial": "IV690715-002", "publishedOn": "2026-07-15T00:00:00+07:00",
+    "dueDate": "2026-08-29T00:00:00+07:00", "contactCode": "C-001",
+    "contactName": "บริษัท ไทยพัฒนาโลจิสติกส์ จำกัด", "contactTaxId": "0107536000234",
+    "contactBranch": "สำนักงานใหญ่", "isVatInclusive": true,
+    "subTotal": 10700, "totalAfterDiscount": 10700, "vatAmount": 700, "grandTotal": 10700, "paidTotal": 0 },
+  { "recordId": 9003, "documentSerial": "IV690701-003", "publishedOn": "2026-07-01T00:00:00+07:00",
+    "contactCode": "C-001", "contactName": "บริษัท ไทยพัฒนาโลจิสติกส์ จำกัด",
+    "isVatInclusive": false, "subTotal": 5000, "totalAfterDiscount": 5000,
+    "vatAmount": 350, "grandTotal": 5350, "paidTotal": 5350 },
+  { "recordId": 9004, "documentSerial": "IV690720-004", "publishedOn": "2026-07-20T00:00:00+07:00",
+    "contactCode": "C-BAD", "contactName": "บริษัท เลขภาษีผิด จำกัด",
+    "isVatInclusive": false, "subTotal": 1000, "totalAfterDiscount": 1000,
+    "vatAmount": 99, "grandTotal": 1200, "paidTotal": 0 }
+]

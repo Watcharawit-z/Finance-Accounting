@@ -256,6 +256,15 @@ table.fs thead th{background:transparent}
 }
 #tip.show{opacity:1}
 
+/* ---------- นำเข้าไฟล์ ---------- */
+.drop{margin:16px; border:2px dashed var(--rule); border-radius:var(--radius); background:var(--paper); transition:border-color .15s,background .15s}
+.drop.over{border-color:var(--accent); background:var(--accent-w)}
+.drop-in{padding:38px 20px; text-align:center; font-size:14px}
+.drop-in b{display:block; font-size:16px; margin-bottom:8px}
+.drop-in .dim{margin:8px 0; font-size:13px; line-height:1.65}
+td select{font:inherit; font-size:13px; height:32px; padding:0 8px; border:1px solid var(--rule); border-radius:4px; background:var(--panel); color:var(--ink); max-width:280px}
+.reco b.neg{color:var(--neg)}
+
 /* ---------- แจ้งเตือน ---------- */
 .toast{
   position:fixed; left:50%; bottom:26px; transform:translate(-50%,20px); z-index:80;

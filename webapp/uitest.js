@@ -12,6 +12,8 @@ const ok = (name, cond, extra) => {
 const closed = (p) => p.waitForFunction(
   () => !document.getElementById('modal').classList.contains('show'), null, { timeout: 5000 });
 
+const fmtT = (v) => (v / 10000).toLocaleString();
+
 (async () => {
   const browser = await chromium.launch();
   const page = await browser.newPage({ viewport: { width: 1440, height: 950 } });
@@ -240,6 +242,141 @@ const closed = (p) => p.waitForFunction(
   await page.waitForTimeout(250);
   ok('กดปุ่มเมนูแล้วลิ้นชักเปิด', await page.evaluate(() =>
     document.getElementById('nav').getBoundingClientRect().right > 100));
+
+  console.log('\n[12] นำเข้าข้อมูลจากระบบเดิม');
+  await page.setViewportSize({ width: 1440, height: 950 });
+  await page.evaluate(() => { STATE.screen = 'import'; STATE.imp = null; render(); });
+  await page.waitForTimeout(150);
+  ok('มีหน้านำเข้าข้อมูลและพื้นที่ลากไฟล์', await page.$('#drop') !== null);
+
+  /* สร้างบริษัทเปล่าเพื่อไม่ให้ข้อมูลจริงปนกับข้อมูลตัวอย่าง */
+  page.once('dialog', (d) => d.accept());
+  await page.click('[data-act="blank:new"]');
+  await page.waitForSelector('#modal.show');
+  await page.fill('[name="coname"]', 'บริษัท ทดสอบย้ายข้อมูล จำกัด');
+  await page.fill('[name="cotax"]', '0105548021442');
+  await page.fill('[name="coyear"]', '2026');
+  await page.click('[data-act="modal:submit"]');
+  await closed(page);
+  const blank = await page.evaluate(() => ({
+    name: DB.company.name, entries: DB.entries.length, accounts: DB.accounts.length,
+    invoices: DB.docs.invoice.length, periods: DB.periods.length,
+  }));
+  ok('สร้างบริษัทเปล่าได้', blank.entries === 0 && blank.invoices === 0 && blank.accounts > 60,
+    blank.name + ' · ผังบัญชี ' + blank.accounts + ' บัญชี · งวด ' + blank.periods);
+
+  /* เลขผู้เสียภาษีผิดต้องถูกปฏิเสธ */
+  page.once('dialog', (d) => d.accept());
+  await page.click('[data-act="blank:new"]');
+  await page.waitForSelector('#modal.show');
+  await page.fill('[name="coname"]', 'บริษัท เลขผิด จำกัด');
+  await page.fill('[name="cotax"]', '1234567890123');
+  await page.click('[data-act="modal:submit"]');
+  await page.waitForTimeout(300);
+  ok('เลขผู้เสียภาษีผิดหลักที่ 13 ถูกปฏิเสธ', await page.evaluate(() =>
+    document.getElementById('modal').classList.contains('show')
+    && document.getElementById('toast').className.indexOf('err') >= 0));
+  await page.click('[data-act="modal:close"]');
+
+  /* อ่านไฟล์ .xlsx จริง — สร้างไฟล์ zip แบบไม่บีบอัดขึ้นมาในเบราว์เซอร์ */
+  await page.evaluate(() => {
+    function crc32(b) {
+      let c, t = [];
+      for (let n = 0; n < 256; n++) { c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c; }
+      let x = 0xFFFFFFFF;
+      for (let i = 0; i < b.length; i++) x = t[(x ^ b[i]) & 0xFF] ^ (x >>> 8);
+      return (x ^ 0xFFFFFFFF) >>> 0;
+    }
+    function zip(files) {
+      const enc = new TextEncoder(), parts = [], central = [];
+      let off = 0;
+      files.forEach(function (f) {
+        const name = enc.encode(f.name), data = enc.encode(f.text), crc = crc32(data);
+        const lh = new DataView(new ArrayBuffer(30));
+        lh.setUint32(0, 0x04034b50, true); lh.setUint16(4, 20, true); lh.setUint16(8, 0, true);
+        lh.setUint32(14, crc, true); lh.setUint32(18, data.length, true); lh.setUint32(22, data.length, true);
+        lh.setUint16(26, name.length, true);
+        parts.push(new Uint8Array(lh.buffer), name, data);
+        const ch = new DataView(new ArrayBuffer(46));
+        ch.setUint32(0, 0x02014b50, true); ch.setUint16(6, 20, true); ch.setUint16(10, 0, true);
+        ch.setUint32(16, crc, true); ch.setUint32(20, data.length, true); ch.setUint32(24, data.length, true);
+        ch.setUint16(28, name.length, true); ch.setUint32(42, off, true);
+        central.push(new Uint8Array(ch.buffer), name);
+        off += 30 + name.length + data.length;
+      });
+      const cstart = off;
+      let csize = 0;
+      central.forEach((c) => { csize += c.length; });
+      const eo = new DataView(new ArrayBuffer(22));
+      eo.setUint32(0, 0x06054b50, true);
+      eo.setUint16(8, files.length, true); eo.setUint16(10, files.length, true);
+      eo.setUint32(12, csize, true); eo.setUint32(16, cstart, true);
+      return new Blob([...parts, ...central, new Uint8Array(eo.buffer)]);
+    }
+    const rows = [
+      ['รายงานงบทดลอง', '', '', ''],
+      ['รหัสบัญชี', 'ชื่อบัญชี', 'เดบิต', 'เครดิต'],
+      ['1113', 'เงินฝากธนาคาร–กระแสรายวัน', '1200000', ''],
+      ['1131', 'ลูกหนี้การค้า–ในประเทศ', '148730', ''],
+      ['2121', 'เจ้าหนี้การค้า–ในประเทศ', '', '94160'],
+      ['3120', 'ทุนที่ออกและชำระแล้ว', '', '1000000'],
+      ['3310', 'กำไรสะสมยังไม่ได้จัดสรร', '', '254570'],
+    ];
+    const esc2 = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+    const sheet = '<?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>'
+      + rows.map(function (r, ri) {
+          return '<row r="' + (ri + 1) + '">' + r.map(function (c, ci) {
+            if (c === '') return '';
+            const ref = String.fromCharCode(65 + ci) + (ri + 1);
+            return /^\d+$/.test(c)
+              ? '<c r="' + ref + '"><v>' + c + '</v></c>'
+              : '<c r="' + ref + '" t="inlineStr"><is><t>' + esc2(c) + '</t></is></c>';
+          }).join('') + '</row>';
+        }).join('')
+      + '</sheetData></worksheet>';
+    const blob = zip([
+      { name: '[Content_Types].xml', text: '<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"/>' },
+      { name: 'xl/worksheets/sheet1.xml', text: sheet },
+    ]);
+    window.__xlsx = new File([blob], 'งบทดลอง.xlsx');
+  });
+  await page.evaluate(() => handleFile(window.__xlsx));
+  await page.waitForTimeout(400);
+  const impState = await page.evaluate(() => ({
+    err: STATE.imp && STATE.imp.error, rows: STATE.imp && STATE.imp.rows && STATE.imp.rows.length,
+    header: STATE.imp && STATE.imp.headerRow, tb: STATE.imp && STATE.imp.tb && STATE.imp.tb.rows.length,
+  }));
+  ok('★ อ่านไฟล์ .xlsx ได้โดยไม่ต้องแปลงเป็น CSV ก่อน', !impState.err && impState.rows === 7,
+    impState.err || impState.rows + ' แถว');
+  ok('หาหัวตารางเจอแม้มีหัวรายงานคั่น', impState.header === 1, 'แถวที่ ' + (impState.header + 1));
+  ok('อ่านบัญชีที่มียอดได้ครบ', impState.tb === 5, impState.tb + ' บัญชี');
+
+  const prev = await page.evaluate(() => previewOpening(STATE.imp.tb.rows, {}));
+  ok('งบทดลองสมดุลและจับคู่บัญชีได้ครบ', prev.ready && prev.unmatched.length === 0,
+    'เดบิต ' + fmtT(prev.totalDr) + ' เครดิต ' + fmtT(prev.totalCr));
+
+  await page.fill('[name="cutoff"]', '2026-07-31');
+  await page.click('[data-act="imp:run"]');
+  await page.waitForTimeout(400);
+  const after3 = await page.evaluate(() => ({
+    screen: STATE.screen, entries: DB.entries.length,
+    balanced: trialBalance('2026-01-01', '2026-12-31').balanced,
+    diff: balanceSheet('2026-07-31').diff,
+    bank: balanceOf('1113', '2026-07-31'),
+  }));
+  ok('ตั้งยอดยกมาแล้ว', after3.entries === 1 && after3.screen === 'importResult');
+  ok('งบทดลองสมดุลหลังตั้งยอดยกมา', after3.balanced);
+  ok('งบแสดงฐานะการเงินสมดุล', after3.diff === 0, 'ผลต่าง ' + after3.diff);
+  ok('ยอดเงินฝากตรงกับไฟล์', after3.bank === 12000000000, after3.bank / 10000 + ' บาท');
+
+  await page.evaluate(() => { STATE.screen = 'import'; STATE.imp = null; render(); });
+  await page.evaluate(() => handleFile(window.__xlsx));
+  await page.waitForTimeout(300);
+  await page.fill('[name="cutoff"]', '2026-07-31');
+  await page.click('[data-act="imp:run"]');
+  await page.waitForTimeout(300);
+  ok('★ ตั้งยอดยกมาวันเดิมซ้ำถูกปฏิเสธ', await page.evaluate(() =>
+    DB.entries.length === 1 && document.getElementById('toast').className.indexOf('err') >= 0));
 
   ok('ไม่มีข้อผิดพลาดในคอนโซลเลย', errors.length === 0, errors.slice(0, 3).join(' | '));
 

@@ -51,6 +51,7 @@ start webapp\index.html         # Windows
 | 14 | [วงจรสถานะเอกสารและ Error Catalog](docs/14-document-states.md) | state machine ทุกเอกสาร + รหัสข้อผิดพลาด |
 | 15 | [แผนการทดสอบ](docs/15-test-plan.md) | golden test, property test, UAT, เกณฑ์ go-live |
 | 16 | [อภิธานศัพท์ไทย-อังกฤษ](docs/16-glossary.md) | มาตรฐานคำที่ใช้ทั้งระบบ |
+| 17 | [ย้ายข้อมูลจาก FlowAccount](docs/17-migration-flowaccount.md) | สิ่งที่ API ให้และไม่ให้ แผนตัดยอด ข้อควรระวัง |
 
 ## การรันระบบ
 
@@ -72,8 +73,9 @@ cd apps/web && npm install && npm run dev    # http://localhost:5173
 ## การทดสอบ
 
 ```bash
-node webapp/test.js              # 55 ข้อ — เครื่องบัญชีในเบราว์เซอร์ (ไม่ต้องติดตั้งอะไร)
-node webapp/uitest.js            # 69 ข้อ — หน้าเว็บจริงใน Chromium ทุกหน้าจอทุกปุ่ม
+node tools/flowaccount-import/test.js  # 50 ข้อ — ย้ายข้อมูลจาก FlowAccount เข้าระบบจริง
+node webapp/test.js              # 58 ข้อ — เครื่องบัญชีในเบราว์เซอร์ (ไม่ต้องติดตั้งอะไร)
+node webapp/uitest.js            # 87 ข้อ — หน้าเว็บจริงใน Chromium ทุกหน้าจอทุกปุ่ม
 db/tests/run.sh                  # 43 ข้อ — กฎบัญชีที่บังคับในฐานข้อมูล
 cd apps/api && npm test          # 52 ข้อ — เงิน ภาษี บัญชีแยกประเภท RLS และสัญญา HTTP
 ```
@@ -89,7 +91,8 @@ cd apps/api && npm test          # 52 ข้อ — เงิน ภาษี �
 | `apps/api/` | **โค้ดระบบจริง** NestJS + PostgreSQL ([README](apps/api/README.md)) |
 | `apps/web/` | หน้าเว็บที่เรียก API จริง ([README](apps/web/README.md)) |
 | `prototype/` | ต้นแบบหน้าตา **43 หน้าจอ** แบบ static HTML ([README](prototype/README.md)) |
-| `webapp/` | **ระบบที่ใช้งานได้จริงในไฟล์เดียว** 35 หน้าจอ รันในเบราว์เซอร์ ([README](webapp/README.md)) |
+| `webapp/` | **ระบบที่ใช้งานได้จริงในไฟล์เดียว** 36 หน้าจอ รันในเบราว์เซอร์ ([README](webapp/README.md)) |
+| `tools/flowaccount-import/` | ตัวย้ายข้อมูลจาก FlowAccount ([README](tools/flowaccount-import/README.md)) |
 
 ## สิ่งที่ทำงานได้จริงแล้ว
 
@@ -112,7 +115,8 @@ cd apps/api && npm test          # 52 ข้อ — เงิน ภาษี �
 เฟสปัจจุบัน: **ระบบใช้งานได้จริงในเบราว์เซอร์ครบทุกโมดูล + สถาปัตยกรรมหลายบริษัทกำลังตามมา**
 
 - เอกสารออกแบบ 17 ฉบับ · สคีมา 152 ตารางพร้อมกฎที่บังคับในฐานข้อมูล — เสร็จ
-- `webapp/` ระบบครบ 35 หน้าจอ ผ่านการทดสอบ 124 ข้อ — เสร็จ
+- `webapp/` ระบบครบ 36 หน้าจอ ผ่านการทดสอบ 145 ข้อ — เสร็จ
+- ตัวย้ายข้อมูลจาก FlowAccount + หน้านำเข้าข้อมูลที่อ่าน .xlsx ได้ — เสร็จ
 - `apps/api` + `apps/web` บน PostgreSQL หลายบริษัท — ขาย/ลูกหนี้/รายงานเสร็จ โมดูลที่เหลือกำลังทำ
 - AI Layer สำหรับวิเคราะห์การเงิน — ยังไม่เริ่ม (ตามที่วางไว้ให้ทำหลังระบบบัญชีนิ่งแล้ว)
 

@@ -155,6 +155,67 @@ const ASSETS = [
 ];
 
 /* -------------------------------------------------------------- */
+/* ---------- ผังบัญชีและงวด — ใช้ร่วมกันทั้งข้อมูลตัวอย่างและบริษัทเปล่า ---------- */
+function loadChart() {
+  DB.accounts = COA.map(function (r) {
+    return {
+      code: r[0], name: r[1], type: r[2], subType: r[3],
+      postable: !!r[4], requiresPartner: r[5] === 'partner',
+      level: r[0].endsWith('000') ? 1 : r[0].endsWith('00') ? 2 : 3,
+    };
+  });
+}
+
+function loadPeriods(year) {
+  DB.periods = [];
+  for (let m = 1; m <= 12; m++) {
+    const mm = String(m).padStart(2, '0');
+    DB.periods.push({
+      code: year + '-' + mm, start: year + '-' + mm + '-01',
+      end: endOfMonth(year + '-' + mm + '-01'), status: 'open',
+    });
+  }
+}
+
+/**
+ * เริ่มจากบริษัทเปล่า — ผังบัญชีและงวดครบ แต่ไม่มีรายการใด ๆ
+ * ใช้เมื่อจะย้ายข้อมูลจริงเข้ามา จะได้ไม่ปนกับข้อมูลตัวอย่าง
+ */
+function buildBlank(o) {
+  o = o || {};
+  const year = Number(o.year) || 2026;
+  DB.company = {
+    name: String(o.name || '').trim() || 'บริษัทของฉัน จำกัด',
+    nameEn: '',
+    taxId: String(o.taxId || '').trim(),
+    regNo: String(o.taxId || '').trim(),
+    address: String(o.address || '').trim(),
+    branch: '00000', branchName: 'สำนักงานใหญ่', phone: '',
+    fiscalYear: String(year + 543),
+    standard: 'TFRS for NPAEs',
+    bookkeeper: '', auditor: '',
+    paidUpCapital: 0, vatRegistered: true,
+  };
+  if (DB.company.taxId && !validTaxId(DB.company.taxId)) {
+    throw new DomainError('TAX_ID_INVALID',
+      'เลขประจำตัวผู้เสียภาษี ' + DB.company.taxId + ' ไม่ผ่านการตรวจหลักที่ 13',
+      'ตรวจเลขกับหนังสือรับรองของบริษัท หรือเว้นว่างไว้ก่อนแล้วมาแก้ทีหลัง');
+  }
+  loadChart();
+  loadPeriods(year);
+  DB.partners = []; DB.items = []; DB.employees = []; DB.assets = [];
+  DB.entries = []; DB.taxTx = [];
+  DB.docs = {
+    quotation: [], salesOrder: [], invoice: [], receipt: [], creditNote: [],
+    purchaseOrder: [], bill: [], payment: [], whtCert: [],
+    stockMove: [], payRun: [], depreciation: [], filing: [],
+  };
+  DB.seq = {}; DB.budget = []; DB.projects = []; DB.bankTxns = [];
+  DB.audit = []; DB.settings = { hardLockDate: null };
+  audit('company', 'blank', 'create', null, { name: DB.company.name, year: DB.company.fiscalYear });
+  return DB.company;
+}
+
 function buildSeed() {
   DB.company = {
     name: 'บริษัท ศรีวัฒนาการค้า จำกัด',
@@ -172,22 +233,8 @@ function buildSeed() {
     vatRegistered: true,
   };
 
-  DB.accounts = COA.map(function (r) {
-    return {
-      code: r[0], name: r[1], type: r[2], subType: r[3],
-      postable: !!r[4], requiresPartner: r[5] === 'partner',
-      level: r[0].endsWith('000') ? 1 : r[0].endsWith('00') ? 2 : 3,
-    };
-  });
-
-  DB.periods = [];
-  for (let m = 1; m <= 12; m++) {
-    const mm = String(m).padStart(2, '0');
-    DB.periods.push({
-      code: '2026-' + mm, start: '2026-' + mm + '-01',
-      end: endOfMonth('2026-' + mm + '-01'), status: 'open',
-    });
-  }
+  loadChart();
+  loadPeriods(2026);
 
   DB.partners = CUSTOMERS.map((c) => ({
     code:c[0], name:c[1], taxId:c[2], address:c[3], termDays:c[4],

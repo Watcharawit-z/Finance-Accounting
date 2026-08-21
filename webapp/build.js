@@ -2,7 +2,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const ORDER = ['engine.js', 'operations.js', 'seed.js', 'ui-core.js', 'ui-charts.js', 'ui-screens.js', 'ui-actions.js'];
+const ORDER = ['engine.js', 'operations.js', 'seed.js', 'ui-core.js', 'import.js', 'ui-charts.js', 'ui-screens.js', 'ui-actions.js'];
 const dir = path.join(__dirname, 'src');
 
 /* กันชื่อชนกันระหว่างไฟล์ เพราะทุกไฟล์จะอยู่ในสโคปเดียวกัน */

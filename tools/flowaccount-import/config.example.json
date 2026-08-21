@@ -1,0 +1,9 @@
+{
+  "clientId": "ใส่ client id จาก MyCompany → connection",
+  "clientSecret": "ใส่ client secret",
+  "baseUrl": "https://openapi.flowaccount.com/v3-alpha",
+  "tokenUrl": "https://openapi.flowaccount.com/token",
+  "scope": "openapi",
+  "culture": "th",
+  "pageSize": 100
+}

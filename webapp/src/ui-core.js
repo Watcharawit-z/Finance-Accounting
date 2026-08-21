@@ -9,6 +9,8 @@ const STATE = {
   filter: '',
   drill: null,        // บัญชีที่กำลังเจาะดู
   dashView: 'chart',  // แดชบอร์ด: กราฟ หรือ ตาราง
+  imp: null,          // สถานะการนำเข้าไฟล์
+  impResult: null,
 };
 const TODAY = '2026-07-31';
 
@@ -219,6 +221,7 @@ function navGroups() {
       ['pl', 'งบกำไรขาดทุน', null],
     ]},
     { g: 'ระบบ', items: [
+      ['import', 'นำเข้าข้อมูลจากระบบเดิม', null],
       ['audit', 'ร่องรอยการตรวจสอบ', null],
       ['about', 'เกี่ยวกับระบบนี้', null],
     ]},

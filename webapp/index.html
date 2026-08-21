@@ -256,6 +256,15 @@ table.fs thead th{background:transparent}
 }
 #tip.show{opacity:1}
 
+/* ---------- นำเข้าไฟล์ ---------- */
+.drop{margin:16px; border:2px dashed var(--rule); border-radius:var(--radius); background:var(--paper); transition:border-color .15s,background .15s}
+.drop.over{border-color:var(--accent); background:var(--accent-w)}
+.drop-in{padding:38px 20px; text-align:center; font-size:14px}
+.drop-in b{display:block; font-size:16px; margin-bottom:8px}
+.drop-in .dim{margin:8px 0; font-size:13px; line-height:1.65}
+td select{font:inherit; font-size:13px; height:32px; padding:0 8px; border:1px solid var(--rule); border-radius:4px; background:var(--panel); color:var(--ink); max-width:280px}
+.reco b.neg{color:var(--neg)}
+
 /* ---------- แจ้งเตือน ---------- */
 .toast{
   position:fixed; left:50%; bottom:26px; transform:translate(-50%,20px); z-index:80;
@@ -873,7 +882,11 @@ function settledUpto(kind, docNo, asOf) {
   DB.docs.payment.forEach((p) => { if (p.billNo === docNo && p.date <= asOf) v += p.gross; });
   return v;
 }
-const outstandingAsOf = (kind, d, asOf) => d.total - settledUpto(kind, d.no, asOf);
+/* bfPaid = ยอดที่ชำระไปแล้วก่อนวันตัดยอด ตอนย้ายข้อมูลเข้ามา
+   ในระบบเราไม่มีใบเสร็จรองรับส่วนนั้น จึงต้องหักแยกจากใบเสร็จที่เกิดหลังย้าย
+   ไม่งั้นถ้าใช้ d.paid ตรง ๆ จะถูกนับซ้ำเมื่อมีการรับชำระเพิ่มภายหลัง */
+const outstandingAsOf = (kind, d, asOf) =>
+  d.total - (d.bfPaid || 0) - settledUpto(kind, d.no, asOf);
 
 /* ---------- อายุหนี้ ---------- */
 function aging(kind, asOf) {
@@ -912,11 +925,12 @@ function reconciliationChecks(asOf) {
   const glDiff = balanceOf(() => true, asOf);
   checks.push({ code:'GL_BALANCED', label:'เดบิตรวม = เครดิตรวม ทั้งฐานข้อมูล', control:glDiff, sub:0, ok:glDiff === 0 });
 
-  // ★ เทียบเฉพาะรายการที่มาจากเอกสาร ไม่รวมใบสำคัญปิดภาษีสิ้นเดือน
-  //   ไม่งั้นหลังยื่นแบบแล้วบัญชีจะถูกเคลียร์เป็นศูนย์ และการเทียบจะไม่มีความหมาย
+  // ★ เทียบเฉพาะรายการที่มาจากเอกสารของงวดนี้จริง ๆ
+  //   - ไม่รวมใบสำคัญปิดภาษีสิ้นเดือน ไม่งั้นหลังยื่นแบบบัญชีจะถูกเคลียร์เป็นศูนย์ แล้วการเทียบไม่มีความหมาย
+  //   - ไม่รวมยอดยกมาจากระบบเดิม เพราะเป็นยอดสะสมก่อนเริ่มใช้ระบบ ไม่มีเอกสารในทะเบียนภาษีรองรับ
   const period = periodOf(asOf);
   const start = period + '-01', end = endOfMonth(start);
-  const notFiling = (e) => e.src !== 'filing';
+  const notFiling = (e) => e.src !== 'filing' && e.type !== 'opening';
 
   const vatOutReport = DB.taxTx.filter((t) => t.kind === 'vat_output' && t.period === period)
     .reduce((s, t) => s + t.tax, 0);
@@ -1753,6 +1767,67 @@ const ASSETS = [
 ];
 
 /* -------------------------------------------------------------- */
+/* ---------- ผังบัญชีและงวด — ใช้ร่วมกันทั้งข้อมูลตัวอย่างและบริษัทเปล่า ---------- */
+function loadChart() {
+  DB.accounts = COA.map(function (r) {
+    return {
+      code: r[0], name: r[1], type: r[2], subType: r[3],
+      postable: !!r[4], requiresPartner: r[5] === 'partner',
+      level: r[0].endsWith('000') ? 1 : r[0].endsWith('00') ? 2 : 3,
+    };
+  });
+}
+
+function loadPeriods(year) {
+  DB.periods = [];
+  for (let m = 1; m <= 12; m++) {
+    const mm = String(m).padStart(2, '0');
+    DB.periods.push({
+      code: year + '-' + mm, start: year + '-' + mm + '-01',
+      end: endOfMonth(year + '-' + mm + '-01'), status: 'open',
+    });
+  }
+}
+
+/**
+ * เริ่มจากบริษัทเปล่า — ผังบัญชีและงวดครบ แต่ไม่มีรายการใด ๆ
+ * ใช้เมื่อจะย้ายข้อมูลจริงเข้ามา จะได้ไม่ปนกับข้อมูลตัวอย่าง
+ */
+function buildBlank(o) {
+  o = o || {};
+  const year = Number(o.year) || 2026;
+  DB.company = {
+    name: String(o.name || '').trim() || 'บริษัทของฉัน จำกัด',
+    nameEn: '',
+    taxId: String(o.taxId || '').trim(),
+    regNo: String(o.taxId || '').trim(),
+    address: String(o.address || '').trim(),
+    branch: '00000', branchName: 'สำนักงานใหญ่', phone: '',
+    fiscalYear: String(year + 543),
+    standard: 'TFRS for NPAEs',
+    bookkeeper: '', auditor: '',
+    paidUpCapital: 0, vatRegistered: true,
+  };
+  if (DB.company.taxId && !validTaxId(DB.company.taxId)) {
+    throw new DomainError('TAX_ID_INVALID',
+      'เลขประจำตัวผู้เสียภาษี ' + DB.company.taxId + ' ไม่ผ่านการตรวจหลักที่ 13',
+      'ตรวจเลขกับหนังสือรับรองของบริษัท หรือเว้นว่างไว้ก่อนแล้วมาแก้ทีหลัง');
+  }
+  loadChart();
+  loadPeriods(year);
+  DB.partners = []; DB.items = []; DB.employees = []; DB.assets = [];
+  DB.entries = []; DB.taxTx = [];
+  DB.docs = {
+    quotation: [], salesOrder: [], invoice: [], receipt: [], creditNote: [],
+    purchaseOrder: [], bill: [], payment: [], whtCert: [],
+    stockMove: [], payRun: [], depreciation: [], filing: [],
+  };
+  DB.seq = {}; DB.budget = []; DB.projects = []; DB.bankTxns = [];
+  DB.audit = []; DB.settings = { hardLockDate: null };
+  audit('company', 'blank', 'create', null, { name: DB.company.name, year: DB.company.fiscalYear });
+  return DB.company;
+}
+
 function buildSeed() {
   DB.company = {
     name: 'บริษัท ศรีวัฒนาการค้า จำกัด',
@@ -1770,22 +1845,8 @@ function buildSeed() {
     vatRegistered: true,
   };
 
-  DB.accounts = COA.map(function (r) {
-    return {
-      code: r[0], name: r[1], type: r[2], subType: r[3],
-      postable: !!r[4], requiresPartner: r[5] === 'partner',
-      level: r[0].endsWith('000') ? 1 : r[0].endsWith('00') ? 2 : 3,
-    };
-  });
-
-  DB.periods = [];
-  for (let m = 1; m <= 12; m++) {
-    const mm = String(m).padStart(2, '0');
-    DB.periods.push({
-      code: '2026-' + mm, start: '2026-' + mm + '-01',
-      end: endOfMonth('2026-' + mm + '-01'), status: 'open',
-    });
-  }
+  loadChart();
+  loadPeriods(2026);
 
   DB.partners = CUSTOMERS.map((c) => ({
     code:c[0], name:c[1], taxId:c[2], address:c[3], termDays:c[4],
@@ -2066,6 +2127,8 @@ const STATE = {
   filter: '',
   drill: null,        // บัญชีที่กำลังเจาะดู
   dashView: 'chart',  // แดชบอร์ด: กราฟ หรือ ตาราง
+  imp: null,          // สถานะการนำเข้าไฟล์
+  impResult: null,
 };
 const TODAY = '2026-07-31';
 
@@ -2276,6 +2339,7 @@ function navGroups() {
       ['pl', 'งบกำไรขาดทุน', null],
     ]},
     { g: 'ระบบ', items: [
+      ['import', 'นำเข้าข้อมูลจากระบบเดิม', null],
       ['audit', 'ร่องรอยการตรวจสอบ', null],
       ['about', 'เกี่ยวกับระบบนี้', null],
     ]},
@@ -2310,6 +2374,384 @@ function render() {
   const main = document.getElementById('main');
   main.innerHTML = html;
   main.scrollTop = 0;
+}
+
+
+/* ===== import.js ===== */
+/* ===================================================================
+   นำเข้าข้อมูลจากระบบบัญชีเดิม
+   อ่านได้ทั้งไฟล์ Excel (.xlsx) ไฟล์ CSV และแฟ้มข้อมูลจากตัวดึง FlowAccount
+   ทุกจำนวนเงินผ่าน M() เสมอ ไม่มีการคำนวณต่อจากทศนิยมลอยตัว
+   =================================================================== */
+
+/* ---------- CSV ---------- */
+function parseCsv(text) {
+  const rows = [];
+  let row = [], cell = '', q = false;
+  const src = String(text).replace(/^﻿/, '');
+  for (let i = 0; i < src.length; i++) {
+    const c = src[i];
+    if (q) {
+      if (c === '"') { if (src[i + 1] === '"') { cell += '"'; i++; } else q = false; }
+      else cell += c;
+    } else if (c === '"') q = true;
+    else if (c === ',' || c === '\t') { row.push(cell); cell = ''; }
+    else if (c === '\n') { row.push(cell); rows.push(row); row = []; cell = ''; }
+    else if (c !== '\r') cell += c;
+  }
+  if (cell !== '' || row.length) { row.push(cell); rows.push(row); }
+  return rows.filter((r) => r.some((x) => String(x).trim() !== ''));
+}
+
+/* ---------- .xlsx คือไฟล์ zip ที่ข้างในเป็น XML ---------- */
+const u16 = (b, o) => b[o] | (b[o + 1] << 8);
+const u32 = (b, o) => (b[o] | (b[o + 1] << 8) | (b[o + 2] << 16) | (b[o + 3] << 24)) >>> 0;
+
+async function inflateRaw(bytes) {
+  if (typeof DecompressionStream === 'undefined') {
+    throw new DomainError('XLSX_UNSUPPORTED',
+      'เบราว์เซอร์นี้ยังแตกไฟล์ .xlsx ไม่ได้',
+      'เปิดไฟล์ใน Excel แล้วสั่ง Save As เป็น CSV จากนั้นลากไฟล์ CSV มาวางแทน');
+  }
+  const ds = new DecompressionStream('deflate-raw');
+  const stream = new Blob([bytes]).stream().pipeThrough(ds);
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+
+/** อ่านสารบัญกลางของ zip แล้วคลายเฉพาะไฟล์ที่ต้องใช้ */
+async function unzipEntries(buf, wanted) {
+  const b = new Uint8Array(buf);
+  let eocd = -1;
+  for (let i = b.length - 22; i >= 0 && i > b.length - 66000; i--) {
+    if (u32(b, i) === 0x06054b50) { eocd = i; break; }
+  }
+  if (eocd < 0) {
+    throw new DomainError('NOT_A_ZIP', 'ไฟล์นี้ไม่ใช่ไฟล์ .xlsx ที่อ่านได้',
+      'ตรวจว่าเป็นไฟล์ Excel จริง ไม่ใช่ .xls รุ่นเก่าหรือไฟล์ที่เสียหาย');
+  }
+  let p = u32(b, eocd + 16);
+  const count = u16(b, eocd + 10);
+  const out = {};
+  for (let i = 0; i < count; i++) {
+    if (u32(b, p) !== 0x02014b50) break;
+    const nameLen = u16(b, p + 28), extraLen = u16(b, p + 30), cmtLen = u16(b, p + 32);
+    const method = u16(b, p + 10), csize = u32(b, p + 20), local = u32(b, p + 42);
+    const name = new TextDecoder().decode(b.subarray(p + 46, p + 46 + nameLen));
+    p += 46 + nameLen + extraLen + cmtLen;
+    if (wanted && !wanted(name)) continue;
+    const lnLen = u16(b, local + 26), leLen = u16(b, local + 28);
+    const start = local + 30 + lnLen + leLen;
+    const raw = b.subarray(start, start + csize);
+    out[name] = method === 0 ? raw : await inflateRaw(raw);
+  }
+  return out;
+}
+
+const xmlDoc = (text) => new DOMParser().parseFromString(text, 'application/xml');
+
+function parseSharedStrings(xml) {
+  if (!xml) return [];
+  const doc = xmlDoc(xml);
+  return Array.from(doc.getElementsByTagName('si')).map(function (si) {
+    return Array.from(si.getElementsByTagName('t')).map((t) => t.textContent).join('');
+  });
+}
+
+const colIndex = (ref) => {
+  let n = 0;
+  for (let i = 0; i < ref.length; i++) {
+    const c = ref.charCodeAt(i);
+    if (c < 65 || c > 90) break;
+    n = n * 26 + (c - 64);
+  }
+  return n - 1;
+};
+
+function parseSheetXml(xml, shared) {
+  const doc = xmlDoc(xml);
+  const rows = [];
+  Array.from(doc.getElementsByTagName('row')).forEach(function (r) {
+    const cells = [];
+    Array.from(r.getElementsByTagName('c')).forEach(function (c) {
+      const at = colIndex(c.getAttribute('r') || 'A');
+      const t = c.getAttribute('t');
+      let v = '';
+      if (t === 'inlineStr') {
+        v = Array.from(c.getElementsByTagName('t')).map((x) => x.textContent).join('');
+      } else {
+        const node = c.getElementsByTagName('v')[0];
+        v = node ? node.textContent : '';
+        if (t === 's') v = shared[Number(v)] || '';
+      }
+      cells[at >= 0 ? at : cells.length] = v;
+    });
+    for (let i = 0; i < cells.length; i++) if (cells[i] === undefined) cells[i] = '';
+    rows.push(cells);
+  });
+  return rows.filter((r) => r.some((x) => String(x).trim() !== ''));
+}
+
+async function readXlsx(buf) {
+  const files = await unzipEntries(buf, (n) =>
+    n === 'xl/sharedStrings.xml' || /^xl\/worksheets\/sheet\d+\.xml$/.test(n));
+  const dec = new TextDecoder();
+  const sheetName = Object.keys(files).filter((n) => n.indexOf('worksheets') >= 0).sort()[0];
+  if (!sheetName) throw new DomainError('NO_SHEET', 'ไม่พบแผ่นงานในไฟล์นี้');
+  const shared = parseSharedStrings(files['xl/sharedStrings.xml'] ? dec.decode(files['xl/sharedStrings.xml']) : null);
+  return parseSheetXml(dec.decode(files[sheetName]), shared);
+}
+
+/* ---------- ตัวเลขจากไฟล์ภายนอก ---------- */
+function parseAmount(s) {
+  let t = String(s === null || s === undefined ? '' : s).trim();
+  if (!t || t === '-' || t === '—') return '0';
+  let neg = false;
+  if (/^\(.*\)$/.test(t)) { neg = true; t = t.slice(1, -1); }
+  t = t.replace(/[,\s฿]/g, '').replace(/^บาท/, '');
+  if (t.startsWith('-')) { neg = !neg; t = t.slice(1); }
+  if (!/^\d*(\.\d+)?$/.test(t) || t === '') return null;
+  return (neg ? '-' : '') + t;
+}
+
+/* ---------- เดาคอลัมน์จากหัวตาราง ---------- */
+const COL_HINTS = {
+  code:   ['รหัสบัญชี', 'เลขที่บัญชี', 'รหัส', 'account code', 'code', 'accountcode'],
+  name:   ['ชื่อบัญชี', 'ชื่อ', 'account name', 'description', 'name'],
+  debit:  ['เดบิต', 'debit', 'dr'],
+  credit: ['เครดิต', 'credit', 'cr'],
+};
+const norm = (s) => String(s || '').toLowerCase().replace(/\s+/g, '');
+
+function detectColumns(rows) {
+  let headerRow = -1, best = 0, map = {};
+  rows.slice(0, 25).forEach(function (r, i) {
+    const found = {};
+    r.forEach(function (cell, j) {
+      const n = norm(cell);
+      if (!n) return;
+      Object.keys(COL_HINTS).forEach(function (k) {
+        if (COL_HINTS[k].some((h) => n.indexOf(norm(h)) >= 0)) {
+          // งบทดลองมีเดบิต/เครดิตหลายคู่ เอาคู่ขวาสุดคือยอดคงเหลือปลายงวด
+          if (k === 'debit' || k === 'credit' || found[k] === undefined) found[k] = j;
+        }
+      });
+    });
+    const score = Object.keys(found).length;
+    if (score > best) { best = score; headerRow = i; map = found; }
+  });
+  return { headerRow, map, ok: best >= 3 };
+}
+
+/* ---------- อ่านงบทดลอง ---------- */
+function readTrialBalance(rows, map, headerRow) {
+  const out = [], skipped = [];
+  rows.slice(headerRow + 1).forEach(function (r, i) {
+    const code = String(r[map.code] === undefined ? '' : r[map.code]).trim();
+    const name = String(r[map.name] === undefined ? '' : r[map.name]).trim();
+    const dr = parseAmount(r[map.debit]);
+    const cr = parseAmount(r[map.credit]);
+    if (!code && !name) return;
+    if (dr === null || cr === null) { skipped.push({ line: headerRow + 2 + i, code, name, why: 'ตัวเลขอ่านไม่ออก' }); return; }
+    const debit = M(dr), credit = M(cr);
+    if (debit === 0 && credit === 0) return;
+    if (/^(รวม|total|ยอดรวม)/i.test(name) || /^(รวม|total)/i.test(code)) {
+      skipped.push({ line: headerRow + 2 + i, code, name, why: 'บรรทัดผลรวม ข้ามอัตโนมัติ' });
+      return;
+    }
+    out.push({ code, name, debit, credit });
+  });
+  return { rows: out, skipped };
+}
+
+/* ---------- จับคู่กับผังบัญชีของเรา ---------- */
+function matchAccount(code, name) {
+  const byCode = DB.accounts.find((a) => a.postable && a.code === String(code).trim());
+  if (byCode) return byCode.code;
+  const n = norm(name);
+  if (!n) return null;
+  const byName = DB.accounts.find((a) => a.postable && norm(a.name) === n);
+  return byName ? byName.code : null;
+}
+
+/**
+ * ตรวจก่อนนำเข้า — บอกให้ครบว่าจะเกิดอะไรขึ้น ก่อนแตะบัญชีจริง
+ * overrides: { 'รหัสเดิม': 'รหัสในผังบัญชีเรา' }
+ */
+function previewOpening(tbRows, overrides) {
+  overrides = overrides || {};
+  const matched = [], unmatched = [];
+  let totalDr = 0, totalCr = 0;
+  tbRows.forEach(function (r) {
+    const key = r.code || r.name;
+    const target = overrides[key] || matchAccount(r.code, r.name);
+    totalDr += r.debit; totalCr += r.credit;
+    if (target) matched.push({ ...r, target, targetName: acc(target).name });
+    else unmatched.push(r);
+  });
+  return {
+    matched, unmatched, totalDr, totalCr,
+    diff: totalDr - totalCr,
+    balanced: totalDr === totalCr,
+    ready: totalDr === totalCr && unmatched.length === 0 && matched.length > 0,
+  };
+}
+
+function importOpeningBalances(tbRows, date, overrides) {
+  const p = previewOpening(tbRows, overrides);
+  if (!p.matched.length && !p.unmatched.length) {
+    throw new DomainError('NOTHING_TO_IMPORT', 'ไม่พบบรรทัดที่มียอดในไฟล์นี้');
+  }
+  if (!p.balanced) {
+    throw new DomainError('IMPORT_UNBALANCED',
+      'งบทดลองในไฟล์ไม่สมดุล เดบิตรวม ' + fmt(p.totalDr) + ' เครดิตรวม ' + fmt(p.totalCr)
+        + ' ต่างกัน ' + fmt(p.diff),
+      'ตรวจว่าเลือกคอลัมน์เดบิตและเครดิตถูกคู่ และไฟล์ครอบคลุมทุกบัญชี');
+  }
+  if (p.unmatched.length) {
+    throw new DomainError('ACCOUNT_UNMATCHED',
+      'ยังจับคู่บัญชีไม่ครบ เหลือ ' + p.unmatched.length + ' บัญชี',
+      'เลือกบัญชีปลายทางให้ครบทุกบรรทัดก่อนนำเข้า');
+  }
+  const srcId = 'opening|' + date;
+  if (DB.entries.find((e) => e.src === 'import' && e.srcId === srcId)) {
+    throw new DomainError('ALREADY_IMPORTED',
+      'นำเข้ายอดยกมา ณ ' + thDate(date) + ' ไปแล้ว',
+      'ถ้าต้องการนำเข้าใหม่ ให้กลับรายการใบสำคัญเดิมก่อน');
+  }
+  // รวมบรรทัดที่ชี้ไปบัญชีเดียวกัน แล้วสุทธิเป็นด้านเดียว
+  const net = {};
+  p.matched.forEach(function (r) { net[r.target] = (net[r.target] || 0) + r.debit - r.credit; });
+  const lines = Object.keys(net).filter((c) => net[c] !== 0).map(function (c) {
+    const a = acc(c);
+    const l = net[c] > 0 ? { acc: c, dr: net[c] } : { acc: c, cr: -net[c] };
+    if (a.requiresPartner) l.partner = 'OPENING';
+    return l;
+  });
+  if (!DB.partners.find((x) => x.code === 'OPENING')) {
+    DB.partners.push({ code:'OPENING', name:'ยอดยกมาจากระบบเดิม', taxId:null, address:'',
+      branch:'00000', entityType:'juristic', kind:'customer', termDays:0, active:false });
+  }
+  const je = post({
+    type: 'opening', date: date,
+    desc: 'ยอดยกมาจากระบบเดิม ณ ' + thDate(date),
+    src: 'import', srcId: srcId,
+    lines: lines,
+  });
+  audit('import', srcId, 'run', null, { accounts: lines.length, total: fmt(p.totalDr) });
+  return { entry: je, accounts: lines.length, total: p.totalDr };
+}
+
+/* ===================================================================
+   แฟ้มข้อมูลจากตัวดึง FlowAccount (duly-import/1)
+   =================================================================== */
+function validatePackage(pkg) {
+  if (!pkg || pkg.format !== 'duly-import/1') {
+    throw new DomainError('BAD_PACKAGE',
+      'ไฟล์นี้ไม่ใช่แฟ้มข้อมูลของระบบ (ต้องเป็น duly-import/1)',
+      'ใช้ไฟล์ที่ได้จากคำสั่ง flowaccount-import convert');
+  }
+  if (!pkg.cutoff || !/^\d{4}-\d{2}-\d{2}$/.test(pkg.cutoff)) {
+    throw new DomainError('BAD_CUTOFF', 'แฟ้มข้อมูลไม่ได้ระบุวันตัดยอดที่ถูกต้อง');
+  }
+  return pkg;
+}
+
+function upsertPartner(p) {
+  const kind = p.kind === 'vendor' ? 'vendor' : 'customer';
+  const rec = {
+    code: p.code, name: p.name, taxId: p.taxId || null, address: p.address || '',
+    branch: p.branch || (p.entityType === 'individual' ? null : '00000'),
+    entityType: p.entityType === 'individual' ? 'individual' : 'juristic',
+    kind: kind, termDays: Number(p.termDays || 0), whtCode: p.whtCode || null,
+    creditLimit: M(p.creditLimit || '0'), active: true,
+  };
+  const at = DB.partners.findIndex((x) => x.code === rec.code);
+  if (at >= 0) { DB.partners[at] = { ...DB.partners[at], ...rec }; return 0; }
+  DB.partners.push(rec);
+  return 1;
+}
+
+function upsertItem(i) {
+  const rec = {
+    code: i.code, name: i.name, category: i.category || 'ทั่วไป', uom: i.uom || 'หน่วย',
+    type: i.type === 'service' ? 'service' : 'stock',
+    avgCost: M(i.avgCost || '0'), price: M(i.price || '0'),
+    qty: Number(i.qty || 0), reorder: Number(i.reorder || 0),
+  };
+  rec.value = rec.avgCost * rec.qty;
+  const at = DB.items.findIndex((x) => x.code === rec.code);
+  if (at >= 0) { DB.items[at] = { ...DB.items[at], ...rec }; return 0; }
+  DB.items.push(rec);
+  return 1;
+}
+
+/** เอกสารค้างยกมา — เป็นบัญชีย่อยเท่านั้น ไม่ลงบัญชีซ้ำ เพราะยอดอยู่ในงบทดลองแล้ว */
+function importOpenDocs(pkg, entryNo) {
+  let inv = 0, bill = 0;
+  (pkg.openInvoices || []).forEach(function (d) {
+    if (DB.docs.invoice.find((x) => x.no === d.no)) return;
+    const base = M(d.base || '0'), vat = M(d.vat || '0');
+    const total = d.total !== undefined ? M(d.total) : base + vat;
+    DB.docs.invoice.push({
+      no: d.no, legacyNo: d.legacyNo || d.no, date: d.date, due: d.due || d.date,
+      partnerCode: d.partnerCode, partnerName: d.partnerName,
+      snap: { name:d.partnerName, taxId:d.taxId || null, branch:d.branch || '00000', address:d.address || '' },
+      lines: [{ desc:'ยอดค้างยกมาจากระบบเดิม', qty:1, price:base, amount:base, taxCode:'EXEMPT', uom:'', itemCode:null }],
+      base: base, vat: vat, total: total,
+      paid: M(d.paid || '0'), bfPaid: M(d.paid || '0'), credited: M(d.credited || '0'),
+      status: 'issued', entryNo: entryNo, etax: 'not_applicable', broughtForward: true,
+    });
+    inv++;
+  });
+  (pkg.openBills || []).forEach(function (d) {
+    if (DB.docs.bill.find((x) => x.no === d.no)) return;
+    const base = M(d.base || '0'), vat = M(d.vat || '0');
+    const total = d.total !== undefined ? M(d.total) : base + vat;
+    DB.docs.bill.push({
+      no: d.no, legacyNo: d.legacyNo || d.no, date: d.date, due: d.due || d.date,
+      vendorNo: d.vendorNo || d.no, partnerCode: d.partnerCode, partnerName: d.partnerName,
+      lines: [{ desc:'ยอดค้างยกมาจากระบบเดิม', qty:1, price:base, amount:base, itemCode:null }],
+      base: base, vat: vat, total: total, claimable: true,
+      paid: M(d.paid || '0'), bfPaid: M(d.paid || '0'), status: 'issued', entryNo: entryNo,
+      whtCode: d.whtCode || null, broughtForward: true,
+    });
+    bill++;
+  });
+  return { inv, bill };
+}
+
+function importPackage(pkg, overrides) {
+  validatePackage(pkg);
+  const before = { partners: DB.partners.length, items: DB.items.length };
+  let newPartners = 0, newItems = 0;
+  (pkg.partners || []).forEach((p) => { newPartners += upsertPartner(p); });
+  (pkg.items || []).forEach((i) => { newItems += upsertItem(i); });
+
+  let opening = null;
+  if (pkg.trialBalance && pkg.trialBalance.length) {
+    const tb = pkg.trialBalance.map((r) => ({
+      code: String(r.code || ''), name: String(r.name || ''),
+      debit: M(r.debit || '0'), credit: M(r.credit || '0'),
+    }));
+    opening = importOpeningBalances(tb, pkg.cutoff, overrides);
+  }
+  const docs = importOpenDocs(pkg, opening ? opening.entry.no : null);
+
+  const asOf = pkg.cutoff;
+  const rec = reconciliationChecks(asOf);
+  audit('import', 'package|' + pkg.cutoff, 'run', null, {
+    partners: newPartners, items: newItems, invoices: docs.inv, bills: docs.bill,
+  });
+  return {
+    cutoff: pkg.cutoff, source: pkg.source || 'ไม่ระบุ',
+    partners: newPartners, partnersSeen: (pkg.partners || []).length,
+    items: newItems, itemsSeen: (pkg.items || []).length,
+    invoices: docs.inv, bills: docs.bill,
+    opening: opening,
+    warnings: pkg.warnings || [],
+    checks: rec.checks, allPassed: rec.allPassed,
+    before: before,
+  };
 }
 
 
@@ -3599,7 +4041,150 @@ const SCREENS = {
   projects: scProjects, budget: scBudget,
   bs: scBalanceSheet, pl: scIncomeStatement,
   audit: scAudit, about: scAbout,
+  import: scImport, importResult: scImportResult,
 };
+
+/* ===================================================================
+   นำเข้าข้อมูลจากระบบเดิม
+   =================================================================== */
+function scImport() {
+  const IMP = STATE.imp || {};
+  const accOptions = '<option value="">— เลือกบัญชีปลายทาง —</option>'
+    + DB.accounts.filter((a) => a.postable)
+      .map((a) => '<option value="' + a.code + '">' + esc(a.code + ' ' + a.name) + '</option>').join('');
+
+  const step1 = card({
+    title:'นำเข้าข้อมูลจากระบบบัญชีเดิม',
+    sub:'รองรับไฟล์ .xlsx และ .csv ที่ส่งออกจากโปรแกรมบัญชีเดิม และแฟ้ม .json จากตัวดึงข้อมูล FlowAccount',
+    body:'<div class="drop" id="drop">'
+      + '<input type="file" id="file" accept=".xlsx,.csv,.txt,.json" hidden>'
+      + '<div class="drop-in">'
+      + '<b>ลากไฟล์มาวางที่นี่</b>'
+      + '<div class="dim">หรือ</div>'
+      + btn('pick:file', 'เลือกไฟล์จากเครื่อง', 'primary')
+      + '<div class="dim" style="margin-top:14px">'
+      + 'งบทดลอง — FlowAccount: รายงานด้านบัญชี → งบทดลอง → เลือกรอบระยะเวลา → ดาวน์โหลด Excel<br>'
+      + 'ผังบัญชี — บริหารบัญชี → ผังบัญชี → เพิ่มเติม → ดาวน์โหลด Excel</div>'
+      + '</div></div>'
+      + (IMP.error ? '<div class="note warn">' + esc(IMP.error) + '</div>' : ''),
+    foot:'ไฟล์ถูกอ่านในเครื่องคุณเท่านั้น ไม่ได้อัปโหลดไปที่ใด',
+  });
+
+  const blank = card({
+    title:'เริ่มจากบริษัทเปล่า',
+    sub:'ล้างข้อมูลตัวอย่างทิ้ง เหลือแต่ผังบัญชีและงวดบัญชี พร้อมรับข้อมูลจริงของคุณ',
+    actions: btn('blank:new', 'ตั้งค่าบริษัทใหม่'),
+    body:'<div class="prose"><p>ก่อนย้ายข้อมูลจริงเข้ามา ควรเริ่มจากบริษัทเปล่าก่อน '
+      + 'ไม่งั้นตัวเลขของคุณจะปนกับข้อมูลตัวอย่างที่ระบบสร้างไว้ให้ลอง '
+      + 'และยอดคุมจะไม่มีทางตรง</p>'
+      + '<p class="dim">ตอนนี้กำลังใช้ข้อมูลของ <b>' + esc(DB.company.name) + '</b> '
+      + 'มีใบสำคัญ ' + DB.entries.length + ' ใบ · ใบกำกับภาษี ' + DB.docs.invoice.length + ' ฉบับ</p></div>',
+    foot:'ข้อมูลเดิมทั้งหมดจะหายถาวร ระบบจะถามยืนยันอีกครั้งก่อนทำ',
+  });
+
+  if (!IMP.rows) return step1 + blank;
+
+  /* ---- อ่านไฟล์ได้แล้ว ให้เลือกคอลัมน์ ---- */
+  const head = IMP.rows[IMP.headerRow] || [];
+  const colOpts = (sel) => '<option value="">— ไม่ใช้ —</option>'
+    + head.map((h, i) => '<option value="' + i + '"' + (String(i) === String(sel) ? ' selected' : '') + '>'
+        + esc((h || '').trim() || 'คอลัมน์ที่ ' + (i + 1)) + '</option>').join('');
+
+  const preview = IMP.tb ? previewOpening(IMP.tb.rows, IMP.overrides || {}) : null;
+
+  const step2 = card({
+    title:'ตรวจไฟล์ก่อนนำเข้า',
+    sub: esc(IMP.name) + ' · ' + IMP.rows.length + ' แถว · หัวตารางอยู่แถวที่ ' + (IMP.headerRow + 1),
+    actions: btn('imp:reset', 'เลือกไฟล์ใหม่'),
+    body:'<div class="flds">'
+      + '<div class="fld-w"><label for="c_code">คอลัมน์รหัสบัญชี</label><select id="c_code" class="impcol" data-k="code">' + colOpts(IMP.map.code) + '</select></div>'
+      + '<div class="fld-w"><label for="c_name">คอลัมน์ชื่อบัญชี</label><select id="c_name" class="impcol" data-k="name">' + colOpts(IMP.map.name) + '</select></div>'
+      + '<div class="fld-w"><label for="c_debit">คอลัมน์เดบิต</label><select id="c_debit" class="impcol" data-k="debit">' + colOpts(IMP.map.debit) + '</select></div>'
+      + '<div class="fld-w"><label for="c_credit">คอลัมน์เครดิต</label><select id="c_credit" class="impcol" data-k="credit">' + colOpts(IMP.map.credit) + '</select></div>'
+      + field({ name:'cutoff', label:'วันตัดยอด (ยอดยกมาจะลงบัญชีวันนี้)', type:'date',
+          value: IMP.cutoff || pStart(), hint:'ต้องอยู่ในงวดที่ยังเปิดอยู่' })
+      + '</div>'
+      + '<div class="sub-h">ตัวอย่าง 8 แถวแรกที่อ่านได้</div>'
+      + tbl({
+          cols:[{t:'รหัส'},{t:'ชื่อบัญชี'},{t:'เดบิต',a:'r'},{t:'เครดิต',a:'r'},{t:'จับคู่กับ'}],
+          rows: (IMP.tb ? IMP.tb.rows.slice(0, 8) : []).map(function (r) {
+            const t = (IMP.overrides || {})[r.code || r.name] || matchAccount(r.code, r.name);
+            return [{mono:r.code}, r.name, {n:r.debit}, {n:r.credit},
+              t ? {dim: t + ' ' + acc(t).name} : {st:['late','ยังไม่จับคู่']}];
+          }),
+          empty:'อ่านบรรทัดที่มียอดไม่ได้เลย ลองเลือกคอลัมน์ใหม่',
+        })
+      + (IMP.tb && IMP.tb.skipped.length
+          ? '<div class="note">ข้ามไป ' + IMP.tb.skipped.length + ' แถว: '
+            + esc(IMP.tb.skipped.slice(0, 4).map((s) => 'แถว ' + s.line + ' (' + s.why + ')').join(', '))
+            + (IMP.tb.skipped.length > 4 ? ' และอื่น ๆ' : '') + '</div>'
+          : ''),
+  });
+
+  if (!preview) return step1 + step2 + blank;
+
+  const step3 = card({
+    title:'สรุปสิ่งที่จะเกิดขึ้น',
+    sub:'ยังไม่มีอะไรถูกบันทึกจนกว่าจะกดปุ่มนำเข้า',
+    actions: btn('imp:run', 'นำเข้ายอดยกมา', preview.ready ? 'primary' : 'disabled'),
+    body:'<div class="reco">'
+      + '<div><span>บัญชีที่จับคู่ได้</span><b>' + preview.matched.length + ' บัญชี</b></div>'
+      + '<div><span>บัญชีที่ยังจับคู่ไม่ได้</span><b class="' + (preview.unmatched.length ? 'neg' : '') + '">'
+        + preview.unmatched.length + ' บัญชี</b></div>'
+      + '<div><span>เดบิตรวม</span><b>' + fmt(preview.totalDr) + '</b></div>'
+      + '<div><span>เครดิตรวม</span><b>' + fmt(preview.totalCr) + '</b></div>'
+      + '<div class="gt"><span>ผลต่าง</span><b class="' + (preview.balanced ? '' : 'neg') + '">'
+        + fmt(preview.diff) + '</b></div></div>'
+      + (preview.unmatched.length
+          ? '<div class="sub-h">เลือกบัญชีปลายทางให้ครบก่อนนำเข้า</div>'
+            + tbl({
+                cols:[{t:'รหัสเดิม'},{t:'ชื่อบัญชีเดิม'},{t:'เดบิต',a:'r'},{t:'เครดิต',a:'r'},{t:'ลงบัญชีของเราที่'}],
+                rows: preview.unmatched.map((r) => [{mono:r.code}, r.name, {n:r.debit}, {n:r.credit},
+                  {html:'<select class="impmap" data-key="' + esc(r.code || r.name) + '">' + accOptions + '</select>'}]),
+              })
+          : '')
+      + (preview.balanced ? '' : '<div class="note warn">เดบิตรวมไม่เท่ากับเครดิตรวม '
+          + 'มักเกิดจากเลือกคอลัมน์ผิดคู่ — งบทดลองมักมีทั้งคู่ยอดยกมา คู่เคลื่อนไหว และคู่ยอดคงเหลือ '
+          + 'ให้เลือกคู่ยอดคงเหลือปลายงวด</div>'),
+    foot: preview.ready
+      ? 'ระบบจะสร้างใบสำคัญ "ยอดยกมา" หนึ่งใบ ลงวันที่ตามที่เลือก แก้ไม่ได้ ถ้าผิดต้องกลับรายการ'
+      : 'ยังนำเข้าไม่ได้ — ' + (!preview.balanced ? 'งบทดลองไม่สมดุล' : 'ยังจับคู่บัญชีไม่ครบ'),
+  });
+
+  return step1 + step2 + step3 + blank;
+}
+
+function scImportResult() {
+  const r = STATE.impResult;
+  if (!r) { STATE.screen = 'import'; return scImport(); }
+  return card({
+    title:'นำเข้าข้อมูลเรียบร้อย',
+    sub:'จากระบบ ' + r.source + ' ตัดยอด ณ ' + thDate(r.cutoff),
+    actions: btn('go:tb', 'ดูงบทดลอง', 'primary') + btn('go:import', 'นำเข้าไฟล์อื่นต่อ'),
+    body: kpi([
+      { label:'คู่ค้าที่เพิ่มใหม่', value: r.partners + ' / ' + r.partnersSeen + ' ราย' },
+      { label:'สินค้าที่เพิ่มใหม่', value: r.items + ' / ' + r.itemsSeen + ' รายการ' },
+      { label:'ลูกหนี้ค้างยกมา', value: r.invoices + ' ใบ' },
+      { label:'เจ้าหนี้ค้างยกมา', value: r.bills + ' รายการ' },
+    ])
+    + (r.opening ? '<div class="reco"><div><span>ใบสำคัญยอดยกมา</span><b>' + esc(r.opening.entry.no) + '</b></div>'
+        + '<div><span>จำนวนบัญชี</span><b>' + r.opening.accounts + '</b></div>'
+        + '<div class="gt"><span>ยอดรวมด้านเดบิต</span><b>' + fmt(r.opening.total) + '</b></div></div>' : '')
+    + '<div class="sub-h">ตรวจยอดคุมหลังนำเข้า</div>'
+    + '<ul class="checks">' + r.checks.map((c) =>
+        '<li><span class="dot ' + (c.ok ? 'good' : 'bad') + '"></span>' + esc(c.label)
+        + '<span class="grow"></span><span class="' + (c.ok ? 'dim' : 'neg') + '">'
+        + (c.ok ? 'ตรงกัน' : 'ต่าง ' + fmt(c.control - c.sub)) + '</span></li>').join('') + '</ul>'
+    + (r.warnings.length
+        ? '<div class="sub-h">ข้อสังเกตจากตัวดึงข้อมูล (' + r.warnings.length + ')</div>'
+          + tbl({ cols:[{t:'เอกสาร'},{t:'เรื่อง'}],
+                  rows: r.warnings.slice(0, 50).map((w) => [{mono:w.doc || '—'}, w.message || String(w)]) })
+        : ''),
+    foot: r.allPassed
+      ? 'ยอดคุมผ่านครบทุกข้อ ข้อมูลที่ย้ายมาสอดคล้องกันทั้งบัญชีคุมและบัญชีย่อย'
+      : 'มียอดคุมที่ยังไม่ตรง — แปลว่าย้ายมาไม่ครบ ตรวจรายการข้างต้นก่อนใช้งานจริง',
+  });
+}
 
 
 /* ===== ui-actions.js ===== */
@@ -3905,6 +4490,29 @@ function dispatch(act) {
   if (head === 'entry')   { STATE.screen = 'journals'; STATE.sel = arg; render(); return; }
   if (head === 'print')   { window.print(); return; }
   if (head === 'view')    { STATE.dashView = arg; render(); return; }
+  if (head === 'pick')    { document.getElementById('file').click(); return; }
+  if (head === 'blank')   { modalBlank(); return; }
+  if (head === 'imp') {
+    if (arg === 'reset') { STATE.imp = null; render(); return; }
+    if (arg === 'run') {
+      const I = STATE.imp;
+      if (!I || !I.tb) return;
+      runAction(function () {
+        const r = importOpeningBalances(I.tb.rows, val('cutoff') || pStart(), I.overrides || {});
+        STATE.impResult = {
+          cutoff: val('cutoff') || pStart(), source: 'ไฟล์ ' + I.name,
+          partners: 0, partnersSeen: 0, items: 0, itemsSeen: 0, invoices: 0, bills: 0,
+          opening: r, warnings: [],
+          checks: reconciliationChecks(val('cutoff') || pStart()).checks,
+          allPassed: reconciliationChecks(val('cutoff') || pStart()).allPassed,
+        };
+        STATE.screen = 'importResult';
+        STATE.imp = null;
+        toast('ตั้งยอดยกมา ' + r.accounts + ' บัญชีแล้ว', 'ok', 'ใบสำคัญ ' + r.entry.no);
+      });
+    }
+    return;
+  }
   if (head === 'reset')   {
     if (window.confirm('ล้างข้อมูลตัวอย่างทั้งหมดและสร้างใหม่?')) resetAll();
     return;
@@ -3987,6 +4595,25 @@ function bindEvents() {
     const t = ev.target;
     if (t.id === 'periodSel') { STATE.period = t.value; STATE.sel = null; save(); render(); return; }
     if (t.id === 'accSel')    { STATE.drill = t.value; render(); return; }
+    if (t.id === 'file') {
+      if (t.files && t.files[0]) handleFile(t.files[0]);
+      return;
+    }
+    if (t.classList.contains('impcol')) {
+      const I = STATE.imp;
+      if (I) { I.map[t.getAttribute('data-k')] = t.value === '' ? undefined : Number(t.value); refreshImportPreview(); render(); }
+      return;
+    }
+    if (t.classList.contains('impmap')) {
+      const I = STATE.imp;
+      if (I) {
+        I.overrides = I.overrides || {};
+        if (t.value) I.overrides[t.getAttribute('data-key')] = t.value;
+        else delete I.overrides[t.getAttribute('data-key')];
+        render();
+      }
+      return;
+    }
     if (t.classList.contains('itemsel')) {
       const i = t.getAttribute('data-i');
       const it = DB.items.find((x) => x.code === t.value);
@@ -4029,11 +4656,117 @@ function bindEvents() {
   });
   document.addEventListener('mouseleave', function () { ttEl.classList.remove('show'); });
 
+  ['dragenter', 'dragover'].forEach(function (ev) {
+    document.addEventListener(ev, function (e) {
+      const d = document.getElementById('drop');
+      if (!d) return;
+      e.preventDefault();
+      d.classList.add('over');
+    });
+  });
+  ['dragleave', 'drop'].forEach(function (ev) {
+    document.addEventListener(ev, function (e) {
+      const d = document.getElementById('drop');
+      if (!d) return;
+      e.preventDefault();
+      if (ev === 'dragleave' && e.relatedTarget) return;
+      d.classList.remove('over');
+      if (ev === 'drop' && e.dataTransfer && e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+    });
+  });
+
   document.getElementById('menuBtn').addEventListener('click', function () {
     document.body.classList.toggle('nav-open');
   });
   document.getElementById('nav').addEventListener('click', function () {
     document.body.classList.remove('nav-open');
+  });
+}
+
+
+function modalBlank() {
+  const yr = new Date().getFullYear();
+  modal({
+    title:'เริ่มจากบริษัทเปล่า',
+    sub:'ข้อมูลปัจจุบันทั้งหมดจะถูกลบถาวร',
+    body:'<div class="flds">'
+      + field({ name:'coname', label:'ชื่อผู้ประกอบการ', wide:true, placeholder:'บริษัท ... จำกัด' })
+      + field({ name:'cotax', label:'เลขประจำตัวผู้เสียภาษี 13 หลัก', placeholder:'เว้นว่างไว้ก่อนได้',
+          hint:'ถ้าใส่ ระบบจะตรวจหลักที่ 13 ให้ทันที' })
+      + field({ name:'coyear', label:'ปีของรอบบัญชี (ค.ศ.)', value: String(yr),
+          hint:'ระบบจะสร้างงวดรายเดือน 12 งวดให้' })
+      + field({ name:'coaddr', label:'ที่อยู่สถานประกอบการ', wide:true,
+          placeholder:'ที่อยู่ที่จะพิมพ์ลงใบกำกับภาษีทุกใบ' })
+      + '</div>',
+    submitLabel:'ลบข้อมูลเดิมและเริ่มใหม่',
+    note:'กดแล้วย้อนกลับไม่ได้',
+    onSubmit: function () {
+      if (!window.confirm('ลบข้อมูลทั้งหมดของ "' + DB.company.name + '" และเริ่มจากบริษัทเปล่า?')) return;
+      submitAction(function () {
+        const c = buildBlank({ name: val('coname'), taxId: val('cotax'),
+          address: val('coaddr'), year: val('coyear') });
+        STATE.period = DB.periods[0].code;
+        STATE.imp = null; STATE.impResult = null; STATE.sel = null;
+        toast('สร้างบริษัท ' + c.name + ' แล้ว', 'ok', 'ผังบัญชี ' + DB.accounts.length + ' บัญชี · ยังไม่มีรายการใด ๆ');
+        return c;
+      });
+    },
+  });
+}
+
+/* ===================================================================
+   นำเข้าไฟล์
+   =================================================================== */
+async function handleFile(file) {
+  STATE.imp = { name: file.name };
+  try {
+    const lower = file.name.toLowerCase();
+    if (lower.endsWith('.json')) {
+      const pkg = JSON.parse(await file.text());
+      validatePackage(pkg);
+      STATE.imp = { name: file.name, pkg: pkg };
+      runImportPackage(pkg);
+      return;
+    }
+    let rows;
+    if (lower.endsWith('.xlsx')) rows = await readXlsx(await file.arrayBuffer());
+    else rows = parseCsv(await file.text());
+    if (!rows.length) throw new DomainError('EMPTY_FILE', 'ไฟล์นี้ไม่มีข้อมูล');
+
+    const det = detectColumns(rows);
+    if (!det.ok) {
+      throw new DomainError('COLUMNS_NOT_FOUND',
+        'หาหัวตารางไม่เจอ ต้องมีคอลัมน์รหัสบัญชี ชื่อบัญชี เดบิต และเครดิต',
+        'ถ้าไฟล์มีหัวรายงานหลายบรรทัด ให้ลบบรรทัดบนออกแล้วบันทึกใหม่');
+    }
+    STATE.imp = {
+      name: file.name, rows: rows, headerRow: det.headerRow, map: det.map,
+      overrides: {}, cutoff: null,
+    };
+    refreshImportPreview();
+  } catch (e) {
+    STATE.imp = { name: file.name, error: (e.message || String(e)) + (e.hint ? ' — ' + e.hint : '') };
+    if (!(e instanceof DomainError)) console.error(e);
+  }
+  render();
+}
+
+function refreshImportPreview() {
+  const I = STATE.imp;
+  if (!I || !I.rows) return;
+  const m = I.map;
+  if (m.code === undefined || m.debit === undefined || m.credit === undefined) { I.tb = null; return; }
+  I.tb = readTrialBalance(I.rows, m, I.headerRow);
+}
+
+function runImportPackage(pkg) {
+  runAction(function () {
+    const r = importPackage(pkg, {});
+    STATE.impResult = r;
+    STATE.screen = 'importResult';
+    STATE.imp = null;
+    toast('นำเข้าข้อมูลจาก ' + (pkg.source || 'ระบบเดิม') + ' แล้ว', 'ok',
+      r.allPassed ? 'ยอดคุมผ่านครบทุกข้อ' : 'มียอดคุมที่ยังไม่ตรง ตรวจในหน้าสรุป');
   });
 }
 

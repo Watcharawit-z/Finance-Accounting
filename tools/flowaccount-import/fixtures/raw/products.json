@@ -1,0 +1,7 @@
+[
+  { "id": 1, "type": 5, "code": "SW-220", "name": "สวิตช์ตัดตอนอัตโนมัติ 220V",
+    "categoryName": "อุปกรณ์ไฟฟ้า", "unitName": "อัน",
+    "buyPrice": 880, "averageBuyPrice": 880, "sellPrice": 1290, "remainingStock": 120 },
+  { "id": 2, "type": 1, "code": "SRV-INS", "name": "ค่าบริการติดตั้งหน้างาน",
+    "categoryName": "บริการ", "unitName": "งาน", "sellPrice": 0 }
+]
