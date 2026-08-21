@@ -22,6 +22,9 @@ DULY คือระบบบัญชี–การเงิน (Accounting & 
 ไม่ต้องมีเซิร์ฟเวอร์ ไม่ต้องต่ออินเทอร์เน็ต และข้อมูลไม่ถูกส่งออกไปที่ใด
 ([คู่มือ](webapp/README.md))
 
+หรือขึ้นเป็นเว็บจริงบนอินเทอร์เน็ตด้วย Railway ใน 5 นาที
+ดู [คู่มือการ deploy](docs/18-deploy-railway.md)
+
 ```bash
 open webapp/index.html          # macOS
 xdg-open webapp/index.html      # Linux
@@ -52,8 +55,9 @@ start webapp\index.html         # Windows
 | 15 | [แผนการทดสอบ](docs/15-test-plan.md) | golden test, property test, UAT, เกณฑ์ go-live |
 | 16 | [อภิธานศัพท์ไทย-อังกฤษ](docs/16-glossary.md) | มาตรฐานคำที่ใช้ทั้งระบบ |
 | 17 | [ย้ายข้อมูลจาก FlowAccount](docs/17-migration-flowaccount.md) | สิ่งที่ API ให้และไม่ให้ แผนตัดยอด ข้อควรระวัง |
+| 18 | [ขึ้นเว็บจริงด้วย Railway](docs/18-deploy-railway.md) | ขึ้นระบบไฟล์เดียวใน 5 นาที หรือขึ้นทั้งสามบริการพร้อม Postgres |
 
-## การรันระบบ
+## การรันระบบเต็ม (หลายบริษัท)
 
 ต้องมี **PostgreSQL 16+** และ **Node.js 22+**
 
@@ -93,6 +97,7 @@ cd apps/api && npm test          # 52 ข้อ — เงิน ภาษี �
 | `prototype/` | ต้นแบบหน้าตา **43 หน้าจอ** แบบ static HTML ([README](prototype/README.md)) |
 | `webapp/` | **ระบบที่ใช้งานได้จริงในไฟล์เดียว** 36 หน้าจอ รันในเบราว์เซอร์ ([README](webapp/README.md)) |
 | `tools/flowaccount-import/` | ตัวย้ายข้อมูลจาก FlowAccount ([README](tools/flowaccount-import/README.md)) |
+| `railway.json` · `webapp/railway.json` · `apps/web/railway.json` | ตั้งค่า deploy ของแต่ละบริการ ([คู่มือ](docs/18-deploy-railway.md)) |
 
 ## สิ่งที่ทำงานได้จริงแล้ว
 
@@ -117,6 +122,8 @@ cd apps/api && npm test          # 52 ข้อ — เงิน ภาษี �
 - เอกสารออกแบบ 17 ฉบับ · สคีมา 152 ตารางพร้อมกฎที่บังคับในฐานข้อมูล — เสร็จ
 - `webapp/` ระบบครบ 36 หน้าจอ ผ่านการทดสอบ 145 ข้อ — เสร็จ
 - ตัวย้ายข้อมูลจาก FlowAccount + หน้านำเข้าข้อมูลที่อ่าน .xlsx ได้ — เสร็จ
+- ไฟล์ตั้งค่า deploy ขึ้น Railway + ตัวรัน migration บนเครื่องจริง — เสร็จ
+- ระบบยืนยันตัวตนและสิทธิ์ผู้ใช้ — **ยังไม่มี** ต้องทำก่อนเปิดใช้กับข้อมูลจริง
 - `apps/api` + `apps/web` บน PostgreSQL หลายบริษัท — ขาย/ลูกหนี้/รายงานเสร็จ โมดูลที่เหลือกำลังทำ
 - AI Layer สำหรับวิเคราะห์การเงิน — ยังไม่เริ่ม (ตามที่วางไว้ให้ทำหลังระบบบัญชีนิ่งแล้ว)
 

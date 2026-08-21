@@ -10,6 +10,10 @@ xdg-open webapp/index.html      # Linux
 start webapp\index.html         # Windows
 ```
 
+อยากได้ URL จริงบนอินเทอร์เน็ต — โฟลเดอร์นี้ deploy ขึ้น Railway ได้เลย
+ตั้ง Root Directory เป็น `webapp` แล้วกด Generate Domain
+รายละเอียดที่ [คู่มือการ deploy](../docs/18-deploy-railway.md)
+
 ## ทำอะไรได้จริงบ้าง
 
 36 หน้าจอ ครอบคลุม 12 กลุ่มงาน และครบทั้ง 5 หมวดบัญชี

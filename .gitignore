@@ -24,7 +24,7 @@ npm-debug.log*
 *.key
 
 # ภาพหน้าจอที่สร้างตอนทดสอบ
-webapp/shot-*.png
+shot-*.png
 
 # ความลับของตัวย้ายข้อมูล
 config.json

@@ -1,0 +1,13 @@
+{
+  "name": "@duly/webapp",
+  "version": "1.0.0",
+  "private": true,
+  "description": "ระบบบัญชีไทยที่รันในเบราว์เซอร์ ไฟล์เดียวจบ",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "build": "node build.js",
+    "start": "node server.js",
+    "test": "node test.js",
+    "test:ui": "node uitest.js"
+  }
+}

@@ -17,10 +17,18 @@ export class DbService implements OnModuleDestroy {
   private readonly pool: Pool;
 
   constructor() {
+    // ★ แอปต้องเชื่อมด้วย role ที่ถูกจำกัดสิทธิ์ (APP_DATABASE_URL)
+    //   ส่วน DATABASE_URL เป็นของผู้ดูแลไว้รัน migration เท่านั้น
+    //   ถ้าไม่ได้ตั้งแยกไว้ก็ยังใช้ DATABASE_URL ได้ เพราะทุกตารางตั้ง
+    //   FORCE ROW LEVEL SECURITY ไว้ เจ้าของตารางจึงยังถูกบังคับ — แต่ superuser ข้ามได้
+    const url = process.env.APP_DATABASE_URL ?? process.env.DATABASE_URL
+      ?? 'postgres://duly_app@localhost/duly';
+    const needsSsl = /sslmode=require/.test(url) || process.env.DATABASE_SSL === 'require';
     this.pool = new Pool({
-      connectionString: process.env.DATABASE_URL ?? 'postgres://duly_app@localhost/duly',
+      connectionString: url,
       max: Number(process.env.DB_POOL_MAX ?? 10),
       application_name: 'duly-api',
+      ...(needsSsl ? { ssl: { rejectUnauthorized: false } } : {}),
     });
   }
 

@@ -1,0 +1,132 @@
+# 18 — ขึ้นเว็บจริงด้วย Railway
+
+ในโปรเจกต์นี้มีสองอย่างที่ขึ้นได้ เลือกตามที่ต้องการใช้
+
+| จะขึ้นอะไร | ต้องใช้ | เหมาะกับ |
+|---|---|---|
+| **A. ระบบไฟล์เดียว** (`webapp/`) | บริการเดียว ไม่ต้องมีฐานข้อมูล | ใช้เองคนเดียว/ทีมเล็ก อยากได้ URL วันนี้ |
+| **B. ระบบหลายบริษัท** (`apps/api` + `apps/web` + Postgres) | สามบริการ | ใช้หลายคน ข้อมูลอยู่บนเซิร์ฟเวอร์ |
+
+ทุกไฟล์ตั้งค่าอยู่ในรีโปแล้ว ไม่ต้องเขียนเพิ่ม
+
+---
+
+## A. ระบบไฟล์เดียว — 5 นาที
+
+1. Railway → **New Project → Deploy from GitHub repo** → เลือกรีโปนี้
+2. ที่บริการที่สร้างขึ้น → **Settings → Source → Root Directory** ใส่ `webapp`
+3. **Settings → Networking → Generate Domain**
+
+จบ. Railway จะอ่าน `webapp/railway.json` เอง — build ด้วย `node build.js`
+แล้วรัน `node server.js` ตรวจสุขภาพที่ `/health`
+
+**ข้อมูลอยู่ที่ไหน:** ในเบราว์เซอร์ของแต่ละคน (localStorage) ไม่ได้อยู่บนเซิร์ฟเวอร์
+เปิดคนละเครื่องคือคนละชุดข้อมูล ถ้าต้องการให้ทุกคนเห็นชุดเดียวกัน ต้องใช้แบบ B
+
+---
+
+## B. ระบบหลายบริษัท — 3 บริการ
+
+### 1. ฐานข้อมูล
+
+**New → Database → Add PostgreSQL** — Railway ตั้ง `DATABASE_URL` ให้อัตโนมัติ
+
+### 2. บริการ API
+
+**New → GitHub Repo** → เลือกรีโปนี้ → **ปล่อย Root Directory ว่างไว้**
+
+> ต้องปล่อยว่างเพราะ API ต้องอ่านไฟล์ `db/migrations/` ที่อยู่นอกโฟลเดอร์ตัวเอง
+> Railway จะตัดไฟล์นอก Root Directory ออกทั้งหมด ถ้าตั้งเป็น `apps/api` จะรัน migration ไม่ได้
+
+Railway อ่าน `railway.json` ที่ราก ซึ่งชี้ไปที่ API อยู่แล้ว
+
+**Variables** ที่ต้องตั้ง
+
+| ตัวแปร | ค่า | ทำไม |
+|---|---|---|
+| `DATABASE_URL` | `${{Postgres.DATABASE_URL}}` | ผู้ดูแล ใช้รัน migration เท่านั้น |
+| `APP_DB_PASSWORD` | รหัสผ่านสุ่มยาว ≥ 16 ตัว | ใช้สร้าง role `duly_app` |
+| `APP_DATABASE_URL` | URL เดียวกับข้างบน แต่เปลี่ยน user/password เป็น `duly_app` กับรหัสข้างต้น | แอปเชื่อมด้วยตัวนี้ |
+
+> **ทำไมต้องแยกสองผู้ใช้** — role ที่เป็น superuser **ข้าม Row Level Security ได้**
+> ถ้าแอปเชื่อมด้วยผู้ใช้ของ Railway ตรง ๆ policy จะดูเหมือนทำงานแต่ข้อมูลข้ามบริษัทรั่วได้
+> ตัวรัน migration จะสร้าง `duly_app` ที่จำกัดสิทธิ์ให้ และตรวจซ้ำว่ามันไม่ใช่ superuser
+> ถ้าเป็นเมื่อไหร่จะหยุดทันทีพร้อมบอกเหตุผล
+
+สร้าง `APP_DATABASE_URL` จาก `DATABASE_URL` โดยแทนที่ส่วน `user:password` เช่น
+
+```
+DATABASE_URL      postgresql://postgres:AAA@postgres.railway.internal:5432/railway
+APP_DATABASE_URL  postgresql://duly_app:BBB@postgres.railway.internal:5432/railway
+```
+
+โดย `BBB` คือค่าเดียวกับ `APP_DB_PASSWORD`
+
+**Settings → Networking → Generate Domain** (หรือข้ามไปก็ได้ ถ้าให้เข้าผ่านหน้าเว็บอย่างเดียว)
+
+### 3. บริการหน้าเว็บ
+
+**New → GitHub Repo** → รีโปเดิม → **Root Directory** = `apps/web`
+
+**Variables**
+
+| ตัวแปร | ค่า |
+|---|---|
+| `API_URL` | `http://${{duly-api.RAILWAY_PRIVATE_DOMAIN}}:${{duly-api.PORT}}` |
+
+(เปลี่ยน `duly-api` เป็นชื่อบริการ API จริงของคุณ)
+
+หน้าเว็บจะส่งต่อคำขอ `/api/*` ไปยัง API ผ่านเครือข่ายภายในของ Railway
+ทำให้อยู่โดเมนเดียวกัน ไม่ต้องเปิด CORS และ API ไม่ต้องเปิดออกสู่อินเทอร์เน็ตก็ได้
+
+**Settings → Networking → Generate Domain** → นี่คือ URL ที่คนเข้าใช้
+
+---
+
+## migration ทำงานอย่างไร
+
+คำสั่งเริ่มบริการคือ `node scripts/migrate.js && node dist/main.js`
+ทุกครั้งที่ deploy จะรัน migration ก่อน แล้วค่อยเปิดแอป
+
+- จำว่ารันไฟล์ไหนไปแล้วในตาราง `public.schema_migration` พร้อม checksum
+- ไฟล์ที่รันไปแล้ว **ห้ามแก้** ถ้าแก้จะหยุดทันทีพร้อมบอกว่าไฟล์ไหน
+  ต้องการเปลี่ยนสคีมาให้เพิ่มไฟล์ใหม่ `016_*.sql`
+- แต่ละไฟล์รันใน transaction เดียว พังกลางทางจะถอยกลับทั้งไฟล์ ไม่ทิ้งสคีมาครึ่ง ๆ
+- ไม่ต้องมี `psql` ในคอนเทนเนอร์ ตัวรันเข้าใจ `\ir` `\copy` `\set` เองแล้ว
+
+รัน migration อย่างเดียวได้ด้วย `npm run migrate`
+
+## ตรวจว่าขึ้นสำเร็จ
+
+```bash
+curl https://<โดเมนของคุณ>/health
+# ระบบไฟล์เดียว → {"ok":true,"service":"duly-webapp"}
+# หน้าเว็บ       → {"ok":true,"service":"duly-web","api":"ตั้งค่าแล้ว"}
+# API           → {"status":"ok","database":true,"service":"duly-api"}
+```
+
+`"database": false` แปลว่าแอปต่อฐานข้อมูลไม่ได้ ให้ดู `APP_DATABASE_URL` ก่อน
+
+## ค่าใช้จ่ายโดยประมาณ
+
+Railway คิดตามการใช้จริง แผน Hobby ให้เครดิตรายเดือนมาก้อนหนึ่ง
+ระบบไฟล์เดียวกินทรัพยากรน้อยมาก ส่วนแบบ B มีสามบริการรวม Postgres
+ควรดูราคาปัจจุบันที่หน้า Pricing ของ Railway เพราะเปลี่ยนได้
+
+## เรื่องที่ต้องทำก่อนใช้กับข้อมูลจริง
+
+ระบบยังไม่มีการยืนยันตัวตน — `apps/api` รับ `X-Tenant-Id` / `X-Company-Id` /
+`X-User-Id` จาก header ตรง ๆ **ใครก็ตามที่รู้ URL และ id จะอ่านข้อมูลได้**
+เหมาะกับการทดลองภายในเท่านั้น ก่อนเปิดใช้จริงต้องเพิ่ม
+
+1. การเข้าสู่ระบบและออก token แทนการเชื่อ header
+2. ตรวจสิทธิ์ว่าผู้ใช้มีสิทธิ์ในบริษัทนั้นจริง ก่อนส่ง company_id ลง RLS
+3. เปิด HTTPS อย่างเดียว (Railway ทำให้แล้ว) และจำกัด `CORS_ORIGIN`
+
+รายละเอียดอยู่ใน [07 — ความปลอดภัยและ PDPA](07-security-and-pdpa.md)
+
+## แหล่งอ้างอิง
+
+- [Railway — Config as Code](https://docs.railway.com/config-as-code)
+- [Railway — Deploying a Monorepo](https://docs.railway.com/deployments/monorepo)
+- [Railway — Build Configuration](https://docs.railway.com/builds/build-configuration)

@@ -1,0 +1,13 @@
+{
+  "name": "duly",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DULY — ระบบบัญชีและการเงินสำหรับธุรกิจไทย",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "build": "cd apps/api && npm ci --omit=dev --include=dev && npm run build",
+    "start": "cd apps/api && node scripts/migrate.js && node dist/main.js",
+    "migrate": "cd apps/api && node scripts/migrate.js",
+    "test": "node webapp/test.js && node tools/flowaccount-import/test.js"
+  }
+}
