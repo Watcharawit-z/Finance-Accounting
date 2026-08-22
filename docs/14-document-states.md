@@ -9,6 +9,11 @@
 
 ---
 
+> **ที่ทำแล้วใน `webapp/`** — ใบเสนอราคา ใบสั่งขาย และใบสั่งซื้อ ใช้สถานะ
+> `issued → approved → closed` (closed = แปลงเป็นเอกสารถัดไปแล้ว) และ `rejected` /
+> `cancelled` ส่วน `expired` คิดจาก `valid_until` ตอนแสดงผล ไม่ต้องมี job รายวัน
+> ค่าทั้งหมดเป็นค่าเดียวกับ enum `doc_status` ใน `db/migrations/001`
+
 ## 2. ใบเสนอราคา (Quotation)
 
 ```

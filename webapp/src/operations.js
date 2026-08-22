@@ -53,6 +53,17 @@ function assertTaxInvoiceComplete(snap, lines) {
   }
 }
 
+/* ---------- สถานะใบกำกับ คิดจากยอดคงค้างเสมอ ----------
+   ใบเพิ่มหนี้ทำให้ใบที่ชำระครบแล้วกลับมาค้างได้ ถ้าเขียนเงื่อนไขกระจายตามที่ต่าง ๆ
+   จะมีที่ที่ลืมอัปเดตแล้วสถานะค้างเป็น "ชำระครบ" ทั้งที่ยังค้างเงินอยู่ */
+function syncInvStatus(inv) {
+  if (inv.status === 'void' || inv.status === 'draft') return;
+  const out = invOutstanding(inv);
+  if (out <= 0) inv.status = 'paid';
+  else if (inv.paid > 0 || inv.credited > 0) inv.status = 'partially_paid';
+  else inv.status = 'issued';
+}
+
 /* ---------- ขาย: ออกใบกำกับภาษี ---------- */
 function issueInvoice(input) {
   const p = partnerByCode(input.partnerCode);
@@ -130,7 +141,7 @@ function issueInvoice(input) {
 function receivePayment(input) {
   const inv = DB.docs.invoice.find((d) => d.no === input.invoiceNo);
   if (!inv) throw new DomainError('INVOICE_NOT_FOUND', 'ไม่พบใบกำกับภาษี ' + input.invoiceNo);
-  const outstanding = inv.total - inv.paid - inv.credited;
+  const outstanding = invOutstanding(inv);
   if (outstanding <= 0) throw new DomainError('ALREADY_PAID', 'ใบกำกับภาษีนี้ชำระครบแล้ว');
 
   const gross = input.amount ? M(input.amount) : outstanding;
@@ -162,8 +173,7 @@ function receivePayment(input) {
   });
 
   inv.paid += gross;
-  if (inv.paid + inv.credited >= inv.total) inv.status = 'paid';
-  else inv.status = 'partially_paid';
+  syncInvStatus(inv);
 
   const doc = {
     no, date: input.date, invoiceNo: inv.no, partnerCode: inv.partnerCode,
@@ -225,7 +235,7 @@ function issueCreditNote(input) {
   });
 
   inv.credited += total;
-  if (inv.paid + inv.credited >= inv.total) inv.status = 'paid';
+  syncInvStatus(inv);
 
   const doc = { no, date: input.date, invoiceNo: inv.no, partnerCode: inv.partnerCode,
     partnerName: inv.partnerName, reason: input.reason, reasonText: CN_REASONS[input.reason],
@@ -233,6 +243,198 @@ function issueCreditNote(input) {
   DB.docs.creditNote.unshift(doc);
   audit('creditNote', no, 'issue', null, { ref: inv.no, total: fmt(total), reason: CN_REASONS[input.reason] });
   return doc;
+}
+
+/* ---------- ขาย: ใบเพิ่มหนี้ (มาตรา 86/9) ----------
+   ใช้เมื่อออกใบกำกับไปแล้วแต่เก็บเงินต่ำกว่าที่ควร ต้องเก็บเพิ่มพร้อมภาษีขายเพิ่ม
+   ห้ามออกใบกำกับใบใหม่ทับ เพราะรายได้และภาษีขายจะถูกนับซ้ำสองรอบ */
+const DN_REASONS = {
+  GOODS_EXCESS: 'ส่งมอบสินค้าเกินกว่าจำนวนที่ตกลงซื้อขายกัน',
+  GOODS_UNDERPRICED: 'คำนวณราคาสินค้าต่ำกว่าที่เป็นจริง',
+  SERVICE_EXCESS: 'ให้บริการเกินกว่าข้อกำหนดที่ตกลงกัน',
+  SERVICE_UNDERPRICED: 'คำนวณราคาค่าบริการต่ำกว่าที่เป็นจริง',
+  VAT_UNDERCALC: 'คำนวณภาษีมูลค่าเพิ่มต่ำกว่าที่เป็นจริง',
+};
+function issueDebitNote(input) {
+  const inv = DB.docs.invoice.find((d) => d.no === input.invoiceNo);
+  if (!inv) {
+    throw new DomainError('DEBIT_NOTE_NO_ORIGIN',
+      'ใบเพิ่มหนี้ต้องอ้างอิงใบกำกับภาษีเดิมเสมอ (มาตรา 86/9)',
+      'เลือกใบกำกับภาษีที่ต้องการเพิ่มหนี้');
+  }
+  if (inv.status === 'void') {
+    throw new DomainError('DEBIT_NOTE_ORIGIN_VOID',
+      'ใบกำกับเดิมถูกยกเลิกไปแล้ว ออกใบเพิ่มหนี้อ้างใบที่ยกเลิกไม่ได้',
+      'ออกใบกำกับภาษีใบใหม่แทน');
+  }
+  if (!DN_REASONS[input.reason]) {
+    throw new DomainError('DEBIT_NOTE_REASON_INVALID',
+      'เหตุผลไม่อยู่ในเหตุที่กฎหมายกำหนดตามมาตรา 86/9');
+  }
+  if (input.date < inv.date) {
+    throw new DomainError('DEBIT_NOTE_BEFORE_ORIGIN',
+      'วันที่ใบเพิ่มหนี้ (' + thDate(input.date) + ') ก่อนวันที่ใบกำกับเดิม (' + thDate(inv.date) + ')',
+      'ใบเพิ่มหนี้ต้องออกหลังใบกำกับเดิมเสมอ');
+  }
+  const base = M(input.base);
+  if (base <= 0) {
+    throw new DomainError('DEBIT_NOTE_ZERO', 'มูลค่าที่เพิ่มต้องมากกว่าศูนย์');
+  }
+  const r = resolveRate('VAT7', input.date);
+  const vat = round2(pct(base, r.rate));
+  const total = base + vat;
+  const no = nextNo('debitNote', input.date);
+
+  const je = post({
+    type: 'sales', date: input.date,
+    desc: 'ใบเพิ่มหนี้ ' + no + ' อ้าง ' + inv.no + ' — ' + DN_REASONS[input.reason],
+    src: 'debitNote', srcId: no,
+    lines: [
+      { acc: accBySub('trade_receivable'), dr: total, partner: inv.partnerCode },
+      { acc: accBySub('sales_revenue'), cr: base },
+      { acc: accBySub('output_vat'), cr: vat },
+    ],
+  });
+
+  DB.taxTx.push({
+    kind: 'vat_output', period: periodOf(input.date), date: input.date,
+    docNo: no, docType: 'debit_note', refDoc: inv.no,
+    partnerName: inv.partnerName, taxId: inv.snap.taxId, branch: inv.snap.branch,
+    base, zero: 0, exempt: 0, tax: vat, entryNo: je.no, filingId: null,
+  });
+
+  inv.debited = (inv.debited || 0) + total;
+  syncInvStatus(inv);
+
+  const doc = { no, date: input.date, invoiceNo: inv.no, partnerCode: inv.partnerCode,
+    partnerName: inv.partnerName, reason: input.reason, reasonText: DN_REASONS[input.reason],
+    base, vat, total, entryNo: je.no };
+  DB.docs.debitNote.unshift(doc);
+  audit('debitNote', no, 'issue', null, { ref: inv.no, total: fmt(total), reason: DN_REASONS[input.reason] });
+  return doc;
+}
+
+/* ===================================================================
+   เอกสารก่อนลงบัญชี — ใบเสนอราคา ใบสั่งขาย ใบสั่งซื้อ
+   ไม่มีผลทางบัญชี ไม่สร้างใบสำคัญ ไม่แตะสต๊อก และไม่เข้ารายงานภาษี
+   (docs/14 ข้อ 2–3) ผลทางบัญชีเกิดตอนแปลงเป็นใบกำกับหรือใบตั้งหนี้เท่านั้น
+   =================================================================== */
+const TRADE_DOCS = {
+  quotation:     { label:'ใบเสนอราคา', side:'customer', next:'salesOrder', validDays:30 },
+  salesOrder:    { label:'ใบสั่งขาย',   side:'customer', next:'invoice',    validDays:0 },
+  purchaseOrder: { label:'ใบสั่งซื้อ',   side:'vendor',   next:'bill',       validDays:0 },
+};
+
+function tradeDocFind(kind, no) {
+  const d = (DB.docs[kind] || []).find((x) => x.no === no);
+  if (!d) throw new DomainError('TRADE_DOC_NOT_FOUND', 'ไม่พบ' + TRADE_DOCS[kind].label + ' ' + no);
+  return d;
+}
+
+/** สถานะที่แสดง — หมดอายุคิดจากวันที่ ไม่ได้เก็บไว้ในเอกสาร จะได้ไม่ต้องมี job รายวัน */
+function tradeDocStatus(kind, d, asOf) {
+  if (d.status !== 'issued') return d.status;
+  if (d.validUntil && (asOf || TODAY) > d.validUntil) return 'expired';
+  return 'issued';
+}
+
+function issueTradeDoc(kind, input) {
+  const cfg = TRADE_DOCS[kind];
+  if (!cfg) throw new DomainError('TRADE_DOC_KIND_UNKNOWN', 'ไม่รู้จักเอกสารประเภท ' + kind);
+  const p = partnerByCode(input.partnerCode);
+  if (p.kind !== cfg.side) {
+    throw new DomainError('PARTNER_WRONG_SIDE',
+      cfg.label + 'ต้องออกให้' + (cfg.side === 'customer' ? 'ลูกค้า' : 'ผู้ขาย')
+      + ' แต่ ' + p.name + ' อยู่ในทะเบียน' + (p.kind === 'customer' ? 'ลูกค้า' : 'ผู้ขาย'));
+  }
+  const lines = (input.lines || []).filter((l) => String(l.desc || '').trim() && M(l.price) !== 0);
+  if (!lines.length) throw new DomainError('NO_LINES', 'ต้องมีรายการอย่างน้อย 1 บรรทัด');
+  if (!input.date) throw new DomainError('DATE_REQUIRED', 'ต้องระบุวันที่เอกสาร');
+
+  const v = computeVat(lines, input.date);
+  const no = nextNo(kind, input.date);
+  const validUntil = input.validUntil
+    || (cfg.validDays ? addDays(input.date, cfg.validDays) : null);
+
+  const doc = {
+    no, date: input.date, validUntil,
+    partnerCode: p.code, partnerName: p.name, snap: snapshotPartner(p),
+    lines: lines.map((l) => ({
+      desc: l.desc, qty: Number(l.qty), price: M(l.price), uom: l.uom || '',
+      taxCode: l.taxCode || 'VAT7', itemCode: l.itemCode || null,
+      expenseSub: l.expenseSub || null, revenueSub: l.revenueSub || null,
+      amount: round2(mulQty(M(l.price), l.qty)),
+    })),
+    base: v.std + v.zero + v.exempt, vat: v.vat, total: v.total,
+    note: input.note || '', status: 'issued', convertedTo: null, fromDoc: input.fromDoc || null,
+  };
+  DB.docs[kind].unshift(doc);
+  audit(kind, no, 'issue', null, { partner: p.name, total: fmt(v.total) });
+  return doc;
+}
+
+/** ตอบรับ / ปฏิเสธ / ยกเลิก — ใบที่แปลงไปแล้วห้ามแตะ ไม่งั้นเอกสารปลายทางจะกำพร้า */
+function setTradeDocStatus(kind, no, status, reason) {
+  /* ใช้ค่าเดียวกับ doc_status ใน db/migrations/001 และแผนภาพใน docs/14
+     ไม่คิดค่าใหม่ขึ้นมาเอง ไม่งั้นตอนย้ายขึ้นฐานข้อมูลจริงจะแปลงสถานะไม่ตรง */
+  const allowed = ['approved', 'rejected', 'cancelled'];
+  if (allowed.indexOf(status) < 0) {
+    throw new DomainError('TRADE_DOC_STATUS_INVALID', 'เปลี่ยนสถานะเป็น ' + status + ' ไม่ได้');
+  }
+  const d = tradeDocFind(kind, no);
+  if (d.status === 'closed') {
+    throw new DomainError('TRADE_DOC_ALREADY_CONVERTED',
+      TRADE_DOCS[kind].label + ' ' + no + ' ถูกแปลงเป็น ' + d.convertedTo + ' ไปแล้ว',
+      'ถ้าต้องการยกเลิก ให้จัดการที่เอกสารปลายทางแทน');
+  }
+  d.status = status;
+  if (reason) d.statusReason = reason;
+  audit(kind, no, status, null, reason ? { reason } : null);
+  return d;
+}
+
+/** แปลงเอกสารไปขั้นถัดไป — ใบเสนอราคา → ใบสั่งขาย → ใบกำกับภาษี, ใบสั่งซื้อ → ตั้งหนี้ */
+function convertTradeDoc(kind, no, input) {
+  const cfg = TRADE_DOCS[kind];
+  const d = tradeDocFind(kind, no);
+  if (d.status === 'closed') {
+    throw new DomainError('TRADE_DOC_ALREADY_CONVERTED',
+      TRADE_DOCS[kind].label + ' ' + no + ' ถูกแปลงเป็น ' + d.convertedTo + ' ไปแล้ว');
+  }
+  if (d.status === 'cancelled' || d.status === 'rejected') {
+    throw new DomainError('TRADE_DOC_NOT_ACTIVE',
+      TRADE_DOCS[kind].label + ' ' + no + ' อยู่ในสถานะ ' + d.status + ' แปลงต่อไม่ได้');
+  }
+  const opts = input || {};
+  const date = opts.date || TODAY;
+  let made;
+
+  /* บรรทัดที่เก็บไว้เป็นจำนวนเงินสเกลแล้ว ต้องแปลงกลับเป็นข้อความก่อนส่งต่อ
+     ไม่งั้นฟังก์ชันปลายทางจะคูณสเกลซ้ำ */
+  const carry = d.lines.map((l) => ({ ...l, price: unM(l.price) }));
+
+  if (cfg.next === 'salesOrder') {
+    made = issueTradeDoc('salesOrder', {
+      partnerCode: d.partnerCode, date, lines: carry, note: d.note, fromDoc: d.no,
+    });
+  } else if (cfg.next === 'invoice') {
+    made = issueInvoice({ partnerCode: d.partnerCode, date, lines: carry });
+  } else {
+    if (!opts.vendorNo) {
+      throw new DomainError('VENDOR_INVOICE_NO_REQUIRED',
+        'ต้องกรอกเลขที่ใบกำกับภาษีของผู้ขายก่อนตั้งหนี้',
+        'ดูเลขที่จากใบกำกับที่ผู้ขายส่งมา');
+    }
+    made = recordBill({
+      partnerCode: d.partnerCode, date, vendorNo: opts.vendorNo,
+      lines: carry.map((l) => ({ ...l, expenseSub: l.expenseSub || opts.expenseSub || 'admin_expense' })),
+      nonClaimableVat: !!opts.nonClaimableVat, whtCode: opts.whtCode || null,
+    });
+  }
+  d.status = 'closed';
+  d.convertedTo = made.no;
+  audit(kind, no, 'convert', null, { to: made.no });
+  return made;
 }
 
 /* ---------- ซื้อ: ตั้งหนี้ผู้ขาย ---------- */

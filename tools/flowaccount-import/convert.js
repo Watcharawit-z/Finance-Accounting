@@ -123,11 +123,13 @@ function main() {
     return [...byNo.values()];
   }
 
-  const openInvoices = collect(['tax-invoices', 'receivable-invoices'], 'invoice');
+  /* ใบเพิ่มหนี้ก่อให้เกิดลูกหนี้เหมือนใบกำกับ ถ้าไม่ยกมาด้วย ลูกหนี้จะขาดไปเท่ายอดที่เพิ่ม
+     เดิมนับเป็น "ปิดแล้ว" ทั้งก้อน ทำให้ใบเพิ่มหนี้ที่ยังเก็บเงินไม่ได้หายจากยอดค้าง */
+  const openInvoices = collect(['tax-invoices', 'receivable-invoices', 'debit-notes'], 'invoice');
   const openBills = collect(['purchases', 'expenses'], 'bill');
 
   /* เอกสารที่ไม่ได้ยกมาเป็นยอดค้าง ก็ยังต้องนับให้เห็นว่าอ่านแล้ว ไม่ได้หายไปเฉย ๆ */
-  ['receipts', 'cash-invoices', 'purchase-orders', 'debit-notes'].forEach(function (f) {
+  ['receipts', 'cash-invoices'].forEach(function (f) {
     const rows = readJson(path.join(raw, f + '.json'));
     if (!rows.length) return;
     track(f, { rows: rows.length, ok: rows.length, open: 0, closed: rows.length,

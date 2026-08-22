@@ -41,6 +41,15 @@ function fmt(a, dec) {
 }
 const fmt0 = (a) => (a === 0 ? '—' : fmt(a));
 
+/* ทางกลับของ M() — คืนข้อความทศนิยม 4 ตำแหน่ง ไม่มีเครื่องหมายคั่นหลักพัน
+   ต้องใช้ทุกครั้งที่ส่งจำนวนเงินที่คูณสเกลแล้วกลับเข้าฟังก์ชันที่รับข้อความ
+   ถ้าส่งตัวเลขดิบเข้าไป M() จะคูณสเกลซ้ำอีกรอบแล้วยอดจะบานเป็นหมื่นเท่า */
+function unM(a) {
+  const neg = a < 0, abs = Math.abs(a);
+  const i = Math.floor(abs / S);
+  return (neg ? '-' : '') + i + '.' + String(abs - i * S).padStart(4, '0');
+}
+
 /* ---------- วันที่แบบไทย ---------- */
 const TH_M = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
 const TH_MF = ['มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน',
@@ -102,7 +111,8 @@ function blankState() {
     entries: [],         // {no,date,type,desc,src,srcId,status,lines:[...],reversedBy,reverseOf,reason}
     taxTx: [],           // {kind,period,date,docNo,docType,partnerName,taxId,branch,base,tax,...}
     docs: {              // เอกสารแยกตามประเภท
-      quotation: [], salesOrder: [], invoice: [], receipt: [], creditNote: [],
+      quotation: [], salesOrder: [], invoice: [], receipt: [],
+      creditNote: [], debitNote: [],
       purchaseOrder: [], bill: [], payment: [], whtCert: [],
       stockMove: [], payRun: [], depreciation: [], filing: [],
     },
@@ -241,7 +251,7 @@ function periodFor(date) {
    เลขที่เอกสาร — จองตอนลงบัญชีเท่านั้น
    =================================================================== */
 const SEQ_PREFIX = {
-  invoice:'INV', receipt:'RC', creditNote:'CN', quotation:'QT', salesOrder:'SO',
+  invoice:'INV', receipt:'RC', creditNote:'CN', debitNote:'DN', quotation:'QT', salesOrder:'SO',
   purchaseOrder:'PO', bill:'AP', payment:'PV', whtCert:'WT', stockCount:'SC',
   je_sales:'SA', je_purchase:'PU', je_receipt:'RV', je_payment:'PY',
   je_general:'JV', je_adjustment:'JV', je_payroll:'PR', je_asset:'AS',
@@ -550,6 +560,8 @@ function settledUpto(kind, docNo, asOf) {
     let v = 0;
     DB.docs.receipt.forEach((r) => { if (r.invoiceNo === docNo && r.date <= asOf) v += r.gross; });
     DB.docs.creditNote.forEach((c) => { if (c.invoiceNo === docNo && c.date <= asOf) v += c.total; });
+    /* ใบเพิ่มหนี้เดินกลับทาง — ทำให้ลูกหนี้ค้างมากขึ้น ไม่ใช่น้อยลง */
+    DB.docs.debitNote.forEach((c) => { if (c.invoiceNo === docNo && c.date <= asOf) v -= c.total; });
     return v;
   }
   let v = 0;
@@ -561,6 +573,11 @@ function settledUpto(kind, docNo, asOf) {
    ไม่งั้นถ้าใช้ d.paid ตรง ๆ จะถูกนับซ้ำเมื่อมีการรับชำระเพิ่มภายหลัง */
 const outstandingAsOf = (kind, d, asOf) =>
   d.total - (d.bfPaid || 0) - settledUpto(kind, d.no, asOf);
+
+/* ยอดคงค้าง ณ ปัจจุบัน — เขียนไว้ที่เดียว หน้าจอและรายงานต้องเรียกตัวนี้เท่านั้น
+   ไม่งั้นพอเพิ่มประเภทเอกสารใหม่ จะมีบางหน้าลืมนับแล้วตัวเลขเพี้ยนแบบหายาก */
+const invOutstanding = (d) => d.total + (d.debited || 0) - d.paid - d.credited;
+const billOutstanding = (d) => d.total - d.paid;
 
 /* ---------- อายุหนี้ ---------- */
 function aging(kind, asOf) {

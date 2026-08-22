@@ -198,6 +198,12 @@ function buildBlank(o) {
       'ปี พ.ศ. 2569 คือ ค.ศ. 2026');
   }
 
+  /* ล้างทุกอย่างจากแม่แบบเดียวใน engine.js ห้ามไล่เขียนทีละฟิลด์ตรงนี้
+     ไม่งั้นพอเพิ่มประเภทเอกสารใหม่ ที่นี่จะลืมแล้วสร้างบริษัทใหม่จะพัง */
+  const fresh = blankState();
+  Object.keys(DB).forEach((k) => { if (!(k in fresh)) delete DB[k]; });
+  Object.keys(fresh).forEach((k) => { DB[k] = fresh[k]; });
+
   DB.company = {
     name: String(o.name || '').trim() || 'บริษัทของฉัน จำกัด',
     nameEn: '',
@@ -212,21 +218,19 @@ function buildBlank(o) {
   };
   loadChart();
   loadPeriods(year);
-  DB.partners = []; DB.items = []; DB.employees = []; DB.assets = [];
-  DB.entries = []; DB.taxTx = [];
-  DB.docs = {
-    quotation: [], salesOrder: [], invoice: [], receipt: [], creditNote: [],
-    purchaseOrder: [], bill: [], payment: [], whtCert: [],
-    stockMove: [], payRun: [], depreciation: [], filing: [],
-  };
-  DB.seq = {}; DB.budget = []; DB.projects = []; DB.bankTxns = [];
-  DB.audit = []; DB.settings = { hardLockDate: null };
   DB.isDemo = false;
   audit('company', 'blank', 'create', null, { name: DB.company.name, year: DB.company.fiscalYear });
   return DB.company;
 }
 
 function buildSeed() {
+  /* ล้างจากแม่แบบเดียวกับ blankState() ก่อนเสมอ
+     ปุ่ม "ล้างข้อมูลตัวอย่างแล้วสร้างใหม่" เรียกตัวนี้ทับของเดิม ถ้าไม่ล้างก่อน
+     เอกสารจะซ้ำทั้งชุดแล้วโยน DUPLICATE_VENDOR_INVOICE ตั้งแต่เดือนแรก */
+  const fresh = blankState();
+  Object.keys(DB).forEach((k) => { if (!(k in fresh)) delete DB[k]; });
+  Object.keys(fresh).forEach((k) => { DB[k] = fresh[k]; });
+
   DB.company = {
     name: 'บริษัท ศรีวัฒนาการค้า จำกัด',
     nameEn: 'Sriwattana Trading Co., Ltd.',
@@ -456,6 +460,55 @@ function generateTransactions() {
           issueCreditNote({ date: mo + '-' + String(Math.min(28, last)).padStart(2, '0'),
             invoiceNo: target.no, base: String(divRound(round2(divRound(target.base, 12)), S)),
             reason: pick(['RETURN_DEFECT','PRICE_REDUCE','CALC_ERROR']) });
+        } catch (e) { /* ข้ามถ้าเงื่อนไขไม่ผ่าน */ }
+      }
+    }
+
+    // ---- วงจรก่อนลงบัญชี: ใบเสนอราคา → ใบสั่งขาย → ใบกำกับภาษี ----
+    const quoteCust = customers[(mi * 3) % customers.length];
+    const quoteLines = [{ desc:'งานติดตั้งและวางระบบตามข้อเสนอเดือน ' + thPeriod(mo),
+                          qty:1, price:String(rint(80, 260) * 1000), revenueSub:'service_revenue' }];
+    const q1 = issueTradeDoc('quotation', {
+      date: mo + '-' + String(rint(2, 6)).padStart(2, '0'),
+      partnerCode: quoteCust.code, lines: quoteLines, note:'ยืนราคา 30 วัน ชำระภายใน 30 วันนับจากวันส่งมอบ',
+    });
+    /* ใบที่ลูกค้าตอบรับ เดินต่อเป็นใบสั่งขายแล้วออกใบกำกับในเดือนเดียวกัน
+       ใบที่เหลือปล่อยค้างไว้ให้เห็นสถานะจริงว่ามีทั้งรอผล ปฏิเสธ และหมดอายุ */
+    if (mi % 3 !== 2) {
+      setTradeDocStatus('quotation', q1.no, 'approved');
+      const so = convertTradeDoc('quotation', q1.no, { date: mo + '-' + String(rint(7, 10)).padStart(2, '0') });
+      if (mi < months.length - 1) {
+        convertTradeDoc('salesOrder', so.no, { date: mo + '-' + String(rint(12, 20)).padStart(2, '0') });
+      }
+    } else {
+      setTradeDocStatus('quotation', q1.no, 'rejected', 'ลูกค้าเลือกผู้เสนอราคารายอื่น');
+    }
+
+    // ---- ใบสั่งซื้อ: ออกทุกเดือน แปลงเป็นตั้งหนี้เมื่อผู้ขายส่งใบกำกับมาแล้ว ----
+    const poVendor = vendors[mi % vendors.length];
+    const po = issueTradeDoc('purchaseOrder', {
+      date: mo + '-' + String(rint(3, 8)).padStart(2, '0'),
+      partnerCode: poVendor.code,
+      lines: [{ desc:'สั่งซื้อวัสดุและอุปกรณ์ตามแผนเดือน ' + thPeriod(mo),
+                qty:1, price:String(rint(20, 60) * 1000), expenseSub:'admin_expense' }],
+      note:'ส่งของภายใน 15 วัน',
+    });
+    if (mi % 2 === 0) {
+      convertTradeDoc('purchaseOrder', po.no, {
+        date: mo + '-' + String(rint(14, Math.min(24, last))).padStart(2, '0'),
+        vendorNo: 'PO-' + poVendor.code.slice(-4) + '-' + mo.replace('-', '') + '-1',
+        expenseSub: 'admin_expense',
+      });
+    }
+
+    // ---- ใบเพิ่มหนี้: คิดราคาต่ำไปแล้วต้องเก็บเพิ่ม (มาตรา 86/9) ----
+    if (mi === 3) {
+      const dnTarget = DB.docs.invoice.find((d) => periodOf(d.date) === mo && d.base > M('50000') && !d.debited);
+      if (dnTarget) {
+        try {
+          issueDebitNote({ date: mo + '-' + String(Math.min(27, last)).padStart(2, '0'),
+            invoiceNo: dnTarget.no, base: String(divRound(round2(divRound(dnTarget.base, 20)), S)),
+            reason: 'GOODS_UNDERPRICED' });
         } catch (e) { /* ข้ามถ้าเงื่อนไขไม่ผ่าน */ }
       }
     }

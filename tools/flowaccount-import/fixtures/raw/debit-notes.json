@@ -1,0 +1,41 @@
+[
+ {
+  "recordId": 6701,
+  "documentSerial": "DN690726-001",
+  "publishedOn": "2026-07-26T00:00:00+07:00",
+  "dueDate": "2026-08-25T00:00:00+07:00",
+  "contactCode": "C-002",
+  "contactName": "บริษัท สยามคอนกรีต จำกัด",
+  "documentReference": [
+   {
+    "referenceDocumentSerial": "IN690725-009",
+    "referenceDocumentType": 3
+   }
+  ],
+  "isVatInclusive": false,
+  "subTotal": 5000,
+  "totalAfterDiscount": 5000,
+  "vatAmount": 350,
+  "grandTotal": 5350,
+  "paidTotal": 0
+ },
+ {
+  "recordId": 6702,
+  "documentSerial": "DN690610-002",
+  "publishedOn": "2026-06-10T00:00:00+07:00",
+  "contactCode": "C-001",
+  "contactName": "บริษัท ไทยพัฒนาโลจิสติกส์ จำกัด",
+  "documentReference": [
+   {
+    "referenceDocumentSerial": "IN690601-003",
+    "referenceDocumentType": 3
+   }
+  ],
+  "isVatInclusive": false,
+  "subTotal": 2000,
+  "totalAfterDiscount": 2000,
+  "vatAmount": 140,
+  "grandTotal": 2140,
+  "paidTotal": 2140
+ }
+]

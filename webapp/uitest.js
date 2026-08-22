@@ -578,6 +578,68 @@ const overflowInfo = (page) => page.evaluate(() => {
   ok('เก็บกวาดคีย์ชื่อเดิมออกให้ เหลือแค่ที่ยังไม่ได้ย้าย',
     rebranded.oldKeys <= 1, rebranded.oldKeys + ' คีย์');
 
+  console.log('\n[17] วงจรเอกสารครบตั้งแต่ใบเสนอราคาถึงใบเพิ่มหนี้');
+  const salesMenu = await page.evaluate(() =>
+    navGroups().find((g) => g.g === 'เอกสารขาย').items.map((i) => i[1]));
+  const buyMenu = await page.evaluate(() =>
+    navGroups().find((g) => g.g === 'เอกสารซื้อ').items.map((i) => i[1]));
+  ok('★ เมนูเอกสารขายเรียงตามวงจรจริง เสนอราคา → สั่งขาย → ใบกำกับ → ใบเสร็จ',
+    salesMenu.join('|') === 'ใบเสนอราคา|ใบสั่งขาย|ใบกำกับภาษี|ใบเสร็จรับเงิน|ใบลดหนี้|ใบเพิ่มหนี้',
+    salesMenu.join(' → '));
+  ok('เมนูเอกสารซื้อเริ่มจากใบสั่งซื้อ',
+    buyMenu.join('|') === 'ใบสั่งซื้อ|ตั้งหนี้ผู้ขาย|ใบสำคัญจ่าย', buyMenu.join(' → '));
+
+  /* ทุกหน้าจอในเมนูต้องเปิดได้จริง ไม่ใช่มีชื่ออยู่ในเมนูเฉย ๆ */
+  const screensOk = await page.evaluate(() => {
+    const bad = [];
+    navScreens().forEach(function (sc) {
+      try {
+        STATE.screen = sc; STATE.sel = null; STATE.filter = ''; render();
+        const html = document.getElementById('main').innerHTML;
+        if (!html || html.length < 80) bad.push(sc + ' (ว่าง)');
+      } catch (e) { bad.push(sc + ' (' + e.message + ')'); }
+    });
+    return { total: navScreens().length, bad };
+  });
+  ok('★ ทุกหน้าจอที่อยู่ในเมนูเปิดได้จริงทั้งหมด', screensOk.bad.length === 0,
+    screensOk.total + ' หน้า' + (screensOk.bad.length ? ' · พัง ' + screensOk.bad.join(', ') : ''));
+
+  const cycle = await page.evaluate(() => {
+    const cust = DB.partners.find((p) => p.kind === 'customer');
+    /* ใบกำกับต้องมีข้อมูลผู้ซื้อครบตามมาตรา 86/4 — คู่ค้าที่ย้ายมาจากระบบเดิมอาจยังไม่ครบ */
+    if (!cust.taxId) cust.taxId = '0105536000003';
+    if (!cust.address) cust.address = '99 ถนนทดสอบ แขวงทดสอบ เขตทดสอบ กรุงเทพมหานคร 10110';
+    if (!cust.branch) cust.branch = '00000';
+    const per = DB.periods.find((p) => p.status === 'open');
+    const d = per.start;
+    const q = issueTradeDoc('quotation', { partnerCode: cust.code, date: d,
+      lines: [{ desc: 'งานทดสอบวงจรเอกสาร', qty: 1, price: '40000' }] });
+    STATE.screen = 'quotations'; STATE.sel = null; render();
+    const listed = document.getElementById('main').innerHTML.indexOf(q.no) >= 0;
+    setTradeDocStatus('quotation', q.no, 'approved');
+    const so = convertTradeDoc('quotation', q.no, { date: d });
+    const inv = convertTradeDoc('salesOrder', so.no, { date: d });
+    STATE.screen = 'quotations'; STATE.sel = q.no; render();
+    const showsTarget = document.getElementById('main').innerHTML.indexOf(so.no) >= 0;
+    const dn = issueDebitNote({ invoiceNo: inv.no, date: d, base: '1000', reason: 'GOODS_UNDERPRICED' });
+    STATE.screen = 'debitnotes'; STATE.sel = null; STATE.period = periodOf(d); render();
+    const dnListed = document.getElementById('main').innerHTML.indexOf(dn.no) >= 0;
+    STATE.screen = 'invoices'; STATE.sel = inv.no; render();
+    const detail = document.getElementById('main').innerHTML;
+    return { listed, showsTarget, dnListed,
+      dnOnInvoice: detail.indexOf('เพิ่มหนี้แล้ว') >= 0 && detail.indexOf(dn.no) >= 0,
+      qTotal: q.total, invTotal: inv.total, out: invOutstanding(inv), dnTotal: dn.total,
+      balanced: trialBalance(DB.periods[0].start, DB.periods[DB.periods.length - 1].end).balanced };
+  });
+  ok('ใบเสนอราคาที่ออกใหม่ขึ้นในทะเบียนทันที', cycle.listed);
+  ok('★ แปลงใบเสนอราคา → ใบสั่งขาย → ใบกำกับภาษี แล้วยอดไม่เพี้ยน',
+    cycle.qTotal === cycle.invTotal, 'รวม ' + (cycle.invTotal / 10000).toFixed(2));
+  ok('หน้าใบเสนอราคาบอกได้ว่าแปลงไปเป็นเอกสารใบไหน', cycle.showsTarget);
+  ok('ใบเพิ่มหนี้ขึ้นในทะเบียนของงวดนั้น', cycle.dnListed);
+  ok('★ หน้าใบกำกับแสดงใบเพิ่มหนี้และยอดคงค้างที่เพิ่มขึ้น',
+    cycle.dnOnInvoice && cycle.out === cycle.invTotal + cycle.dnTotal);
+  ok('งบทดลองยังสมดุลหลังเดินเอกสารครบวงจรบนหน้าจอ', cycle.balanced);
+
   ok('ไม่มีข้อผิดพลาดในคอนโซลเลย', errors.length === 0, errors.slice(0, 3).join(' | '));
 
   await page.setViewportSize({ width: 1440, height: 950 });

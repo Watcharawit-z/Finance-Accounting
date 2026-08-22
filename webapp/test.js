@@ -4,7 +4,9 @@ const src = ['engine','operations','seed'].map(f => fs.readFileSync(__dirname + 
 const ctx = new Function(src + '\nreturn {DB,buildSeed,trialBalance,balanceSheet,incomeStatement,cashFlow,' +
   'reconciliationChecks,aging,issueInvoice,receivePayment,issueCreditNote,recordBill,payBill,' +
   'runPayroll,runDepreciation,fileVat,fileWht,post,reverse,fmt,M,validTaxId,DomainError,' +
-  'closeChecklist,closePeriod,resolveRate,round2,pct,periodOf,computePit,ssoRate,divRound,buildBlank};')();
+  'closeChecklist,closePeriod,resolveRate,round2,pct,periodOf,computePit,ssoRate,divRound,buildBlank,' +
+  'issueDebitNote,DN_REASONS,issueTradeDoc,setTradeDocStatus,convertTradeDoc,tradeDocStatus,' +
+  'TRADE_DOCS,invOutstanding,outstandingAsOf,unM};')();
 
 let pass = 0, fail = 0;
 function ok(label, cond, extra) {
@@ -159,6 +161,102 @@ const net = [target, rev].reduce((s, e) => s + e.lines.reduce((t, l) => t + l.dr
 ok('ยอดสุทธิหลังกลับรายการ = 0', net === 0);
 ok('รายการเดิมยังอยู่ในบัญชีแยกประเภท', target.lines.length > 0 && target.status === 'reversed');
 ok('งบทดลองยังสมดุลหลังกลับรายการ', ctx.trialBalance('2026-01-01','2026-12-31').balanced);
+
+console.log('\n=== 7.5 ใบเพิ่มหนี้ (ม.86/9) ===');
+const dnInv = D.docs.invoice.find((d) => ctx.periodOf(d.date) === '2026-07' && d.status === 'issued' && !d.debited);
+const outBefore = ctx.invOutstanding(dnInv);
+const tbBeforeDn = ctx.trialBalance('2026-01-01', '2026-12-31');
+const dn = ctx.issueDebitNote({ invoiceNo: dnInv.no, date: '2026-07-28',
+  base: '1000', reason: 'GOODS_UNDERPRICED' });
+ok('ใบเพิ่มหนี้คิดภาษีขาย 7% จากมูลค่าที่เพิ่ม', dn.vat === ctx.M('70'), ctx.fmt(dn.vat));
+ok('ยอดคงค้างของใบกำกับเพิ่มขึ้นเท่ายอดรวมใบเพิ่มหนี้',
+   ctx.invOutstanding(dnInv) === outBefore + dn.total, ctx.fmt(ctx.invOutstanding(dnInv)));
+ok('งบทดลองยังสมดุลหลังออกใบเพิ่มหนี้',
+   ctx.trialBalance('2026-01-01', '2026-12-31').balanced);
+ok('เดบิตรวมเพิ่มขึ้นเท่ายอดใบเพิ่มหนี้',
+   ctx.trialBalance('2026-01-01', '2026-12-31').totalDr === tbBeforeDn.totalDr + dn.total);
+const dnTax = D.taxTx.find((t) => t.docNo === dn.no);
+ok('ใบเพิ่มหนี้เข้ารายงานภาษีขายเป็นจำนวนบวก (ต่างจากใบลดหนี้ที่ติดลบ)',
+   dnTax && dnTax.kind === 'vat_output' && dnTax.tax > 0 && dnTax.refDoc === dnInv.no);
+ok('รายงานย้อนหลังก่อนวันออกใบเพิ่มหนี้ ยังไม่รวมยอดที่เพิ่ม',
+   ctx.outstandingAsOf('ar', dnInv, '2026-07-28') - ctx.outstandingAsOf('ar', dnInv, '2026-07-27') === dn.total,
+   ctx.fmt(ctx.outstandingAsOf('ar', dnInv, '2026-07-27')) + ' → ' + ctx.fmt(ctx.outstandingAsOf('ar', dnInv, '2026-07-28')));
+const dnChecks = ctx.reconciliationChecks('2026-07-31').checks;
+const arChk = dnChecks.find((c) => c.code === 'AR_SUBLEDGER');
+const voChk = dnChecks.find((c) => c.code === 'OUTPUT_VAT');
+ok('ลูกหนี้รายรายยังตรงกับบัญชีคุมหลังออกใบเพิ่มหนี้', arChk.ok,
+   ctx.fmt(arChk.control) + ' vs ' + ctx.fmt(arChk.sub));
+ok('ภาษีขายในทะเบียนยังตรงกับที่ลงบัญชีหลังออกใบเพิ่มหนี้', voChk.ok,
+   ctx.fmt(voChk.control) + ' vs ' + ctx.fmt(voChk.sub));
+
+/* ใบเพิ่มหนี้ที่ออกกับใบที่ชำระครบแล้ว ต้องดึงสถานะกลับมาเป็นค้างชำระ */
+const paidInv = D.docs.invoice.find((d) => d.status === 'paid' && ctx.periodOf(d.date) === '2026-07');
+if (paidInv) {
+  ctx.issueDebitNote({ invoiceNo: paidInv.no, date: '2026-07-29', base: '500', reason: 'VAT_UNDERCALC' });
+  ok('ใบที่ชำระครบแล้วกลับมาเป็นค้างชำระเมื่อออกใบเพิ่มหนี้',
+     paidInv.status === 'partially_paid' && ctx.invOutstanding(paidInv) > 0);
+} else { ok('ใบที่ชำระครบแล้วกลับมาเป็นค้างชำระเมื่อออกใบเพิ่มหนี้', true, '(ไม่มีใบที่ชำระครบในงวดนี้)'); }
+
+throws('ใบเพิ่มหนี้ที่ไม่อ้างใบกำกับเดิม',
+  () => ctx.issueDebitNote({ invoiceNo: 'ไม่มีจริง', date: '2026-07-28', base: '100', reason: 'GOODS_EXCESS' }),
+  'DEBIT_NOTE_NO_ORIGIN');
+throws('เหตุผลนอกมาตรา 86/9',
+  () => ctx.issueDebitNote({ invoiceNo: dnInv.no, date: '2026-07-28', base: '100', reason: 'ลูกค้าขอ' }),
+  'DEBIT_NOTE_REASON_INVALID');
+throws('ใบเพิ่มหนี้ลงวันที่ก่อนใบกำกับเดิม',
+  () => ctx.issueDebitNote({ invoiceNo: dnInv.no, date: '2026-01-01', base: '100', reason: 'GOODS_EXCESS' }),
+  'DEBIT_NOTE_BEFORE_ORIGIN');
+throws('ใบเพิ่มหนี้ยอดศูนย์',
+  () => ctx.issueDebitNote({ invoiceNo: dnInv.no, date: '2026-07-28', base: '0', reason: 'GOODS_EXCESS' }),
+  'DEBIT_NOTE_ZERO');
+
+console.log('\n=== 7.6 เอกสารก่อนลงบัญชี ===');
+const cust = D.partners.find((p) => p.kind === 'customer');
+const vend = D.partners.find((p) => p.kind === 'vendor');
+const entriesBefore2 = D.entries.length;
+const q = ctx.issueTradeDoc('quotation', { partnerCode: cust.code, date: '2026-07-05',
+  lines: [{ desc: 'งานวางระบบตามข้อเสนอ', qty: 2, price: '25000' }] });
+ok('ใบเสนอราคาคิดยอดรวมภาษีถูกต้อง',
+   q.base === ctx.M('50000') && q.vat === ctx.M('3500') && q.total === ctx.M('53500'), ctx.fmt(q.total));
+ok('ใบเสนอราคาไม่สร้างใบสำคัญทางบัญชี', D.entries.length === entriesBefore2);
+ok('ใบเสนอราคาไม่เข้ารายงานภาษีขาย', !D.taxTx.some((t) => t.docNo === q.no));
+ok('ใบเสนอราคาตั้งวันยืนราคาให้อัตโนมัติ 30 วัน', q.validUntil === '2026-08-04', q.validUntil);
+ok('พ้นวันยืนราคาแล้วขึ้นสถานะหมดอายุเอง',
+   ctx.tradeDocStatus('quotation', q, '2026-08-05') === 'expired'
+   && ctx.tradeDocStatus('quotation', q, '2026-08-03') === 'issued');
+
+ctx.setTradeDocStatus('quotation', q.no, 'approved');
+const so = ctx.convertTradeDoc('quotation', q.no, { date: '2026-07-08' });
+ok('แปลงใบเสนอราคาเป็นใบสั่งขายแล้วยอดไม่เพี้ยน', so.total === q.total, ctx.fmt(so.total));
+ok('ใบเสนอราคาถูกปิดและชี้ไปเอกสารปลายทาง',
+   q.status === 'closed' && q.convertedTo === so.no);
+ok('ใบสั่งขายจำที่มาได้', so.fromDoc === q.no);
+const invFromSo = ctx.convertTradeDoc('salesOrder', so.no, { date: '2026-07-10' });
+ok('แปลงใบสั่งขายเป็นใบกำกับภาษีแล้วยอดยังเท่าเดิม', invFromSo.total === q.total, ctx.fmt(invFromSo.total));
+ok('ใบกำกับที่แปลงมาลงบัญชีจริงและเข้ารายงานภาษีขาย',
+   !!invFromSo.entryNo && D.taxTx.some((t) => t.docNo === invFromSo.no));
+throws('แปลงเอกสารเดิมซ้ำอีกรอบ',
+  () => ctx.convertTradeDoc('quotation', q.no, { date: '2026-07-11' }), 'TRADE_DOC_ALREADY_CONVERTED');
+throws('เปลี่ยนสถานะเอกสารที่แปลงไปแล้ว',
+  () => ctx.setTradeDocStatus('quotation', q.no, 'cancelled'), 'TRADE_DOC_ALREADY_CONVERTED');
+throws('ออกใบเสนอราคาให้ผู้ขาย',
+  () => ctx.issueTradeDoc('quotation', { partnerCode: vend.code, date: '2026-07-05',
+    lines: [{ desc: 'x', qty: 1, price: '100' }] }), 'PARTNER_WRONG_SIDE');
+throws('ใบเสนอราคาไม่มีบรรทัดรายการ',
+  () => ctx.issueTradeDoc('quotation', { partnerCode: cust.code, date: '2026-07-05', lines: [] }), 'NO_LINES');
+
+const po = ctx.issueTradeDoc('purchaseOrder', { partnerCode: vend.code, date: '2026-07-06',
+  lines: [{ desc: 'สั่งซื้ออุปกรณ์สำนักงาน', qty: 1, price: '18000', expenseSub: 'admin_expense' }] });
+ok('ใบสั่งซื้อไม่มีวันยืนราคาและไม่ก่อหนี้', po.validUntil === null && !D.docs.bill.some((b) => b.no === po.no));
+throws('ตั้งหนี้จากใบสั่งซื้อโดยไม่มีเลขที่ใบกำกับของผู้ขาย',
+  () => ctx.convertTradeDoc('purchaseOrder', po.no, { date: '2026-07-20' }), 'VENDOR_INVOICE_NO_REQUIRED');
+const billFromPo = ctx.convertTradeDoc('purchaseOrder', po.no,
+  { date: '2026-07-20', vendorNo: 'PO-TEST-0001', expenseSub: 'admin_expense' });
+ok('ตั้งหนี้จากใบสั่งซื้อแล้วยอดตรงกัน', billFromPo.total === po.total, ctx.fmt(billFromPo.total));
+ok('งบทดลองยังสมดุลหลังแปลงเอกสารทั้งชุด',
+   ctx.trialBalance('2026-01-01', '2026-12-31').balanced);
+ok('ตัวแปลงกลับค่าเงิน unM() ส่งเข้า M() แล้วได้ค่าเดิม',
+   ctx.M(ctx.unM(ctx.M('12345.6789'))) === ctx.M('12345.6789'), ctx.unM(ctx.M('12345.6789')));
 
 console.log('\n=== 8. ปิดงวด ===');
 const chk = ctx.closeChecklist('2026-06');

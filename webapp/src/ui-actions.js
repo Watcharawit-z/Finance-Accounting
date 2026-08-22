@@ -95,7 +95,7 @@ function modalInvoice() {
 function modalReceive(no) {
   const inv = DB.docs.invoice.find((d) => d.no === no);
   if (!inv) return;
-  const out = inv.total - inv.paid - inv.credited;
+  const out = invOutstanding(inv);
   modal({
     title:'รับชำระเงินจากใบกำกับ ' + no,
     sub: inv.partnerName + ' · คงเหลือ ' + fmt(out) + ' บาท',
@@ -139,6 +139,108 @@ function modalCreditNote(no) {
         const c = issueCreditNote({ invoiceNo: no, base: val('base'), date: val('date'), reason: val('reason') });
         toast('ออกใบลดหนี้ ' + c.no + ' แล้ว', 'ok', 'ลดภาษีขาย ' + fmt(c.vat) + ' บาทในงวดนี้');
         return c;
+      });
+    },
+  });
+}
+
+function modalDebitNote(no) {
+  const inv = DB.docs.invoice.find((d) => d.no === no);
+  if (!inv) return;
+  modal({
+    title:'ออกใบเพิ่มหนี้อ้างใบกำกับ ' + no,
+    sub:'ใช้เมื่อเรียกเก็บเงินต่ำกว่าที่ควร ออกได้เฉพาะเหตุตามมาตรา 86/9',
+    body:'<div class="flds">'
+      + field({ name:'base', label:'มูลค่าที่เพิ่ม (ก่อนภาษี)', value:'0',
+          hint:'ยอดเดิมของใบกำกับก่อนภาษีคือ ' + fmt(inv.base) + ' บาท' })
+      + field({ name:'date', label:'วันที่ออกใบเพิ่มหนี้', type:'date', value: defaultDate() })
+      + field({ name:'reason', label:'เหตุแห่งการเพิ่มหนี้', type:'select', wide:true,
+          options: Object.keys(DN_REASONS).map((k) => [k, DN_REASONS[k]]) })
+      + '</div>',
+    submitLabel:'ออกใบเพิ่มหนี้',
+    note:'อย่าออกใบกำกับภาษีใบใหม่ทับ เพราะรายได้และภาษีขายจะถูกนับซ้ำสองรอบ',
+    onSubmit: function () {
+      submitAction(function () {
+        const c = issueDebitNote({ invoiceNo: no, base: val('base'), date: val('date'), reason: val('reason') });
+        toast('ออกใบเพิ่มหนี้ ' + c.no + ' แล้ว', 'ok', 'เพิ่มภาษีขาย ' + fmt(c.vat) + ' บาทในงวดนี้');
+        return c;
+      });
+    },
+  });
+}
+
+/* ---------- ใบเสนอราคา / ใบสั่งขาย / ใบสั่งซื้อ ---------- */
+function modalTradeDoc(kind) {
+  const cfg = TRADE_DOCS[kind];
+  const isCust = cfg.side === 'customer';
+  modal({
+    title:'ออก' + cfg.label,
+    sub:'ยังไม่ลงบัญชี ตัวเลขจะเข้าบัญชีตอนแปลงเป็นเอกสารขั้นถัดไป',
+    body:'<div class="flds">'
+      + field({ name:'partner', label: isCust ? 'ลูกค้า' : 'ผู้ขาย', type:'select',
+          options: isCust ? optCustomers() : optVendors() })
+      + field({ name:'date', label:'วันที่ออกเอกสาร', type:'date', value: defaultDate() })
+      + (cfg.validDays
+          ? field({ name:'validUntil', label:'ยืนราคาถึงวันที่', type:'date',
+              value: addDays(defaultDate(), cfg.validDays),
+              hint:'พ้นวันนี้แล้วระบบจะขึ้นสถานะหมดอายุให้เอง' })
+          : '')
+      + field({ name:'note', label:'หมายเหตุ', wide:true, placeholder:'เงื่อนไขการชำระเงิน กำหนดส่งมอบ ฯลฯ' })
+      + '</div>' + lineEditor(4),
+    submitLabel:'บันทึก' + cfg.label,
+    onSubmit: function () {
+      submitAction(function () {
+        const doc = issueTradeDoc(kind, {
+          partnerCode: val('partner'), date: val('date'),
+          validUntil: cfg.validDays ? (val('validUntil') || null) : null,
+          note: val('note'), lines: collectLines(4),
+        });
+        STATE.screen = { quotation:'quotations', salesOrder:'salesorders', purchaseOrder:'purchaseorders' }[kind];
+        STATE.sel = doc.no;
+        toast('บันทึก' + cfg.label + ' ' + doc.no + ' แล้ว', 'ok', 'รวมทั้งสิ้น ' + fmt(doc.total) + ' บาท');
+        return doc;
+      });
+    },
+  });
+}
+
+function modalConvertTradeDoc(kind, no) {
+  const cfg = TRADE_DOCS[kind];
+  const d = DB.docs[kind].find((x) => x.no === no);
+  if (!d) return;
+  const toBill = cfg.next === 'bill';
+  const nextLabel = cfg.next === 'salesOrder' ? 'ใบสั่งขาย'
+    : cfg.next === 'invoice' ? 'ใบกำกับภาษี' : 'รายการตั้งหนี้';
+  const expOpts = [
+    ['inventory','ซื้อสินค้าเข้าคลัง'],
+    ['admin_expense','ค่าใช้จ่ายในการบริหาร'],
+    ['selling_expense','ค่าใช้จ่ายในการขาย'],
+    ['ppe','ซื้อทรัพย์สินถาวร'],
+    ['finance_cost','ค่าธรรมเนียมและดอกเบี้ย'],
+  ];
+  modal({
+    title:'แปลง' + cfg.label + ' ' + no + ' เป็น' + nextLabel,
+    sub: d.partnerName + ' · รวม ' + fmt(d.total) + ' บาท · ' + d.lines.length + ' รายการ',
+    body:'<div class="flds">'
+      + field({ name:'date', label:'วันที่ของ' + nextLabel, type:'date', value: defaultDate(),
+          hint: cfg.next === 'salesOrder' ? '' : 'ต้องอยู่ในงวดที่ยังเปิดอยู่ ระบบจะเลือกอัตราภาษีตามวันที่นี้' })
+      + (toBill ? field({ name:'vendorNo', label:'เลขที่ใบกำกับภาษีของผู้ขาย', placeholder:'ดูจากใบกำกับที่ผู้ขายส่งมา' }) : '')
+      + (toBill ? field({ name:'expenseSub', label:'บันทึกเข้าบัญชี', type:'select', value:'admin_expense', options: expOpts }) : '')
+      + (toBill ? field({ name:'wht', label:'ภาษีหัก ณ ที่จ่ายตอนจ่ายเงิน', type:'select', options: optWht() }) : '')
+      + '</div>',
+    submitLabel:'แปลงเป็น' + nextLabel,
+    note: cfg.next === 'salesOrder' ? 'ยังไม่ลงบัญชีในขั้นนี้'
+      : 'ขั้นนี้จะลงบัญชีจริงและจองเลขที่เอกสาร',
+    onSubmit: function () {
+      submitAction(function () {
+        const made = convertTradeDoc(kind, no, {
+          date: val('date'), vendorNo: toBill ? val('vendorNo') : null,
+          expenseSub: toBill ? val('expenseSub') : null,
+          whtCode: toBill ? (val('wht') || null) : null,
+        });
+        STATE.sel = null;
+        toast('แปลงเป็น ' + made.no + ' แล้ว', 'ok', cfg.label + ' ' + no + ' ปิดรายการแล้ว');
+        return made;
       });
     },
   });
@@ -346,13 +448,32 @@ function dispatch(act) {
   if (head === 'modal')   { if (arg === 'close') closeModal(); else if (modalSubmit) modalSubmit(); return; }
 
   if (head === 'new') {
-    if (!periodIsOpen()) { toast('งวด ' + thPeriod(STATE.period) + ' ปิดแล้ว', 'err', 'เลือกงวดที่ยังเปิดอยู่ก่อน'); return; }
+    /* เอกสารก่อนลงบัญชีไม่ผูกกับงวด ออกได้แม้งวดปัจจุบันปิดแล้ว
+       ส่วนใบที่ลงบัญชีจริงต้องอยู่ในงวดที่ยังเปิด */
+    const postsToLedger = arg === 'invoice' || arg === 'bill';
+    if (postsToLedger && !periodIsOpen()) {
+      toast('งวด ' + thPeriod(STATE.period) + ' ปิดแล้ว', 'err', 'เลือกงวดที่ยังเปิดอยู่ก่อน'); return;
+    }
     if (arg === 'invoice') modalInvoice();
     if (arg === 'bill') modalBill();
+    if (arg === 'quotation') modalTradeDoc('quotation');
+    if (arg === 'salesorder') modalTradeDoc('salesOrder');
+    if (arg === 'purchaseorder') modalTradeDoc('purchaseOrder');
     return;
   }
   if (head === 'pay')     { modalReceive(arg); return; }
   if (head === 'cn')      { modalCreditNote(arg); return; }
+  if (head === 'dn')      { modalDebitNote(arg); return; }
+  if (head === 'trade') {
+    const [kind, what, docNo] = rest;
+    if (!TRADE_DOCS[kind]) return;
+    if (what === 'convert') { modalConvertTradeDoc(kind, docNo); return; }
+    runAction(function () {
+      setTradeDocStatus(kind, docNo, what);
+      toast(TRADE_DOCS[kind].label + ' ' + docNo + ' — ' + tradePill(what).st[1], 'ok');
+    });
+    return;
+  }
   if (head === 'paybill') { modalPayBill(arg); return; }
   if (head === 'rev')     { modalReverse(arg); return; }
   if (head === 'reopen')  { modalReopen(); return; }

@@ -76,7 +76,7 @@ ok('★ บรรทัด "รวม" ถูกข้าม ไม่ถูก�
 const dr = tb.rows.reduce((s, r) => s + r.debit, 0);
 const cr = tb.rows.reduce((s, r) => s + r.credit, 0);
 ok('เดบิตรวม = เครดิตรวม', dr === cr, B(dr) + ' = ' + B(cr));
-ok('อ่านตัวเลขที่มีคอมม่าและอัญประกาศได้', dr === core.M('1493990'), B(dr));
+ok('อ่านตัวเลขที่มีคอมม่าและอัญประกาศได้', dr === core.M('1499340'), B(dr));
 
 console.log('\n=== 3.1 พนักงาน ===');
 const emps = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures/raw/employees.json'), 'utf8'));
@@ -116,7 +116,7 @@ ok('พนักงานอยู่ในแฟ้มข้อมูล ไม
 
 const cov = Object.fromEntries((pkg.coverage || []).map((c) => [c.source, c]));
 ok('★ รายงานความครบถ้วนครอบคลุมทุกชุดข้อมูลที่ดึงมา',
-   ['tax-invoices','receivable-invoices','purchases','receipts','credit-notes','employees']
+   ['tax-invoices','receivable-invoices','purchases','receipts','credit-notes','debit-notes','employees']
      .every((k) => cov[k]), Object.keys(cov).join(', '));
 ok('★ เอกสารเลขซ้ำข้ามชุดข้อมูลถูกตัดออก ไม่นับยอดลูกหนี้สองรอบ',
    cov['receivable-invoices'].duplicate === 1, 'ตัดซ้ำ ' + cov['receivable-invoices'].duplicate + ' ใบ');
@@ -130,6 +130,13 @@ ok('★ ใบลดหนี้ถูกหักออกจากใบกำ
    credited && core.M(credited.credited) === core.M('10700'), credited && credited.credited);
 ok('ใบลดหนี้ที่หาใบต้นทางไม่เจอถูกเตือน ไม่ถูกหักมั่ว',
    pkg.warnings.some((w) => w.message.indexOf('ไม่อยู่ในใบที่ยังค้าง') >= 0));
+
+const dnOpen = pkg.openInvoices.find((d) => d.no === 'DN690726-001');
+ok('★ ใบเพิ่มหนี้ที่ยังเก็บเงินไม่ได้ ถูกยกมาเป็นลูกหนี้ค้าง ไม่หายไปเฉย ๆ',
+   dnOpen && core.M(dnOpen.total) === core.M('5350'), dnOpen && dnOpen.total);
+ok('ใบเพิ่มหนี้ที่เก็บเงินครบแล้วไม่ถูกยกมาซ้ำ',
+   !pkg.openInvoices.some((d) => d.no === 'DN690610-002')
+   && cov['debit-notes'].closed === 1, 'ปิดแล้ว ' + cov['debit-notes'].closed + ' ใบ');
 
 /* โหลดเครื่องบัญชีจริงแล้วนำเข้าเข้าไปในบริษัทเปล่า */
 const webapp = path.join(__dirname, '..', '..', 'webapp', 'src');
@@ -147,7 +154,7 @@ const res = app.importPackage(pkg, {});
 ok('นำเข้าสำเร็จ', res.opening && res.opening.entry.no.startsWith('OB'), res.opening.entry.no);
 ok('คู่ค้าเข้าระบบครบ', res.partners === pkg.partners.length, res.partners + ' ราย');
 ok('สินค้าเข้าระบบครบ', res.items === pkg.items.length, res.items + ' รายการ');
-ok('ลูกหนี้ค้างยกมาเข้าเป็นบัญชีย่อย', res.invoices === 3, res.invoices + ' ใบ');
+ok('ลูกหนี้ค้างยกมาเข้าเป็นบัญชีย่อย', res.invoices === 4, res.invoices + ' ใบ');
 ok('เจ้าหนี้ค้างยกมาเข้าเป็นบัญชีย่อย', res.bills === 2, res.bills + ' รายการ');
 ok('★ พนักงานเข้าระบบครบ พร้อมทำเงินเดือนงวดแรก',
    res.employees === 4 && app.DB.employees.length === 4, res.employees + ' คน');
@@ -163,7 +170,7 @@ res.checks.forEach((c) => ok('ยอดคุม: ' + c.label, c.ok, c.ok ? '' :
 ok('★ ยอดคุมผ่านครบทุกข้อหลังย้ายข้อมูล', res.allPassed);
 
 const ar = app.aging('ar', '2026-07-31');
-ok('อายุลูกหนี้ตรงกับบัญชีคุม', ar.totals.total === core.M('180830'), app.fmt(ar.totals.total));
+ok('อายุลูกหนี้ตรงกับบัญชีคุม', ar.totals.total === core.M('186180'), app.fmt(ar.totals.total));
 const ap = app.aging('ap', '2026-07-31');
 ok('★ อายุเจ้าหนี้ตรงกับบัญชีคุม แม้มีใบที่ยอดเป็นยอดหลังหักภาษี',
    ap.totals.total === core.M('147660'), app.fmt(ap.totals.total));
@@ -176,7 +183,7 @@ ok('★ นำเข้าไฟล์เดิมซ้ำถูกปฏิเ
 app.receivePayment({ invoiceNo: 'IV690712-001', date: '2026-08-05', amount: '38030' });
 const ar2 = app.aging('ar', '2026-08-31');
 ok('★ รับชำระหลังย้ายแล้วยอดลูกหนี้ลดถูกต้อง ไม่นับซ้ำกับยอดที่ชำระก่อนตัดยอด',
-   ar2.totals.total === core.M('142800'), app.fmt(ar2.totals.total));
+   ar2.totals.total === core.M('148150'), app.fmt(ar2.totals.total));
 const rec2 = app.reconciliationChecks('2026-08-31');
 ok('ยอดคุมยังตรงหลังรับชำระ', rec2.allPassed,
    rec2.checks.filter((c) => !c.ok).map((c) => c.label).join(', ') || '');

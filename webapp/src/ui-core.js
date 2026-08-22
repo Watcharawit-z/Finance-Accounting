@@ -71,6 +71,8 @@ function statusPill(s) {
     issued:['open','ลงบัญชีแล้ว'], paid:['paid','ชำระแล้ว'], partially_paid:['wait','ชำระบางส่วน'],
     draft:['draft','ฉบับร่าง'], void:['late','ยกเลิก'], posted:['paid','ลงบัญชีแล้ว'],
     reversed:['late','กลับรายการ'], open:['open','เปิดอยู่'], closed:['paid','ปิดแล้ว'],
+    approved:['paid','อนุมัติแล้ว'], rejected:['late','ถูกปฏิเสธ'], expired:['late','หมดอายุ'],
+    cancelled:['late','ยกเลิก'],
   };
   const m = map[s] || ['draft', s];
   return { st: m };
@@ -258,17 +260,27 @@ function navGroups() {
   const unmatched = DB.bankTxns.filter((t) => !t.matched).length;
   const chk = closeChecklist(STATE.period);
   const todo = chk.items.filter((i) => !i.ok).length;
+  const stillOpen = (k) => (DB.docs[k] || []).filter((d) => tradeDocStatus(k, d) === 'issued').length;
+  const quoteOpen = stillOpen('quotation');
+  const soOpen = stillOpen('salesOrder');
+  const poOpen = stillOpen('purchaseOrder');
   return [
     { g: 'ภาพรวม', items: [
       ['dashboard', 'แดชบอร์ด', todo || null],
       ['close', 'ปิดงวดบัญชี', null],
     ]},
+    /* เรียงตามลำดับที่เอกสารเกิดจริง เสนอราคา → สั่งขาย → ใบกำกับ → ใบเสร็จ
+       ปลายกลุ่มคือใบที่ออกตามหลังเพื่อแก้ยอด (ลดหนี้ ม.86/10 · เพิ่มหนี้ ม.86/9) */
     { g: 'เอกสารขาย', items: [
+      ['quotations', 'ใบเสนอราคา', quoteOpen || null],
+      ['salesorders', 'ใบสั่งขาย', soOpen || null],
       ['invoices', 'ใบกำกับภาษี', null],
       ['receipts', 'ใบเสร็จรับเงิน', null],
       ['creditnotes', 'ใบลดหนี้', null],
+      ['debitnotes', 'ใบเพิ่มหนี้', null],
     ]},
     { g: 'เอกสารซื้อ', items: [
+      ['purchaseorders', 'ใบสั่งซื้อ', poOpen || null],
       ['bills', 'ตั้งหนี้ผู้ขาย', null],
       ['payments', 'ใบสำคัญจ่าย', null],
     ]},

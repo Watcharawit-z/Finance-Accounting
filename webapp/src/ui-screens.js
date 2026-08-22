@@ -228,14 +228,16 @@ function scClose() {
 function invoiceDetail(no) {
   const d = DB.docs.invoice.find((x) => x.no === no);
   if (!d) return '';
-  const out = d.total - d.paid - d.credited;
+  const out = invOutstanding(d);
   const rcs = DB.docs.receipt.filter((r) => r.invoiceNo === no);
   const cns = DB.docs.creditNote.filter((c) => c.invoiceNo === no);
+  const dns = DB.docs.debitNote.filter((c) => c.invoiceNo === no);
   return card({
     title: 'ใบกำกับภาษี/ใบส่งของ เลขที่ ' + d.no,
     sub: 'ออกวันที่ ' + thDate(d.date) + ' · ครบกำหนด ' + thDate(d.due),
     actions: (out > 0 ? btn('pay:' + d.no, 'รับชำระเงิน', 'primary') : '')
       + (out > 0 ? btn('cn:' + d.no, 'ออกใบลดหนี้') : '')
+      + (d.status !== 'void' ? btn('dn:' + d.no, 'ออกใบเพิ่มหนี้') : '')
       + btn('entry:' + d.entryNo, 'ดูใบสำคัญ') + btn('sel:', 'ปิด'),
     body:
       '<div class="docgrid">'
@@ -257,6 +259,7 @@ function invoiceDetail(no) {
       + '<div class="gt"><span>จำนวนเงินรวมทั้งสิ้น</span><b>' + fmt(d.total) + '</b></div>'
       + (d.paid ? '<div><span>รับชำระแล้ว</span><b>' + fmt(d.paid) + '</b></div>' : '')
       + (d.credited ? '<div><span>ลดหนี้แล้ว</span><b>' + fmt(d.credited) + '</b></div>' : '')
+      + (d.debited ? '<div><span>เพิ่มหนี้แล้ว</span><b>' + fmt(d.debited) + '</b></div>' : '')
       + '<div class="gt"><span>คงเหลือ</span><b>' + fmt(out) + '</b></div>'
       + '</div>'
       + (rcs.length ? '<div class="sub-h">ใบเสร็จรับเงินที่อ้างถึงใบนี้</div>' + tbl({
@@ -264,7 +267,10 @@ function invoiceDetail(no) {
           rows: rcs.map((r) => [{mono:r.no}, thDateNum(r.date), {n:r.gross}, {n:r.wht}, {n:r.net}]) }) : '')
       + (cns.length ? '<div class="sub-h">ใบลดหนี้ที่อ้างถึงใบนี้</div>' + tbl({
           cols:[{t:'เลขที่'},{t:'วันที่'},{t:'เหตุผลตามมาตรา 86/10'},{t:'รวม',a:'r'}],
-          rows: cns.map((c) => [{mono:c.no}, thDateNum(c.date), c.reasonText, {n:c.total}]) }) : ''),
+          rows: cns.map((c) => [{mono:c.no}, thDateNum(c.date), c.reasonText, {n:c.total}]) }) : '')
+      + (dns.length ? '<div class="sub-h">ใบเพิ่มหนี้ที่อ้างถึงใบนี้</div>' + tbl({
+          cols:[{t:'เลขที่'},{t:'วันที่'},{t:'เหตุผลตามมาตรา 86/9'},{t:'รวม',a:'r'}],
+          rows: dns.map((c) => [{mono:c.no}, thDateNum(c.date), c.reasonText, {n:c.total}]) }) : ''),
     foot: 'ครบองค์ประกอบตามมาตรา 86/4 · ส่งกรมสรรพากรแบบ e-Tax Invoice แล้ว (จำลอง)',
   });
 }
@@ -281,7 +287,7 @@ function scInvoices() {
       body: tbl({
         cols:[{t:'เลขที่'},{t:'วันที่'},{t:'ลูกค้า'},{t:'ครบกำหนด'},{t:'ก่อนภาษี',a:'r'},{t:'ภาษี',a:'r'},{t:'รวม',a:'r'},{t:'คงเหลือ',a:'r'},{t:'สถานะ'}],
         rows: rows.map((d) => [{mono:d.no}, thDateNum(d.date), d.partnerName, thDateNum(d.due),
-          {n:d.base}, {n:d.vat}, {n:d.total}, {n:d.total - d.paid - d.credited}, statusPill(d.status)]),
+          {n:d.base}, {n:d.vat}, {n:d.total}, {n:invOutstanding(d)}, statusPill(d.status)]),
         rowAttr: (r) => 'class="row-link" data-act="sel:' + r[0].mono + '"',
         foot: ['รวม', '', '', '', {n:totals.base}, {n:totals.vat}, {n:totals.total}, '', ''],
         empty: 'ยังไม่มีใบกำกับภาษีในงวดนี้',
@@ -1109,6 +1115,108 @@ function scAbout() {
 /* ===================================================================
    ตารางหน้าจอ
    =================================================================== */
+/* ===================================================================
+   ใบเพิ่มหนี้ — มาตรา 86/9
+   =================================================================== */
+function scDebitNotes() {
+  const rows = DB.docs.debitNote.filter((d) => periodOf(d.date) === STATE.period);
+  const t = rows.reduce((a, d) => ({ base:a.base + d.base, vat:a.vat + d.vat, total:a.total + d.total }), {base:0,vat:0,total:0});
+  return card({
+    title:'ใบเพิ่มหนี้', sub:'ใช้เมื่อเก็บเงินต่ำกว่าที่ควร ต้องอ้างใบกำกับเดิมและเข้าเหตุตามมาตรา 86/9',
+    body: tbl({
+      cols:[{t:'เลขที่'},{t:'วันที่'},{t:'ลูกค้า'},{t:'อ้างใบกำกับเดิม'},{t:'เหตุตามกฎหมาย'},{t:'มูลค่า',a:'r'},{t:'ภาษี',a:'r'},{t:'รวม',a:'r'}],
+      rows: rows.map((d) => [{mono:d.no}, thDateNum(d.date), d.partnerName, {mono:d.invoiceNo},
+        d.reasonText, {n:d.base}, {n:d.vat}, {n:d.total}]),
+      foot: rows.length ? ['รวม','','','','', {n:t.base}, {n:t.vat}, {n:t.total}] : null,
+      empty:'ไม่มีใบเพิ่มหนี้ในงวดนี้',
+    }),
+    foot:'ออกได้จากหน้าใบกำกับภาษีที่ต้องการเพิ่มหนี้ · ภาษีขายที่เพิ่มเข้ารายงานเดือนที่ออกใบเพิ่มหนี้',
+  });
+}
+
+/* ===================================================================
+   เอกสารก่อนลงบัญชี — ใบเสนอราคา ใบสั่งขาย ใบสั่งซื้อ
+   ไม่มีตัวเลขเข้าบัญชี จึงไม่ผูกกับงวด แสดงทุกใบที่ยังเดินอยู่
+   =================================================================== */
+/* สถานะร่วมกับเอกสารอื่นทั้งระบบ แต่คำอธิบายต้องเป็นภาษาของเอกสารใบนั้น
+   "ปิดแล้ว" บนใบเสนอราคาไม่สื่อ ต้องบอกว่าแปลงไปเป็นเอกสารถัดไปแล้ว */
+const TRADE_LABEL = { closed:'แปลงเป็นเอกสารถัดไปแล้ว', approved:'ตอบรับแล้ว' };
+function tradePill(st) {
+  const p = statusPill(st);
+  return TRADE_LABEL[st] ? { st: [p.st[0], TRADE_LABEL[st]] } : p;
+}
+
+function tradeDocDetail(kind, no) {
+  const cfg = TRADE_DOCS[kind];
+  const d = (DB.docs[kind] || []).find((x) => x.no === no);
+  if (!d) return '';
+  const st = tradeDocStatus(kind, d);
+  const live = st === 'issued' || st === 'approved';
+  const nextLabel = cfg.next === 'salesOrder' ? 'แปลงเป็นใบสั่งขาย'
+    : cfg.next === 'invoice' ? 'แปลงเป็นใบกำกับภาษี' : 'ตั้งหนี้ผู้ขาย';
+  return card({
+    title: cfg.label + ' เลขที่ ' + d.no,
+    sub: 'ออกวันที่ ' + thDate(d.date)
+      + (d.validUntil ? ' · ยืนราคาถึง ' + thDate(d.validUntil) : '')
+      + (d.fromDoc ? ' · มาจาก ' + d.fromDoc : ''),
+    actions: (live ? btn('trade:' + kind + ':convert:' + d.no, nextLabel, 'primary') : '')
+      + (st === 'issued' ? btn('trade:' + kind + ':approved:' + d.no,
+          kind === 'purchaseOrder' ? 'ผู้ขายยืนยันแล้ว' : 'ลูกค้าตอบรับ') : '')
+      + (live ? btn('trade:' + kind + ':cancelled:' + d.no, 'ยกเลิก') : '')
+      + (d.convertedTo ? btn('sel:', 'ปิด') : btn('sel:', 'ปิด')),
+    body:
+      '<div class="docgrid">'
+      + '<div><div class="dim">' + (cfg.side === 'customer' ? 'ลูกค้า' : 'ผู้ขาย') + '</div>'
+      + '<b>' + esc(d.partnerName) + '</b>'
+      + '<div>' + esc(d.snap ? d.snap.address : '') + '</div></div>'
+      + '<div><div class="dim">สถานะ</div><b>' + esc(tradePill(st).st[1]) + '</b>'
+      + (d.convertedTo ? '<div>เอกสารปลายทาง ' + esc(d.convertedTo) + '</div>' : '')
+      + (d.statusReason ? '<div>' + esc(d.statusReason) + '</div>' : '') + '</div>'
+      + '</div>'
+      + tbl({
+          cols:[{t:'รายการ'},{t:'จำนวน',a:'r'},{t:'ราคาต่อหน่วย',a:'r'},{t:'ภาษี'},{t:'จำนวนเงิน',a:'r'}],
+          rows: d.lines.map((l) => [l.desc, {n:M(String(l.qty))}, {n:l.price},
+            l.taxCode === 'VAT7' ? 'VAT 7%' : l.taxCode === 'VAT0' ? 'อัตรา 0%' : 'ยกเว้น', {n:l.amount}]),
+        })
+      + '<div class="totals">'
+      + '<div><span>มูลค่าก่อนภาษี</span><b>' + fmt(d.base) + '</b></div>'
+      + '<div><span>ภาษีมูลค่าเพิ่ม</span><b>' + fmt(d.vat) + '</b></div>'
+      + '<div class="gt"><span>จำนวนเงินรวมทั้งสิ้น</span><b>' + fmt(d.total) + '</b></div>'
+      + '</div>',
+    foot:'เอกสารใบนี้ยังไม่มีผลทางบัญชี ตัวเลขจะเข้าบัญชีเมื่อกด' + nextLabel + 'เท่านั้น',
+  });
+}
+
+function tradeDocScreen(kind) {
+  const cfg = TRADE_DOCS[kind];
+  const all = DB.docs[kind] || [];
+  const rows = all.filter((d) => hit(d.no) || hit(d.partnerName));
+  const openN = all.filter((d) => tradeDocStatus(kind, d) === 'issued').length;
+  const newAct = { quotation:'quotation', salesOrder:'salesorder', purchaseOrder:'purchaseorder' }[kind];
+  return (STATE.sel ? tradeDocDetail(kind, STATE.sel) : '')
+    + card({
+      title: 'ทะเบียน' + cfg.label,
+      sub: all.length + ' ฉบับ · ยังรอผลอยู่ ' + openN + ' ฉบับ',
+      actions: btn('new:' + newAct, '+ ออก' + cfg.label, 'primary'),
+      filters: searchBox('ค้นหาเลขที่หรือชื่อคู่ค้า'),
+      body: tbl({
+        cols:[{t:'เลขที่'},{t:'วันที่'},{t: cfg.side === 'customer' ? 'ลูกค้า' : 'ผู้ขาย'}]
+          .concat(cfg.validDays ? [{t:'ยืนราคาถึง'}] : [])
+          .concat([{t:'ก่อนภาษี',a:'r'},{t:'รวม',a:'r'},{t:'สถานะ'},{t:'เอกสารปลายทาง'}]),
+        rows: rows.map((d) => [{mono:d.no}, thDateNum(d.date), d.partnerName]
+          .concat(cfg.validDays ? [thDateNum(d.validUntil)] : [])
+          .concat([{n:d.base}, {n:d.total}, tradePill(tradeDocStatus(kind, d)),
+            d.convertedTo ? {mono:d.convertedTo} : '—'])),
+        rowAttr: (r) => 'class="row-link" data-act="sel:' + r[0].mono + '"',
+        empty:'ยังไม่มี' + cfg.label,
+        emptyAction: btn('new:' + newAct, 'ออก' + cfg.label + 'ใบแรก', 'primary'),
+      }),
+      foot: cfg.next === 'bill'
+        ? 'ใบสั่งซื้อยังไม่ก่อหนี้ ยอดจะเข้าเจ้าหนี้เมื่อได้รับใบกำกับภาษีจากผู้ขายแล้วกดตั้งหนี้'
+        : 'เอกสารกลุ่มนี้ยังไม่มีผลทางบัญชี จึงไม่ปรากฏในงบทดลองจนกว่าจะแปลงเป็นใบกำกับภาษี',
+    });
+}
+
 const SCREENS = {
   dashboard: scDashboard, close: scClose,
   invoices: scInvoices, receipts: scReceipts, creditnotes: scCreditNotes,
@@ -1124,6 +1232,10 @@ const SCREENS = {
   payroll: scPayroll, employees: scEmployees,
   projects: scProjects, budget: scBudget,
   bs: scBalanceSheet, pl: scIncomeStatement,
+  debitnotes: scDebitNotes,
+  quotations: () => tradeDocScreen('quotation'),
+  salesorders: () => tradeDocScreen('salesOrder'),
+  purchaseorders: () => tradeDocScreen('purchaseOrder'),
   audit: scAudit, about: scAbout,
   import: scImport, importResult: scImportResult,
 };
