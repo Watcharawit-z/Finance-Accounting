@@ -156,11 +156,65 @@ function startServer(env, port) {
   ok('★ ใบกำกับของเครื่องที่สองไม่หายไป',
     survived.data.docs.invoice.some((d) => d.lines.some((l) => l.itemCode === 'CB-16')));
 
-  console.log('\n[7] เก็บฉบับย้อนหลังไว้กู้ได้');
+  console.log('\n[7] หลายบริษัทในฐานข้อมูลเดียว ต้องแยกกันเด็ดขาด');
+  const before = await A.evaluate(() => ({ book: SYNC.book, invoices: DB.docs.invoice.length }));
+  await A.click('[data-act="company:new"]');
+  await A.waitForSelector('#modal.show');
+  await A.fill('[name="coname"]', 'บริษัท ที่สอง จำกัด');
+  await A.fill('[name="coyear"]', '2026');
+  await A.click('[data-act="modal:submit"]');
+  await A.waitForFunction(() => !document.getElementById('modal').classList.contains('show'));
+  await A.waitForTimeout(2000);
+  const co2 = await A.evaluate(() => ({
+    book: SYNC.book, name: DB.company.name, invoices: DB.docs.invoice.length,
+    entries: DB.entries.length, books: SYNC.books.length,
+  }));
+  ok('สร้างบริษัทที่สองบนเซิร์ฟเวอร์ได้', co2.book !== before.book && co2.name === 'บริษัท ที่สอง จำกัด');
+  ok('★ บริษัทใหม่ไม่มีข้อมูลของบริษัทเดิมติดมา', co2.invoices === 0 && co2.entries === 0);
+  ok('รายชื่อบริษัทมีสองเล่ม', co2.books === 2, co2.books + ' เล่ม');
+
+  const booksApi = await (await fetch(base + '/api/books', { headers: H })).json();
+  ok('★ ฐานข้อมูลเก็บแยกคนละแถว', booksApi.books.length === 2,
+    booksApi.books.map((b) => b.name + '(' + b.entries + ' ใบสำคัญ)').join(' · '));
+  const rowA = booksApi.books.find((b) => b.book === before.book);
+  const rowB = booksApi.books.find((b) => b.book === co2.book);
+  ok('แถวของบริษัทแรกยังมีรายการครบ', rowA && rowA.entries > 0, rowA && String(rowA.entries));
+  ok('แถวของบริษัทที่สองว่างเปล่า', rowB && rowB.entries === 0);
+
+  const bookA = await (await fetch(base + '/api/state?book=' + before.book, { headers: H })).json();
+  const bookB = await (await fetch(base + '/api/state?book=' + co2.book, { headers: H })).json();
+  ok('★ อ่านทีละบริษัทได้ข้อมูลคนละชุด',
+    bookA.data.docs.invoice.length === before.invoices && bookB.data.docs.invoice.length === 0,
+    before.invoices + ' ใบ vs ' + bookB.data.docs.invoice.length + ' ใบ');
+  ok('เลขรุ่นนับแยกกันคนละบริษัท', bookA.version !== bookB.version || bookB.version === 1);
+
+  /* เครื่องที่สองต้องเห็นบริษัทที่สองด้วย และสลับไปมาได้ */
+  await B.reload();
+  await B.waitForSelector('#main .card', { timeout: 10000 });
+  await B.fill('[name="passcode"]', PASSCODE).catch(() => {});
+  const needPass = await B.$('[data-act="pass:submit"]');
+  if (needPass) { await B.click('[data-act="pass:submit"]'); await B.waitForSelector('#main .kpis', { timeout: 10000 }); }
+  await B.waitForTimeout(800);
+  ok('เครื่องที่สองเห็นครบทั้งสองบริษัท',
+    await B.evaluate(() => SYNC.books.length) === 2);
+  await B.selectOption('#bookSel', co2.book);
+  await B.waitForTimeout(1200);
+  const bView = await B.evaluate(() => ({ name: DB.company.name, invoices: DB.docs.invoice.length }));
+  ok('★ สลับบริษัทจากอีกเครื่องแล้วเห็นข้อมูลถูกเล่ม',
+    bView.name === 'บริษัท ที่สอง จำกัด' && bView.invoices === 0, bView.name);
+
+  /* กลับมาบริษัทแรก ข้อมูลต้องครบเท่าเดิม */
+  await A.selectOption('#bookSel', before.book);
+  await A.waitForTimeout(1200);
+  ok('★ กลับบริษัทแรกข้อมูลครบเท่าเดิม',
+    await A.evaluate(() => DB.docs.invoice.length) === before.invoices);
+
+  console.log('\n[8] เก็บฉบับย้อนหลังไว้กู้ได้');
   const { Client } = require('pg');
   const c = new Client({ connectionString: DB_URL });
   await c.connect();
-  const hist = await c.query('SELECT count(*)::int n, max(version)::int v FROM duly_state_history');
+  const hist = await c.query(
+    "SELECT count(*)::int n, max(version)::int v FROM duly_state_history WHERE book NOT LIKE 'co-%'");
   ok('มีประวัติทุกรุ่นที่เคยบันทึก', hist.rows[0].n >= 3, hist.rows[0].n + ' ฉบับ ล่าสุดรุ่นที่ ' + hist.rows[0].v);
   await c.end();
 

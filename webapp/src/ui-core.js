@@ -135,25 +135,74 @@ const field = (o) =>
         + (o.readonly ? ' readonly' : '') + (o.cls ? ' class="' + o.cls + '"' : '') + '>')
   + (o.hint ? '<div class="fld-hint">' + esc(o.hint) + '</div>' : '') + '</div>';
 
-/* ---------- เก็บข้อมูลไว้ในเครื่อง ---------- */
-const LS_KEY = 'duly.demo.v1';
+/* ---------- เก็บข้อมูลไว้ในเครื่อง — หนึ่งบริษัทหนึ่งสมุด ---------- */
+const LS_OLD = 'duly.demo.v1';                 // รูปแบบเดิมสมัยรองรับบริษัทเดียว
+const LS_BOOKS = 'duly.books';
+const LS_ACTIVE = 'duly.activeBook';
+const bookKey = (id) => 'duly.book.' + id;
+
+const lsGet = (k) => { try { return localStorage.getItem(k); } catch (e) { return null; } };
+const lsSet = (k, v) => { try { localStorage.setItem(k, v); return true; } catch (e) { return false; } };
+const lsDel = (k) => { try { localStorage.removeItem(k); } catch (e) {} };
+
+function booksList() {
+  try { return JSON.parse(lsGet(LS_BOOKS) || '[]'); } catch (e) { return []; }
+}
+function booksWrite(list) { lsSet(LS_BOOKS, JSON.stringify(list)); }
+
+/** ย้ายข้อมูลรูปแบบเดิมมาเป็นสมุดแรก ผู้ใช้เดิมต้องไม่เสียข้อมูล */
+function booksMigrate() {
+  if (booksList().length) return;
+  const old = lsGet(LS_OLD);
+  if (!old) return;
+  try {
+    const d = JSON.parse(old);
+    if (!d || !d.DB || !d.DB.company) return;
+    lsSet(bookKey('default'), old);
+    booksWrite([{ id: 'default', name: d.DB.company.name, taxId: d.DB.company.taxId || null }]);
+    lsSet(LS_ACTIVE, 'default');
+    lsDel(LS_OLD);
+  } catch (e) { /* อ่านไม่ออกก็ปล่อยไว้ ไม่ลบของเดิมทิ้ง */ }
+}
+
+function booksSaveActive() {
+  if (SYNC.mode === 'server') return;
+  lsSet(bookKey(SYNC.book), JSON.stringify({ DB, STATE: { period: STATE.period } }));
+  const list = booksList();
+  const at = list.findIndex((b) => b.id === SYNC.book);
+  const meta = { id: SYNC.book, name: DB.company ? DB.company.name : SYNC.book,
+    taxId: DB.company ? DB.company.taxId : null, entries: DB.entries.length };
+  if (at >= 0) list[at] = meta; else list.push(meta);
+  booksWrite(list);
+  lsSet(LS_ACTIVE, SYNC.book);
+  SYNC.books = list.map((b) => ({ book: b.id, name: b.name, taxId: b.taxId, entries: b.entries || 0 }));
+}
+
+function booksLoadLocal(id) {
+  const raw = lsGet(bookKey(id));
+  if (!raw) { loadState(null); return false; }
+  try {
+    const d = JSON.parse(raw);
+    const ok = loadState(d && d.DB);
+    if (ok && d.STATE && d.STATE.period) STATE.period = d.STATE.period;
+    lsSet(LS_ACTIVE, id);
+    return ok;
+  } catch (e) { loadState(null); return false; }
+}
+
 function save() {
   if (SYNC.mode === 'server') { syncSave(); return; }
-  try { localStorage.setItem(LS_KEY, JSON.stringify({ DB, STATE: { period: STATE.period } })); }
-  catch (e) { /* โหมดส่วนตัวหรือปิดการเก็บข้อมูล — ใช้งานต่อได้ในหน่วยความจำ */ }
+  booksSaveActive();
 }
 function load() {
-  try {
-    const raw = localStorage.getItem(LS_KEY);
-    if (!raw) return false;
-    const d = JSON.parse(raw);
-    if (!d || !d.DB || !d.DB.company) return false;
-    Object.keys(d.DB).forEach((k) => { DB[k] = d.DB[k]; });
-    if (d.STATE && d.STATE.period) STATE.period = d.STATE.period;
-    // ข้อมูลที่บันทึกไว้ก่อนมีธงนี้ ให้เดาจากชื่อบริษัทตัวอย่าง
-    if (DB.isDemo === undefined) DB.isDemo = DB.company.name === 'บริษัท ศรีวัฒนาการค้า จำกัด';
-    return true;
-  } catch (e) { return false; }
+  booksMigrate();
+  const list = booksList();
+  SYNC.books = list.map((b) => ({ book: b.id, name: b.name, taxId: b.taxId, entries: b.entries || 0 }));
+  if (!list.length) return false;
+  const active = lsGet(LS_ACTIVE);
+  const id = list.some((b) => b.id === active) ? active : list[0].id;
+  SYNC.book = id;
+  return booksLoadLocal(id);
 }
 function resetAll() {
   if (SYNC.mode === 'server') {
@@ -161,8 +210,19 @@ function resetAll() {
     syncPush().then(() => location.reload());
     return;
   }
-  try { localStorage.removeItem(LS_KEY); } catch (e) {}
+  buildSeed();
+  booksSaveActive();
   location.reload();
+}
+
+/** เพิ่มบริษัทใหม่ — สมุดใหม่ที่ไม่แตะข้อมูลของบริษัทอื่นเลย */
+function booksNewId(name) {
+  const base = 'co-' + String(name || '').replace(/[^A-Za-z0-9]+/g, '').slice(0, 12).toLowerCase();
+  const taken = new Set((SYNC.books || []).map((b) => b.book));
+  let id = base.length > 3 ? base : 'co';
+  let n = 1;
+  while (taken.has(id)) { id = (base.length > 3 ? base : 'co') + '-' + (++n); }
+  return id;
 }
 
 /* ---------- เมนู ---------- */
@@ -265,7 +325,15 @@ function render() {
     + thPeriod(p.code) + (p.status !== 'open' ? ' (ปิดแล้ว)' : '') + '</option>').join('');
   document.getElementById('periodSel').innerHTML = periods;
 
-  document.getElementById('coName').innerHTML = esc(DB.company.name)
+  const books = SYNC.books || [];
+  document.getElementById('coName').innerHTML =
+    (books.length > 1
+      ? '<select id="bookSel" class="book-sel" aria-label="เลือกบริษัท">'
+        + books.map((b) => '<option value="' + esc(b.book) + '"'
+            + (b.book === SYNC.book ? ' selected' : '') + '>' + esc(b.name) + '</option>').join('')
+        + '</select>'
+      : '<span class="co-name">' + esc(DB.company.name) + '</span>')
+    + '<button class="add-co" data-act="company:new" title="เพิ่มบริษัท">+ บริษัท</button>'
     + (DB.isDemo
         ? '<button class="demo-tag" data-act="go:import" title="ข้อมูลชุดนี้ระบบสร้างขึ้นเพื่อให้ลองใช้">'
           + 'ข้อมูลตัวอย่าง · เริ่มใช้ของจริง</button>'

@@ -48,12 +48,13 @@ function readBody(req, limit) {
   });
 }
 
-async function api(req, res, url) {
+async function api(req, res, url, query) {
   if (url === '/api/config') {
     return json(res, 200, {
       storage: store.enabled() ? 'server' : 'browser',
       needsPasscode: Boolean(PASSCODE),
-      book: store.BOOK,
+      book: store.DEFAULT_BOOK,
+      multiCompany: true,
     });
   }
   if (!store.enabled()) {
@@ -64,9 +65,26 @@ async function api(req, res, url) {
     return json(res, 401, { error: { code: 'PASSCODE_REQUIRED', message: 'รหัสผ่านไม่ถูกต้อง' } });
   }
 
+  const book = query.get('book') || store.DEFAULT_BOOK;
+  if (!store.validBook(book)) {
+    return json(res, 400, { error: { code: 'BAD_BOOK',
+      message: 'รหัสสมุดใช้ได้เฉพาะ a-z A-Z 0-9 ขีดกลาง และขีดล่าง' } });
+  }
+
+  if (url === '/api/books' && req.method === 'GET') {
+    return json(res, 200, { books: await store.listBooks(), active: book });
+  }
+  if (url === '/api/books' && req.method === 'DELETE') {
+    try { await store.removeBook(book); return json(res, 200, { ok: true }); }
+    catch (e) {
+      const code = e.code === 'NOT_FOUND' ? 404 : e.code === 'HAS_ENTRIES' ? 409 : 400;
+      return json(res, code, { error: { code: e.code || 'DELETE_FAILED', message: e.message } });
+    }
+  }
+
   if (url === '/api/state' && req.method === 'GET') {
-    const s = await store.read();
-    return json(res, 200, { version: s.version, data: s.data, updatedAt: s.updatedAt });
+    const s = await store.read(book);
+    return json(res, 200, { book: s.book, version: s.version, data: s.data, updatedAt: s.updatedAt });
   }
   if (url === '/api/state' && req.method === 'PUT') {
     let body;
@@ -76,11 +94,11 @@ async function api(req, res, url) {
       return json(res, 400, { error: { code: 'BAD_BODY', message: 'ต้องส่ง { version, data }' } });
     }
     try {
-      const r = await store.write(body.version || 0, body.data);
-      return json(res, 200, { version: r.version });
+      const r = await store.write(book, body.version || 0, body.data);
+      return json(res, 200, { book: book, version: r.version });
     } catch (e) {
       if (e.code === 'VERSION_CONFLICT') {
-        const s = await store.read();
+        const s = await store.read(book);
         return json(res, 409, {
           error: { code: 'VERSION_CONFLICT',
             message: 'มีการบันทึกจากอีกเครื่องแทรกเข้ามา ระบบจึงไม่เขียนทับให้' },
@@ -105,7 +123,8 @@ const server = http.createServer(function (req, res) {
     }));
   }
   if (url.startsWith('/api/')) {
-    return api(req, res, url).catch(function (e) {
+    const query = new URLSearchParams((req.url || '').split('?')[1] || '');
+    return api(req, res, url, query).catch(function (e) {
       console.error(e);
       json(res, 500, { error: { code: 'INTERNAL', message: 'เกิดข้อผิดพลาดที่เซิร์ฟเวอร์' } });
     });
@@ -142,7 +161,7 @@ store.init()
   .then(function (on) {
     server.listen(PORT, '0.0.0.0', function () {
       console.log('ดุลย์ — พอร์ต ' + PORT + ' · เก็บข้อมูล: '
-        + (on ? 'ฐานข้อมูลบนเซิร์ฟเวอร์ (สมุด ' + store.BOOK + ')' : 'เบราว์เซอร์ของผู้ใช้')
+        + (on ? 'ฐานข้อมูลบนเซิร์ฟเวอร์ · รองรับหลายบริษัท' : 'เบราว์เซอร์ของผู้ใช้')
         + (PASSCODE ? ' · ต้องใส่รหัสผ่าน' : ''));
       if (on && !PASSCODE) {
         console.warn('★ ยังไม่ได้ตั้ง APP_PASSCODE — ใครที่รู้ URL จะอ่านและแก้ข้อมูลบัญชีได้ทั้งหมด');

@@ -89,29 +89,55 @@ class DomainError extends Error {
 /* ===================================================================
    ฐานข้อมูลในเครื่อง
    =================================================================== */
-const DB = {
-  company: null,
-  accounts: [],        // {code,name,type,subType,postable,contra,parent,level,requiresPartner}
-  partners: [],
-  items: [],
-  employees: [],
-  assets: [],
-  periods: [],         // {code,start,end,status}
-  entries: [],         // {no,date,type,desc,src,srcId,status,lines:[{acc,dr,cr,partner,memo}],reversedBy,reverseOf,reason}
-  taxTx: [],           // {kind,period,date,docNo,docType,partnerName,taxId,branch,base,tax,channel,form,incomeType,rate,filingId,entryNo}
-  docs: {              // เอกสารแยกตามประเภท
-    quotation: [], salesOrder: [], invoice: [], receipt: [], creditNote: [],
-    purchaseOrder: [], bill: [], payment: [], whtCert: [],
-    stockMove: [], payRun: [], depreciation: [], filing: [],
-  },
-  seq: {},             // {'invoice|2026-07': 12}
-  budget: [],          // {account,period,amount}
-  projects: [],
-  bankTxns: [],        // รายการเดินบัญชีที่ยังไม่กระทบยอด
-  audit: [],
-  settings: { hardLockDate: null },
-  isDemo: false,      // true = ข้อมูลตัวอย่างที่ระบบสร้างให้ ไม่ใช่ข้อมูลจริงของผู้ใช้
-};
+/** โครงข้อมูลเปล่าของกิจการหนึ่งราย — ใช้เป็นแม่แบบตอนสลับบริษัท */
+function blankState() {
+  return {
+    company: null,
+    accounts: [],        // {code,name,type,subType,postable,contra,parent,level,requiresPartner}
+    partners: [],
+    items: [],
+    employees: [],
+    assets: [],
+    periods: [],         // {code,start,end,status}
+    entries: [],         // {no,date,type,desc,src,srcId,status,lines:[...],reversedBy,reverseOf,reason}
+    taxTx: [],           // {kind,period,date,docNo,docType,partnerName,taxId,branch,base,tax,...}
+    docs: {              // เอกสารแยกตามประเภท
+      quotation: [], salesOrder: [], invoice: [], receipt: [], creditNote: [],
+      purchaseOrder: [], bill: [], payment: [], whtCert: [],
+      stockMove: [], payRun: [], depreciation: [], filing: [],
+    },
+    seq: {},             // {'invoice|2026-07': 12}
+    budget: [],          // {account,period,amount}
+    projects: [],
+    bankTxns: [],        // รายการเดินบัญชีที่ยังไม่กระทบยอด
+    audit: [],
+    settings: { hardLockDate: null },
+    isDemo: false,       // true = ข้อมูลตัวอย่างที่ระบบสร้างให้ ไม่ใช่ข้อมูลจริงของผู้ใช้
+  };
+}
+
+const DB = blankState();
+
+/**
+ * ★ ยกข้อมูลของกิจการหนึ่งเข้ามาทั้งก้อน — ล้างของเดิมให้เกลี้ยงก่อนเสมอ
+ *   ถ้าใช้วิธีทับทีละคีย์ คีย์ที่กิจการใหม่ไม่มีจะค้างจากกิจการเดิม
+ *   เช่นสลับจากบริษัทที่มีใบกำกับ 91 ใบ ไปบริษัทเปล่า แล้วใบกำกับยังอยู่
+ */
+function loadState(obj) {
+  const fresh = blankState();
+  Object.keys(DB).forEach((k) => { if (!(k in fresh)) delete DB[k]; });
+  Object.keys(fresh).forEach((k) => { DB[k] = fresh[k]; });
+  if (!obj || typeof obj !== 'object') return false;
+  Object.keys(obj).forEach((k) => { if (k in fresh) DB[k] = obj[k]; });
+  /* เอกสารประเภทที่เพิ่มเข้ามาทีหลัง ต้องมีอาร์เรย์รองรับเสมอ */
+  if (!DB.docs || typeof DB.docs !== 'object') DB.docs = fresh.docs;
+  Object.keys(fresh.docs).forEach((k) => { if (!Array.isArray(DB.docs[k])) DB.docs[k] = []; });
+  if (!DB.settings) DB.settings = fresh.settings;
+  if (DB.isDemo === undefined) {
+    DB.isDemo = !!(DB.company && DB.company.name === 'บริษัท ศรีวัฒนาการค้า จำกัด');
+  }
+  return !!DB.company;
+}
 
 /* ---------- อัตราภาษีตามช่วงเวลา (ข้อมูล ไม่ใช่โค้ด) ---------- */
 const TAX_RATES = [

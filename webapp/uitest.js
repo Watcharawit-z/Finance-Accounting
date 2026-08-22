@@ -396,6 +396,104 @@ const fmtT = (v) => (v / 10000).toLocaleString();
   ok('★ ตั้งยอดยกมาวันเดิมซ้ำถูกปฏิเสธ', await page.evaluate(() =>
     DB.entries.length === 1 && document.getElementById('toast').className.indexOf('err') >= 0));
 
+  console.log('\n[14] สามบริษัทในเครื่องเดียว ข้อมูลต้องไม่ปนกัน');
+  await page.evaluate(() => { STATE.screen = 'dashboard'; render(); });
+  await page.waitForTimeout(150);
+
+  /* บริษัทที่ 1 คือบริษัทเปล่าที่สร้างไว้ตอน [13] แล้วนำเข้ายอดยกมา — ออกใบกำกับให้ 1 ใบ */
+  const co1 = await page.evaluate(() => ({ book: SYNC.book, name: DB.company.name }));
+  await page.evaluate(() => { STATE.screen = 'invoices'; STATE.sel = null; render(); });
+  await page.evaluate(() => {
+    DB.partners.push({ code:'C-A', name:'ลูกค้าของบริษัทหนึ่ง', taxId:'0107536000234',
+      address:'ที่อยู่', branch:'00000', entityType:'juristic', kind:'customer', termDays:30, active:true });
+  });
+  await page.click('[data-act="new:invoice"]');
+  await page.waitForSelector('#modal.show');
+  await page.selectOption('[name="partner"]', 'C-A');
+  await page.fill('[name="l0_desc"]', 'ขายของบริษัทหนึ่ง');
+  await page.fill('[name="l0_qty"]', '1');
+  await page.fill('[name="l0_price"]', '100000');
+  await page.click('[data-act="modal:submit"]');
+  await closed(page);
+  const a1 = await page.evaluate(() => ({
+    invoices: DB.docs.invoice.length, entries: DB.entries.length,
+    partners: DB.partners.length, rev: fmt(incomeStatement('2026-01-01','2026-12-31').revenue),
+  }));
+  ok('บริษัทที่ 1 มีเอกสารของตัวเอง', a1.invoices >= 1, a1.invoices + ' ใบ · รายได้ ' + a1.rev);
+
+  /* สร้างบริษัทที่ 2 */
+  await page.click('[data-act="company:new"]');
+  await page.waitForSelector('#modal.show');
+  await page.fill('[name="coname"]', 'บริษัท สองสองสอง จำกัด');
+  await page.fill('[name="cotax"]', '0105533001823');
+  await page.fill('[name="coyear"]', '2026');
+  await page.click('[data-act="modal:submit"]');
+  await closed(page);
+  await page.waitForTimeout(300);
+  const b1 = await page.evaluate(() => ({
+    book: SYNC.book, name: DB.company.name, invoices: DB.docs.invoice.length,
+    entries: DB.entries.length, partners: DB.partners.length, items: DB.items.length,
+    employees: DB.employees.length, taxTx: DB.taxTx.length, books: SYNC.books.length,
+  }));
+  ok('สร้างบริษัทที่ 2 แล้วสลับไปให้เลย', b1.name === 'บริษัท สองสองสอง จำกัด' && b1.book !== co1.book);
+  ok('★ บริษัทใหม่ไม่มีเอกสารของบริษัทเดิมติดมาเลย',
+    b1.invoices === 0 && b1.entries === 0 && b1.taxTx === 0,
+    'ใบกำกับ ' + b1.invoices + ' · ใบสำคัญ ' + b1.entries + ' · ทะเบียนภาษี ' + b1.taxTx);
+  ok('★ ทะเบียนคู่ค้า สินค้า พนักงาน ก็ไม่ติดมาด้วย',
+    b1.partners === 0 && b1.items === 0 && b1.employees === 0,
+    'คู่ค้า ' + b1.partners + ' · สินค้า ' + b1.items + ' · พนักงาน ' + b1.employees);
+  ok('มีตัวสลับบริษัทที่แถบบน', await page.$('#bookSel') !== null);
+
+  /* บริษัทที่ 3 */
+  await page.click('[data-act="company:new"]');
+  await page.waitForSelector('#modal.show');
+  await page.fill('[name="coname"]', 'บริษัท สามสามสาม จำกัด');
+  await page.fill('[name="coyear"]', '2026');
+  await page.click('[data-act="modal:submit"]');
+  await closed(page);
+  await page.waitForTimeout(300);
+  ok('มีครบสามบริษัท', await page.evaluate(() => SYNC.books.length) === 3,
+    (await page.evaluate(() => SYNC.books.map((b) => b.name).join(' · '))));
+
+  /* กลับไปบริษัทที่ 1 — ข้อมูลต้องอยู่ครบเหมือนเดิม */
+  await page.selectOption('#bookSel', co1.book);
+  await page.waitForTimeout(600);
+  const back = await page.evaluate(() => ({
+    name: DB.company.name, invoices: DB.docs.invoice.length, entries: DB.entries.length,
+    rev: fmt(incomeStatement('2026-01-01','2026-12-31').revenue),
+    balanced: trialBalance('2026-01-01','2026-12-31').balanced,
+    diff: balanceSheet('2026-12-31').diff,
+  }));
+  ok('★ สลับกลับบริษัทที่ 1 ข้อมูลอยู่ครบเท่าเดิม',
+    back.name === co1.name && back.invoices === a1.invoices && back.entries === a1.entries,
+    back.invoices + ' ใบ · ' + back.entries + ' ใบสำคัญ');
+  ok('รายได้ของบริษัทที่ 1 ไม่เปลี่ยน', back.rev === a1.rev, back.rev);
+  ok('งบยังสมดุลหลังสลับไปมา', back.balanced && back.diff === 0);
+
+  /* เปิดใหม่ทั้งหน้า ต้องจำได้ว่าเปิดบริษัทไหนอยู่ */
+  await page.reload();
+  await page.waitForSelector('#main .kpis', { timeout: 10000 });
+  const afterReload = await page.evaluate(() => ({
+    name: DB.company.name, book: SYNC.book, books: SYNC.books.length,
+    invoices: DB.docs.invoice.length,
+  }));
+  ok('★ เปิดใหม่แล้วยังอยู่บริษัทเดิมและข้อมูลครบ',
+    afterReload.book === co1.book && afterReload.invoices === a1.invoices,
+    afterReload.name + ' · ' + afterReload.invoices + ' ใบ');
+  ok('รายชื่อบริษัทยังครบสามหลังเปิดใหม่', afterReload.books === 3);
+
+  /* ตรวจถึงชั้นที่เก็บจริง ว่าแยกกันคนละก้อน */
+  const stored = await page.evaluate(() => {
+    const list = JSON.parse(localStorage.getItem('duly.books') || '[]');
+    return list.map(function (b) {
+      const d = JSON.parse(localStorage.getItem('duly.book.' + b.id) || 'null');
+      return { id: b.id, name: b.name, invoices: d && d.DB ? d.DB.docs.invoice.length : -1 };
+    });
+  });
+  ok('★ แต่ละบริษัทเก็บแยกคนละก้อนในเครื่อง',
+    stored.length === 3 && stored.filter((s) => s.invoices > 0).length === 1,
+    stored.map((s) => s.name + '=' + s.invoices).join(' · '));
+
   ok('ไม่มีข้อผิดพลาดในคอนโซลเลย', errors.length === 0, errors.slice(0, 3).join(' | '));
 
   await page.setViewportSize({ width: 1440, height: 950 });

@@ -302,6 +302,7 @@ function dispatch(act) {
   if (head === 'view')    { STATE.dashView = arg; render(); return; }
   if (head === 'pick')    { document.getElementById('file').click(); return; }
   if (head === 'blank')   { modalBlank(); return; }
+  if (head === 'company')  { if (arg === 'new') modalNewCompany(); return; }
   if (head === 'pass') {
     const code = val('passcode');
     syncUnlock(code).then(function (ok) {
@@ -413,6 +414,7 @@ function bindEvents() {
   document.addEventListener('change', function (ev) {
     const t = ev.target;
     if (t.id === 'periodSel') { STATE.period = t.value; STATE.sel = null; save(); render(); return; }
+    if (t.id === 'bookSel')   { switchCompany(t.value); return; }
     if (t.id === 'accSel')    { STATE.drill = t.value; render(); return; }
     if (t.id === 'file') {
       if (t.files && t.files[0]) handleFile(t.files[0]);
@@ -533,6 +535,95 @@ function modalBlank() {
   });
 }
 
+function modalNewCompany() {
+  const yr = new Date().getFullYear();
+  modal({
+    title:'เพิ่มบริษัท',
+    sub:'สร้างสมุดบัญชีเล่มใหม่ ข้อมูลแยกจากบริษัทที่มีอยู่โดยสิ้นเชิง',
+    body:'<div class="flds">'
+      + field({ name:'coname', label:'ชื่อผู้ประกอบการ', wide:true, placeholder:'บริษัท ... จำกัด' })
+      + field({ name:'cotax', label:'เลขประจำตัวผู้เสียภาษี 13 หลัก', placeholder:'เว้นว่างไว้ก่อนได้' })
+      + field({ name:'coyear', label:'ปีของรอบบัญชี (ค.ศ.)', value: String(yr) })
+      + field({ name:'coaddr', label:'ที่อยู่สถานประกอบการ', wide:true,
+          placeholder:'ที่อยู่ที่จะพิมพ์ลงใบกำกับภาษีทุกใบ' })
+      + '</div>'
+      + '<div class="note">บริษัทที่เปิดอยู่ตอนนี้จะถูกบันทึกไว้ก่อน แล้วสลับไปที่บริษัทใหม่ให้</div>',
+    submitLabel:'สร้างบริษัทและสลับไป',
+    onSubmit: function () {
+      const name = val('coname').trim();
+      if (!name) { toast('ต้องใส่ชื่อผู้ประกอบการ', 'err'); return; }
+      const opts = { name: name, taxId: val('cotax'), address: val('coaddr'), year: val('coyear') };
+      /* ตรวจให้ผ่านก่อน แล้วค่อยแตะข้อมูลบริษัทที่เปิดอยู่ */
+      try { blankState(); buildBlankCheck(opts); }
+      catch (e) {
+        if (e instanceof DomainError) toast(e.message, 'err', e.hint);
+        else toast('สร้างไม่สำเร็จ', 'err', e.message);
+        return;
+      }
+      createCompany(opts);
+    },
+  });
+}
+
+/** ตรวจอย่างเดียว ไม่เขียนอะไร — ใช้ก่อนสลับบริษัท */
+function buildBlankCheck(o) {
+  const taxId = String(o.taxId || '').trim();
+  if (taxId && !validTaxId(taxId)) {
+    throw new DomainError('TAX_ID_INVALID',
+      'เลขประจำตัวผู้เสียภาษี ' + taxId + ' ไม่ผ่านการตรวจหลักที่ 13',
+      'ตรวจเลขกับหนังสือรับรองของบริษัท หรือเว้นว่างไว้ก่อนได้');
+  }
+  const year = Number(o.year);
+  if (!Number.isInteger(year) || year < 2000 || year > 2100) {
+    throw new DomainError('FISCAL_YEAR_INVALID',
+      'ปีของรอบบัญชีต้องเป็น ค.ศ. ระหว่าง 2000 ถึง 2100 (ได้รับ "' + o.year + '")',
+      'ปี พ.ศ. 2569 คือ ค.ศ. 2026');
+  }
+}
+
+async function createCompany(opts) {
+  try {
+    if (SYNC.mode === 'server') {
+      clearTimeout(SYNC.timer);
+      if (SYNC.pending) await syncPush();     // บันทึกบริษัทเดิมให้จบก่อน
+    } else {
+      booksSaveActive();
+    }
+    const id = booksNewId(opts.name);
+    SYNC.book = id;
+    SYNC.version = 0;
+    buildBlank(opts);
+    STATE.period = DB.periods[0].code;
+    STATE.screen = 'dashboard';
+    STATE.sel = null; STATE.imp = null; STATE.impResult = null;
+    if (SYNC.mode === 'server') { await syncPush(); await syncBooks(); }
+    else { booksSaveActive(); }
+    closeModal();
+    render();
+    toast('สร้างบริษัท ' + DB.company.name + ' แล้ว', 'ok',
+      'ข้อมูลแยกจากบริษัทอื่นทั้งหมด · สลับได้ที่มุมซ้ายบน');
+  } catch (e) {
+    if (e instanceof DomainError) toast(e.message, 'err', e.hint);
+    else { console.error(e); toast('สร้างบริษัทไม่สำเร็จ', 'err', e.message); }
+  }
+}
+
+async function switchCompany(id) {
+  if (id === SYNC.book) return;
+  const r = await syncSwitch(id);
+  if (r === 'locked') { render(); return; }
+  if (r === 'empty' || !DB.company) {
+    toast('เปิดบริษัทนี้ไม่ได้', 'err', 'ไม่พบข้อมูลของสมุดนี้');
+    return;
+  }
+  STATE.screen = 'dashboard';
+  STATE.sel = null; STATE.drill = null; STATE.imp = null; STATE.impResult = null;
+  const p = DB.periods.find((x) => x.code === STATE.period);
+  if (!p) STATE.period = DB.periods[DB.periods.length - 1].code;
+  render();
+  toast('สลับไปที่ ' + DB.company.name + ' แล้ว', 'ok');
+}
+
 /* ===================================================================
    นำเข้าไฟล์
    =================================================================== */
@@ -601,9 +692,13 @@ async function boot() {
       render();
       return;
     }
+    await syncBooks();
+    if (SYNC.books.length && !SYNC.books.some((b) => b.book === SYNC.book)) {
+      SYNC.book = SYNC.books[0].book;      // สมุดเริ่มต้นถูกลบไปแล้ว ให้เปิดเล่มแรกที่มี
+    }
     const r = await syncPull();
     if (r === 'locked') { render(); return; }
-    if (r === 'empty') { buildSeed(); render(); await syncPush(); }
+    if (r === 'empty') { buildSeed(); render(); await syncPush(); await syncBooks(); }
     else if (r === 'error') {
       /* ต่อเซิร์ฟเวอร์ไม่ได้ อย่าให้หน้าจอว่างเปล่า — ใช้ของในเครื่องไปก่อนแล้วบอกให้รู้ */
       SYNC.mode = 'browser';

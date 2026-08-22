@@ -5,6 +5,8 @@
    =================================================================== */
 const SYNC = {
   mode: 'browser',        // 'browser' | 'server'
+  book: 'default',        // สมุดบัญชีที่เปิดอยู่ = หนึ่งบริษัท
+  books: [],              // [{book, name, taxId, entries}]
   version: 0,
   needsPasscode: false,
   passcode: '',
@@ -64,16 +66,26 @@ async function syncConfig() {
 }
 
 /** ดึงข้อมูลจากเซิร์ฟเวอร์ — คืน 'ok' | 'empty' | 'locked' | 'error' */
+async function syncBooks() {
+  if (SYNC.mode !== 'server') return SYNC.books;
+  try {
+    const r = await fetch('/api/books', { headers: syncHeaders() });
+    if (!r.ok) return SYNC.books;
+    const b = await r.json();
+    SYNC.books = b.books || [];
+  } catch (e) { /* ไม่เป็นไร ใช้รายชื่อเดิมไปก่อน */ }
+  return SYNC.books;
+}
+
 async function syncPull() {
   try {
-    const r = await fetch('/api/state', { headers: syncHeaders() });
+    const r = await fetch('/api/state?book=' + encodeURIComponent(SYNC.book), { headers: syncHeaders() });
     if (r.status === 401) { setStatus('locked'); return 'locked'; }
     if (!r.ok) { setStatus('error', 'อ่านข้อมูลจากเซิร์ฟเวอร์ไม่ได้'); return 'error'; }
     const s = await r.json();
     SYNC.version = s.version || 0;
-    if (!s.data) return 'empty';
-    Object.keys(s.data).forEach(function (k) { DB[k] = s.data[k]; });
-    if (DB.isDemo === undefined) DB.isDemo = DB.company.name === 'บริษัท ศรีวัฒนาการค้า จำกัด';
+    if (!s.data) { loadState(null); return 'empty'; }
+    loadState(s.data);          // ★ แทนที่ทั้งก้อน ไม่ผสมกับบริษัทที่เปิดอยู่ก่อนหน้า
     setStatus('saved', 'ดึงข้อมูลรุ่นที่ ' + SYNC.version + ' มาแล้ว');
     return 'ok';
   } catch (e) {
@@ -87,7 +99,7 @@ async function syncPush() {
   SYNC.pending = false;
   setStatus('saving');
   try {
-    const r = await fetch('/api/state', {
+    const r = await fetch('/api/state?book=' + encodeURIComponent(SYNC.book), {
       method: 'PUT',
       headers: syncHeaders(),
       body: JSON.stringify({ version: SYNC.version, data: DB }),
@@ -98,7 +110,7 @@ async function syncPush() {
          ข้อมูลบัญชีหายเงียบ ๆ ไม่ได้ ต้องบอกให้รู้ทุกครั้ง */
       const s = await r.json();
       SYNC.version = s.version || 0;
-      if (s.data) Object.keys(s.data).forEach(function (k) { DB[k] = s.data[k]; });
+      if (s.data) loadState(s.data);
       setStatus('conflict');
       toast('มีการบันทึกจากอีกเครื่อง', 'err',
         'ระบบดึงข้อมูลล่าสุดมาแสดงแทนแล้ว สิ่งที่เพิ่งทำอาจต้องทำซ้ำ');
@@ -114,6 +126,7 @@ async function syncPush() {
     const b = await r.json();
     SYNC.version = b.version;
     setStatus('saved', 'รุ่นที่ ' + SYNC.version);
+    syncBooks();                // ให้รายชื่อบริษัทอัปเดตชื่อและจำนวนรายการตาม
   } catch (e) {
     setStatus('error', e.message);
     scheduleRetry();
@@ -142,6 +155,22 @@ function syncPasscodeScreen(wrong) {
       + '</div>',
     foot: btn('pass:submit', 'เปิดสมุดบัญชี', 'primary'),
   });
+}
+
+/** สลับบริษัท — ต้องบันทึกของเดิมให้จบก่อน แล้วค่อยยกข้อมูลใหม่เข้ามาแทนทั้งก้อน */
+async function syncSwitch(book) {
+  if (SYNC.mode === 'server') {
+    clearTimeout(SYNC.timer);
+    if (SYNC.pending) await syncPush();
+    SYNC.book = book;
+    SYNC.version = 0;
+    const r = await syncPull();
+    if (r === 'empty') { loadState(null); return 'empty'; }
+    return r;
+  }
+  booksSaveActive();
+  SYNC.book = book;
+  return booksLoadLocal(book) ? 'ok' : 'empty';
 }
 
 async function syncUnlock(code) {

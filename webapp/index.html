@@ -69,7 +69,20 @@ th.r,td.r,.r{text-align:right}
   place-items:center; color:var(--accent); font-size:11px; font-weight:700; font-family:var(--mono);
 }
 .brand-sub{font-family:var(--mono); font-size:10.5px; letter-spacing:.12em; color:var(--faint); font-weight:400; text-transform:uppercase}
-.co{font-size:14px; color:var(--ink-2); padding-left:14px; border-left:1px solid var(--rule)}
+.co{display:flex; align-items:center; gap:8px; font-size:14px; color:var(--ink-2);
+  padding-left:14px; border-left:1px solid var(--rule); min-width:0}
+.co-name{white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:34ch}
+.book-sel{
+  font:inherit; font-size:14px; font-weight:600; color:var(--ink); background:var(--panel);
+  border:1px solid var(--rule); border-radius:4px; padding:4px 8px; max-width:32ch; cursor:pointer;
+}
+.book-sel:hover{border-color:var(--muted)}
+.add-co{
+  font:inherit; font-size:12px; font-weight:500; cursor:pointer; white-space:nowrap;
+  color:var(--accent-d); background:var(--accent-w); border:1px solid var(--accent);
+  border-radius:4px; padding:3px 9px;
+}
+.add-co:hover{filter:brightness(1.05)}
 .periodwrap{display:flex; align-items:center; gap:8px; font-size:13px; color:var(--muted)}
 .periodwrap select{
   font:inherit; font-size:13px; color:var(--ink); background:var(--panel);
@@ -467,29 +480,55 @@ class DomainError extends Error {
 /* ===================================================================
    ฐานข้อมูลในเครื่อง
    =================================================================== */
-const DB = {
-  company: null,
-  accounts: [],        // {code,name,type,subType,postable,contra,parent,level,requiresPartner}
-  partners: [],
-  items: [],
-  employees: [],
-  assets: [],
-  periods: [],         // {code,start,end,status}
-  entries: [],         // {no,date,type,desc,src,srcId,status,lines:[{acc,dr,cr,partner,memo}],reversedBy,reverseOf,reason}
-  taxTx: [],           // {kind,period,date,docNo,docType,partnerName,taxId,branch,base,tax,channel,form,incomeType,rate,filingId,entryNo}
-  docs: {              // เอกสารแยกตามประเภท
-    quotation: [], salesOrder: [], invoice: [], receipt: [], creditNote: [],
-    purchaseOrder: [], bill: [], payment: [], whtCert: [],
-    stockMove: [], payRun: [], depreciation: [], filing: [],
-  },
-  seq: {},             // {'invoice|2026-07': 12}
-  budget: [],          // {account,period,amount}
-  projects: [],
-  bankTxns: [],        // รายการเดินบัญชีที่ยังไม่กระทบยอด
-  audit: [],
-  settings: { hardLockDate: null },
-  isDemo: false,      // true = ข้อมูลตัวอย่างที่ระบบสร้างให้ ไม่ใช่ข้อมูลจริงของผู้ใช้
-};
+/** โครงข้อมูลเปล่าของกิจการหนึ่งราย — ใช้เป็นแม่แบบตอนสลับบริษัท */
+function blankState() {
+  return {
+    company: null,
+    accounts: [],        // {code,name,type,subType,postable,contra,parent,level,requiresPartner}
+    partners: [],
+    items: [],
+    employees: [],
+    assets: [],
+    periods: [],         // {code,start,end,status}
+    entries: [],         // {no,date,type,desc,src,srcId,status,lines:[...],reversedBy,reverseOf,reason}
+    taxTx: [],           // {kind,period,date,docNo,docType,partnerName,taxId,branch,base,tax,...}
+    docs: {              // เอกสารแยกตามประเภท
+      quotation: [], salesOrder: [], invoice: [], receipt: [], creditNote: [],
+      purchaseOrder: [], bill: [], payment: [], whtCert: [],
+      stockMove: [], payRun: [], depreciation: [], filing: [],
+    },
+    seq: {},             // {'invoice|2026-07': 12}
+    budget: [],          // {account,period,amount}
+    projects: [],
+    bankTxns: [],        // รายการเดินบัญชีที่ยังไม่กระทบยอด
+    audit: [],
+    settings: { hardLockDate: null },
+    isDemo: false,       // true = ข้อมูลตัวอย่างที่ระบบสร้างให้ ไม่ใช่ข้อมูลจริงของผู้ใช้
+  };
+}
+
+const DB = blankState();
+
+/**
+ * ★ ยกข้อมูลของกิจการหนึ่งเข้ามาทั้งก้อน — ล้างของเดิมให้เกลี้ยงก่อนเสมอ
+ *   ถ้าใช้วิธีทับทีละคีย์ คีย์ที่กิจการใหม่ไม่มีจะค้างจากกิจการเดิม
+ *   เช่นสลับจากบริษัทที่มีใบกำกับ 91 ใบ ไปบริษัทเปล่า แล้วใบกำกับยังอยู่
+ */
+function loadState(obj) {
+  const fresh = blankState();
+  Object.keys(DB).forEach((k) => { if (!(k in fresh)) delete DB[k]; });
+  Object.keys(fresh).forEach((k) => { DB[k] = fresh[k]; });
+  if (!obj || typeof obj !== 'object') return false;
+  Object.keys(obj).forEach((k) => { if (k in fresh) DB[k] = obj[k]; });
+  /* เอกสารประเภทที่เพิ่มเข้ามาทีหลัง ต้องมีอาร์เรย์รองรับเสมอ */
+  if (!DB.docs || typeof DB.docs !== 'object') DB.docs = fresh.docs;
+  Object.keys(fresh.docs).forEach((k) => { if (!Array.isArray(DB.docs[k])) DB.docs[k] = []; });
+  if (!DB.settings) DB.settings = fresh.settings;
+  if (DB.isDemo === undefined) {
+    DB.isDemo = !!(DB.company && DB.company.name === 'บริษัท ศรีวัฒนาการค้า จำกัด');
+  }
+  return !!DB.company;
+}
 
 /* ---------- อัตราภาษีตามช่วงเวลา (ข้อมูล ไม่ใช่โค้ด) ---------- */
 const TAX_RATES = [
@@ -2160,6 +2199,8 @@ function generateTransactions() {
    =================================================================== */
 const SYNC = {
   mode: 'browser',        // 'browser' | 'server'
+  book: 'default',        // สมุดบัญชีที่เปิดอยู่ = หนึ่งบริษัท
+  books: [],              // [{book, name, taxId, entries}]
   version: 0,
   needsPasscode: false,
   passcode: '',
@@ -2219,16 +2260,26 @@ async function syncConfig() {
 }
 
 /** ดึงข้อมูลจากเซิร์ฟเวอร์ — คืน 'ok' | 'empty' | 'locked' | 'error' */
+async function syncBooks() {
+  if (SYNC.mode !== 'server') return SYNC.books;
+  try {
+    const r = await fetch('/api/books', { headers: syncHeaders() });
+    if (!r.ok) return SYNC.books;
+    const b = await r.json();
+    SYNC.books = b.books || [];
+  } catch (e) { /* ไม่เป็นไร ใช้รายชื่อเดิมไปก่อน */ }
+  return SYNC.books;
+}
+
 async function syncPull() {
   try {
-    const r = await fetch('/api/state', { headers: syncHeaders() });
+    const r = await fetch('/api/state?book=' + encodeURIComponent(SYNC.book), { headers: syncHeaders() });
     if (r.status === 401) { setStatus('locked'); return 'locked'; }
     if (!r.ok) { setStatus('error', 'อ่านข้อมูลจากเซิร์ฟเวอร์ไม่ได้'); return 'error'; }
     const s = await r.json();
     SYNC.version = s.version || 0;
-    if (!s.data) return 'empty';
-    Object.keys(s.data).forEach(function (k) { DB[k] = s.data[k]; });
-    if (DB.isDemo === undefined) DB.isDemo = DB.company.name === 'บริษัท ศรีวัฒนาการค้า จำกัด';
+    if (!s.data) { loadState(null); return 'empty'; }
+    loadState(s.data);          // ★ แทนที่ทั้งก้อน ไม่ผสมกับบริษัทที่เปิดอยู่ก่อนหน้า
     setStatus('saved', 'ดึงข้อมูลรุ่นที่ ' + SYNC.version + ' มาแล้ว');
     return 'ok';
   } catch (e) {
@@ -2242,7 +2293,7 @@ async function syncPush() {
   SYNC.pending = false;
   setStatus('saving');
   try {
-    const r = await fetch('/api/state', {
+    const r = await fetch('/api/state?book=' + encodeURIComponent(SYNC.book), {
       method: 'PUT',
       headers: syncHeaders(),
       body: JSON.stringify({ version: SYNC.version, data: DB }),
@@ -2253,7 +2304,7 @@ async function syncPush() {
          ข้อมูลบัญชีหายเงียบ ๆ ไม่ได้ ต้องบอกให้รู้ทุกครั้ง */
       const s = await r.json();
       SYNC.version = s.version || 0;
-      if (s.data) Object.keys(s.data).forEach(function (k) { DB[k] = s.data[k]; });
+      if (s.data) loadState(s.data);
       setStatus('conflict');
       toast('มีการบันทึกจากอีกเครื่อง', 'err',
         'ระบบดึงข้อมูลล่าสุดมาแสดงแทนแล้ว สิ่งที่เพิ่งทำอาจต้องทำซ้ำ');
@@ -2269,6 +2320,7 @@ async function syncPush() {
     const b = await r.json();
     SYNC.version = b.version;
     setStatus('saved', 'รุ่นที่ ' + SYNC.version);
+    syncBooks();                // ให้รายชื่อบริษัทอัปเดตชื่อและจำนวนรายการตาม
   } catch (e) {
     setStatus('error', e.message);
     scheduleRetry();
@@ -2297,6 +2349,22 @@ function syncPasscodeScreen(wrong) {
       + '</div>',
     foot: btn('pass:submit', 'เปิดสมุดบัญชี', 'primary'),
   });
+}
+
+/** สลับบริษัท — ต้องบันทึกของเดิมให้จบก่อน แล้วค่อยยกข้อมูลใหม่เข้ามาแทนทั้งก้อน */
+async function syncSwitch(book) {
+  if (SYNC.mode === 'server') {
+    clearTimeout(SYNC.timer);
+    if (SYNC.pending) await syncPush();
+    SYNC.book = book;
+    SYNC.version = 0;
+    const r = await syncPull();
+    if (r === 'empty') { loadState(null); return 'empty'; }
+    return r;
+  }
+  booksSaveActive();
+  SYNC.book = book;
+  return booksLoadLocal(book) ? 'ok' : 'empty';
 }
 
 async function syncUnlock(code) {
@@ -2447,25 +2515,74 @@ const field = (o) =>
         + (o.readonly ? ' readonly' : '') + (o.cls ? ' class="' + o.cls + '"' : '') + '>')
   + (o.hint ? '<div class="fld-hint">' + esc(o.hint) + '</div>' : '') + '</div>';
 
-/* ---------- เก็บข้อมูลไว้ในเครื่อง ---------- */
-const LS_KEY = 'duly.demo.v1';
+/* ---------- เก็บข้อมูลไว้ในเครื่อง — หนึ่งบริษัทหนึ่งสมุด ---------- */
+const LS_OLD = 'duly.demo.v1';                 // รูปแบบเดิมสมัยรองรับบริษัทเดียว
+const LS_BOOKS = 'duly.books';
+const LS_ACTIVE = 'duly.activeBook';
+const bookKey = (id) => 'duly.book.' + id;
+
+const lsGet = (k) => { try { return localStorage.getItem(k); } catch (e) { return null; } };
+const lsSet = (k, v) => { try { localStorage.setItem(k, v); return true; } catch (e) { return false; } };
+const lsDel = (k) => { try { localStorage.removeItem(k); } catch (e) {} };
+
+function booksList() {
+  try { return JSON.parse(lsGet(LS_BOOKS) || '[]'); } catch (e) { return []; }
+}
+function booksWrite(list) { lsSet(LS_BOOKS, JSON.stringify(list)); }
+
+/** ย้ายข้อมูลรูปแบบเดิมมาเป็นสมุดแรก ผู้ใช้เดิมต้องไม่เสียข้อมูล */
+function booksMigrate() {
+  if (booksList().length) return;
+  const old = lsGet(LS_OLD);
+  if (!old) return;
+  try {
+    const d = JSON.parse(old);
+    if (!d || !d.DB || !d.DB.company) return;
+    lsSet(bookKey('default'), old);
+    booksWrite([{ id: 'default', name: d.DB.company.name, taxId: d.DB.company.taxId || null }]);
+    lsSet(LS_ACTIVE, 'default');
+    lsDel(LS_OLD);
+  } catch (e) { /* อ่านไม่ออกก็ปล่อยไว้ ไม่ลบของเดิมทิ้ง */ }
+}
+
+function booksSaveActive() {
+  if (SYNC.mode === 'server') return;
+  lsSet(bookKey(SYNC.book), JSON.stringify({ DB, STATE: { period: STATE.period } }));
+  const list = booksList();
+  const at = list.findIndex((b) => b.id === SYNC.book);
+  const meta = { id: SYNC.book, name: DB.company ? DB.company.name : SYNC.book,
+    taxId: DB.company ? DB.company.taxId : null, entries: DB.entries.length };
+  if (at >= 0) list[at] = meta; else list.push(meta);
+  booksWrite(list);
+  lsSet(LS_ACTIVE, SYNC.book);
+  SYNC.books = list.map((b) => ({ book: b.id, name: b.name, taxId: b.taxId, entries: b.entries || 0 }));
+}
+
+function booksLoadLocal(id) {
+  const raw = lsGet(bookKey(id));
+  if (!raw) { loadState(null); return false; }
+  try {
+    const d = JSON.parse(raw);
+    const ok = loadState(d && d.DB);
+    if (ok && d.STATE && d.STATE.period) STATE.period = d.STATE.period;
+    lsSet(LS_ACTIVE, id);
+    return ok;
+  } catch (e) { loadState(null); return false; }
+}
+
 function save() {
   if (SYNC.mode === 'server') { syncSave(); return; }
-  try { localStorage.setItem(LS_KEY, JSON.stringify({ DB, STATE: { period: STATE.period } })); }
-  catch (e) { /* โหมดส่วนตัวหรือปิดการเก็บข้อมูล — ใช้งานต่อได้ในหน่วยความจำ */ }
+  booksSaveActive();
 }
 function load() {
-  try {
-    const raw = localStorage.getItem(LS_KEY);
-    if (!raw) return false;
-    const d = JSON.parse(raw);
-    if (!d || !d.DB || !d.DB.company) return false;
-    Object.keys(d.DB).forEach((k) => { DB[k] = d.DB[k]; });
-    if (d.STATE && d.STATE.period) STATE.period = d.STATE.period;
-    // ข้อมูลที่บันทึกไว้ก่อนมีธงนี้ ให้เดาจากชื่อบริษัทตัวอย่าง
-    if (DB.isDemo === undefined) DB.isDemo = DB.company.name === 'บริษัท ศรีวัฒนาการค้า จำกัด';
-    return true;
-  } catch (e) { return false; }
+  booksMigrate();
+  const list = booksList();
+  SYNC.books = list.map((b) => ({ book: b.id, name: b.name, taxId: b.taxId, entries: b.entries || 0 }));
+  if (!list.length) return false;
+  const active = lsGet(LS_ACTIVE);
+  const id = list.some((b) => b.id === active) ? active : list[0].id;
+  SYNC.book = id;
+  return booksLoadLocal(id);
 }
 function resetAll() {
   if (SYNC.mode === 'server') {
@@ -2473,8 +2590,19 @@ function resetAll() {
     syncPush().then(() => location.reload());
     return;
   }
-  try { localStorage.removeItem(LS_KEY); } catch (e) {}
+  buildSeed();
+  booksSaveActive();
   location.reload();
+}
+
+/** เพิ่มบริษัทใหม่ — สมุดใหม่ที่ไม่แตะข้อมูลของบริษัทอื่นเลย */
+function booksNewId(name) {
+  const base = 'co-' + String(name || '').replace(/[^A-Za-z0-9]+/g, '').slice(0, 12).toLowerCase();
+  const taken = new Set((SYNC.books || []).map((b) => b.book));
+  let id = base.length > 3 ? base : 'co';
+  let n = 1;
+  while (taken.has(id)) { id = (base.length > 3 ? base : 'co') + '-' + (++n); }
+  return id;
 }
 
 /* ---------- เมนู ---------- */
@@ -2577,7 +2705,15 @@ function render() {
     + thPeriod(p.code) + (p.status !== 'open' ? ' (ปิดแล้ว)' : '') + '</option>').join('');
   document.getElementById('periodSel').innerHTML = periods;
 
-  document.getElementById('coName').innerHTML = esc(DB.company.name)
+  const books = SYNC.books || [];
+  document.getElementById('coName').innerHTML =
+    (books.length > 1
+      ? '<select id="bookSel" class="book-sel" aria-label="เลือกบริษัท">'
+        + books.map((b) => '<option value="' + esc(b.book) + '"'
+            + (b.book === SYNC.book ? ' selected' : '') + '>' + esc(b.name) + '</option>').join('')
+        + '</select>'
+      : '<span class="co-name">' + esc(DB.company.name) + '</span>')
+    + '<button class="add-co" data-act="company:new" title="เพิ่มบริษัท">+ บริษัท</button>'
     + (DB.isDemo
         ? '<button class="demo-tag" data-act="go:import" title="ข้อมูลชุดนี้ระบบสร้างขึ้นเพื่อให้ลองใช้">'
           + 'ข้อมูลตัวอย่าง · เริ่มใช้ของจริง</button>'
@@ -4761,6 +4897,7 @@ function dispatch(act) {
   if (head === 'view')    { STATE.dashView = arg; render(); return; }
   if (head === 'pick')    { document.getElementById('file').click(); return; }
   if (head === 'blank')   { modalBlank(); return; }
+  if (head === 'company')  { if (arg === 'new') modalNewCompany(); return; }
   if (head === 'pass') {
     const code = val('passcode');
     syncUnlock(code).then(function (ok) {
@@ -4872,6 +5009,7 @@ function bindEvents() {
   document.addEventListener('change', function (ev) {
     const t = ev.target;
     if (t.id === 'periodSel') { STATE.period = t.value; STATE.sel = null; save(); render(); return; }
+    if (t.id === 'bookSel')   { switchCompany(t.value); return; }
     if (t.id === 'accSel')    { STATE.drill = t.value; render(); return; }
     if (t.id === 'file') {
       if (t.files && t.files[0]) handleFile(t.files[0]);
@@ -4992,6 +5130,95 @@ function modalBlank() {
   });
 }
 
+function modalNewCompany() {
+  const yr = new Date().getFullYear();
+  modal({
+    title:'เพิ่มบริษัท',
+    sub:'สร้างสมุดบัญชีเล่มใหม่ ข้อมูลแยกจากบริษัทที่มีอยู่โดยสิ้นเชิง',
+    body:'<div class="flds">'
+      + field({ name:'coname', label:'ชื่อผู้ประกอบการ', wide:true, placeholder:'บริษัท ... จำกัด' })
+      + field({ name:'cotax', label:'เลขประจำตัวผู้เสียภาษี 13 หลัก', placeholder:'เว้นว่างไว้ก่อนได้' })
+      + field({ name:'coyear', label:'ปีของรอบบัญชี (ค.ศ.)', value: String(yr) })
+      + field({ name:'coaddr', label:'ที่อยู่สถานประกอบการ', wide:true,
+          placeholder:'ที่อยู่ที่จะพิมพ์ลงใบกำกับภาษีทุกใบ' })
+      + '</div>'
+      + '<div class="note">บริษัทที่เปิดอยู่ตอนนี้จะถูกบันทึกไว้ก่อน แล้วสลับไปที่บริษัทใหม่ให้</div>',
+    submitLabel:'สร้างบริษัทและสลับไป',
+    onSubmit: function () {
+      const name = val('coname').trim();
+      if (!name) { toast('ต้องใส่ชื่อผู้ประกอบการ', 'err'); return; }
+      const opts = { name: name, taxId: val('cotax'), address: val('coaddr'), year: val('coyear') };
+      /* ตรวจให้ผ่านก่อน แล้วค่อยแตะข้อมูลบริษัทที่เปิดอยู่ */
+      try { blankState(); buildBlankCheck(opts); }
+      catch (e) {
+        if (e instanceof DomainError) toast(e.message, 'err', e.hint);
+        else toast('สร้างไม่สำเร็จ', 'err', e.message);
+        return;
+      }
+      createCompany(opts);
+    },
+  });
+}
+
+/** ตรวจอย่างเดียว ไม่เขียนอะไร — ใช้ก่อนสลับบริษัท */
+function buildBlankCheck(o) {
+  const taxId = String(o.taxId || '').trim();
+  if (taxId && !validTaxId(taxId)) {
+    throw new DomainError('TAX_ID_INVALID',
+      'เลขประจำตัวผู้เสียภาษี ' + taxId + ' ไม่ผ่านการตรวจหลักที่ 13',
+      'ตรวจเลขกับหนังสือรับรองของบริษัท หรือเว้นว่างไว้ก่อนได้');
+  }
+  const year = Number(o.year);
+  if (!Number.isInteger(year) || year < 2000 || year > 2100) {
+    throw new DomainError('FISCAL_YEAR_INVALID',
+      'ปีของรอบบัญชีต้องเป็น ค.ศ. ระหว่าง 2000 ถึง 2100 (ได้รับ "' + o.year + '")',
+      'ปี พ.ศ. 2569 คือ ค.ศ. 2026');
+  }
+}
+
+async function createCompany(opts) {
+  try {
+    if (SYNC.mode === 'server') {
+      clearTimeout(SYNC.timer);
+      if (SYNC.pending) await syncPush();     // บันทึกบริษัทเดิมให้จบก่อน
+    } else {
+      booksSaveActive();
+    }
+    const id = booksNewId(opts.name);
+    SYNC.book = id;
+    SYNC.version = 0;
+    buildBlank(opts);
+    STATE.period = DB.periods[0].code;
+    STATE.screen = 'dashboard';
+    STATE.sel = null; STATE.imp = null; STATE.impResult = null;
+    if (SYNC.mode === 'server') { await syncPush(); await syncBooks(); }
+    else { booksSaveActive(); }
+    closeModal();
+    render();
+    toast('สร้างบริษัท ' + DB.company.name + ' แล้ว', 'ok',
+      'ข้อมูลแยกจากบริษัทอื่นทั้งหมด · สลับได้ที่มุมซ้ายบน');
+  } catch (e) {
+    if (e instanceof DomainError) toast(e.message, 'err', e.hint);
+    else { console.error(e); toast('สร้างบริษัทไม่สำเร็จ', 'err', e.message); }
+  }
+}
+
+async function switchCompany(id) {
+  if (id === SYNC.book) return;
+  const r = await syncSwitch(id);
+  if (r === 'locked') { render(); return; }
+  if (r === 'empty' || !DB.company) {
+    toast('เปิดบริษัทนี้ไม่ได้', 'err', 'ไม่พบข้อมูลของสมุดนี้');
+    return;
+  }
+  STATE.screen = 'dashboard';
+  STATE.sel = null; STATE.drill = null; STATE.imp = null; STATE.impResult = null;
+  const p = DB.periods.find((x) => x.code === STATE.period);
+  if (!p) STATE.period = DB.periods[DB.periods.length - 1].code;
+  render();
+  toast('สลับไปที่ ' + DB.company.name + ' แล้ว', 'ok');
+}
+
 /* ===================================================================
    นำเข้าไฟล์
    =================================================================== */
@@ -5060,9 +5287,13 @@ async function boot() {
       render();
       return;
     }
+    await syncBooks();
+    if (SYNC.books.length && !SYNC.books.some((b) => b.book === SYNC.book)) {
+      SYNC.book = SYNC.books[0].book;      // สมุดเริ่มต้นถูกลบไปแล้ว ให้เปิดเล่มแรกที่มี
+    }
     const r = await syncPull();
     if (r === 'locked') { render(); return; }
-    if (r === 'empty') { buildSeed(); render(); await syncPush(); }
+    if (r === 'empty') { buildSeed(); render(); await syncPush(); await syncBooks(); }
     else if (r === 'error') {
       /* ต่อเซิร์ฟเวอร์ไม่ได้ อย่าให้หน้าจอว่างเปล่า — ใช้ของในเครื่องไปก่อนแล้วบอกให้รู้ */
       SYNC.mode = 'browser';

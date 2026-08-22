@@ -69,7 +69,20 @@ th.r,td.r,.r{text-align:right}
   place-items:center; color:var(--accent); font-size:11px; font-weight:700; font-family:var(--mono);
 }
 .brand-sub{font-family:var(--mono); font-size:10.5px; letter-spacing:.12em; color:var(--faint); font-weight:400; text-transform:uppercase}
-.co{font-size:14px; color:var(--ink-2); padding-left:14px; border-left:1px solid var(--rule)}
+.co{display:flex; align-items:center; gap:8px; font-size:14px; color:var(--ink-2);
+  padding-left:14px; border-left:1px solid var(--rule); min-width:0}
+.co-name{white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:34ch}
+.book-sel{
+  font:inherit; font-size:14px; font-weight:600; color:var(--ink); background:var(--panel);
+  border:1px solid var(--rule); border-radius:4px; padding:4px 8px; max-width:32ch; cursor:pointer;
+}
+.book-sel:hover{border-color:var(--muted)}
+.add-co{
+  font:inherit; font-size:12px; font-weight:500; cursor:pointer; white-space:nowrap;
+  color:var(--accent-d); background:var(--accent-w); border:1px solid var(--accent);
+  border-radius:4px; padding:3px 9px;
+}
+.add-co:hover{filter:brightness(1.05)}
 .periodwrap{display:flex; align-items:center; gap:8px; font-size:13px; color:var(--muted)}
 .periodwrap select{
   font:inherit; font-size:13px; color:var(--ink); background:var(--panel);
