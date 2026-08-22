@@ -20,7 +20,7 @@ class HealthController {
     return {
       status: ok ? 'ok' : 'degraded',
       database: ok,
-      service: 'duly-api',
+      service: 'financii-api',
       ...(ok ? {} : {
         hint: configured
           ? 'ตั้งค่าฐานข้อมูลไว้แล้วแต่ต่อไม่ได้ — ตรวจ APP_DATABASE_URL ว่าผู้ใช้และรหัสผ่านถูกต้อง'

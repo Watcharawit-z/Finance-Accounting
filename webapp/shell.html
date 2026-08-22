@@ -1,4 +1,4 @@
-<title>ดุลย์</title>
+<title>Financii</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -85,8 +85,9 @@ th.r,td.r,.r{text-align:right}
 .add-co:hover{filter:brightness(1.05)}
 .periodwrap{display:flex; align-items:center; gap:8px; font-size:13px; color:var(--muted)}
 .periodwrap select{
-  font:inherit; font-size:13px; color:var(--ink); background:var(--panel);
-  border:1px solid var(--rule); border-radius:4px; padding:5px 9px; font-size:14px;
+  font:inherit; font-size:14px; color:var(--ink); background:var(--panel);
+  border:1px solid var(--rule); border-radius:4px; padding:5px 9px;
+  max-width:min(200px, 42vw);
 }
 .icon-btn{
   display:none; background:var(--panel); border:1px solid var(--rule); border-radius:4px;
@@ -107,6 +108,17 @@ th.r,td.r,.r{text-align:right}
 }
 .nav-i:hover{background:var(--sunken); color:var(--ink)}
 .nav-i.on{background:var(--accent-w); color:var(--accent-d); font-weight:600}
+.nav-s .badge{margin-left:auto}
+.nav-s{
+  display:flex; align-items:center; gap:7px; width:100%; text-align:left; font:inherit;
+  font-size:13.5px; font-weight:500; color:var(--ink-2); background:none; border:none;
+  padding:7px 10px; border-radius:4px; cursor:pointer;
+}
+.nav-s:hover{background:var(--sunken); color:var(--ink)}
+.nav-s .chev{display:inline-block; transition:transform .15s; color:var(--faint); font-size:15px; line-height:1}
+.nav-s.open .chev{transform:rotate(90deg)}
+.nav-s.open{color:var(--ink); font-weight:600}
+.nav-i.sub{padding-left:31px; font-size:13px}
 .badge{
   font-size:11.5px; color:var(--neg); background:var(--neg-w); padding:1px 7px;
   border-radius:10px; font-variant-numeric:tabular-nums;
@@ -350,6 +362,9 @@ td select{font:inherit; font-size:13px; height:32px; padding:0 8px; border:1px s
   .brand-sub{display:none}
   .kpi{border-inline-end:0; border-bottom:1px solid var(--rule)}
 }
+@media (max-width:700px){
+  .pw-label{display:none}
+}
 @media (max-width:520px){
   .top{padding:0 12px; gap:10px}
   .kpis{grid-template-columns:1fr 1fr}
@@ -373,11 +388,11 @@ td select{font:inherit; font-size:13px; height:32px; padding:0 8px; border:1px s
 
 <header class="top">
   <button id="menuBtn" class="icon-btn" aria-label="เมนู">☰</button>
-  <div class="brand"><span class="brand-mark" aria-hidden="true">D</span>ดุลย์<span class="brand-sub">Duly</span></div>
+  <div class="brand"><span class="brand-mark" aria-hidden="true">F</span>Financii<span class="brand-sub">ระบบบัญชีไทย</span></div>
   <div class="co" id="coName"></div>
   <span class="grow"></span>
   <span id="syncTag" class="sync-tag" role="status" aria-live="polite"></span>
-  <label class="periodwrap">งวดบัญชี <select id="periodSel" aria-label="เลือกงวดบัญชี"></select></label>
+  <label class="periodwrap"><span class="pw-label">งวดบัญชี</span><select id="periodSel" aria-label="เลือกงวดบัญชี"></select></label>
 </header>
 <div class="shell">
   <nav id="nav" aria-label="เมนูหลัก"></nav>

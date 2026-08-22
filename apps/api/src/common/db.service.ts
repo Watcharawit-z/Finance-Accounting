@@ -27,7 +27,7 @@ export class DbService implements OnModuleDestroy {
     this.pool = new Pool({
       connectionString: url,
       max: Number(process.env.DB_POOL_MAX ?? 10),
-      application_name: 'duly-api',
+      application_name: 'financii-api',
       ...(needsSsl ? { ssl: { rejectUnauthorized: false } } : {}),
     });
   }

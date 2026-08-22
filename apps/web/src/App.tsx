@@ -33,7 +33,7 @@ export function App() {
   return (
     <>
       <header className="topbar">
-        <span className="brand"><i>D</i>DULY</span>
+        <span className="brand"><i>F</i>Financii</span>
         {company && (
           <span className="company">
             <b>{company.legal_name_th}</b>

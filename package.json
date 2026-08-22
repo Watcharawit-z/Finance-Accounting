@@ -1,12 +1,16 @@
 {
-  "name": "duly",
+  "name": "financii",
   "version": "0.1.0",
   "private": true,
-  "description": "DULY — ระบบบัญชีและการเงินสำหรับธุรกิจไทย",
-  "engines": { "node": ">=20" },
-  "workspaces": ["apps/api"],
+  "description": "Financii — ระบบบัญชีและการเงินสำหรับธุรกิจไทย",
+  "engines": {
+    "node": ">=20"
+  },
+  "workspaces": [
+    "apps/api"
+  ],
   "scripts": {
-    "build": "npm run build --workspace @duly/api",
+    "build": "npm run build --workspace @financii/api",
     "start": "node apps/api/scripts/migrate.js && node apps/api/dist/main.js",
     "migrate": "node apps/api/scripts/migrate.js",
     "test": "node webapp/test.js && node tools/flowaccount-import/test.js"

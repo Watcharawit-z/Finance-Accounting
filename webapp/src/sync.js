@@ -16,7 +16,7 @@ const SYNC = {
   timer: null,
   retry: null,
 };
-const PASS_KEY = 'duly.passcode';
+const PASS_KEY = 'financii.passcode';
 
 /** ส่วนหัวของ HTTP รับได้แค่ ASCII รหัสผ่านภาษาไทยจึงต้องแปลงเป็น base64 ก่อนส่ง */
 function encodePass(s) {

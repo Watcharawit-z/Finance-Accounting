@@ -118,7 +118,7 @@ const server = http.createServer(function (req, res) {
 
   if (url === '/health' || url === '/healthz') {
     return store.healthy().then((db) => json(res, 200, {
-      ok: true, service: 'duly-webapp',
+      ok: true, service: 'financii-webapp',
       storage: store.enabled() ? (db ? 'server' : 'server-unreachable') : 'browser',
     }));
   }
@@ -160,7 +160,7 @@ const server = http.createServer(function (req, res) {
 store.init()
   .then(function (on) {
     server.listen(PORT, '0.0.0.0', function () {
-      console.log('ดุลย์ — พอร์ต ' + PORT + ' · เก็บข้อมูล: '
+      console.log('Financii — พอร์ต ' + PORT + ' · เก็บข้อมูล: '
         + (on ? 'ฐานข้อมูลบนเซิร์ฟเวอร์ · รองรับหลายบริษัท' : 'เบราว์เซอร์ของผู้ใช้')
         + (PASSCODE ? ' · ต้องใส่รหัสผ่าน' : ''));
       if (on && !PASSCODE) {
@@ -172,6 +172,6 @@ store.init()
     console.error('ต่อฐานข้อมูลไม่สำเร็จ: ' + e.message);
     console.error('ตรวจ DATABASE_URL ของบริการนี้ — จะเปิดเว็บให้ก่อนโดยเก็บข้อมูลในเบราว์เซอร์');
     server.listen(PORT, '0.0.0.0', function () {
-      console.log('ดุลย์ — พอร์ต ' + PORT + ' · เก็บข้อมูล: เบราว์เซอร์ (ต่อฐานข้อมูลไม่ได้)');
+      console.log('Financii — พอร์ต ' + PORT + ' · เก็บข้อมูล: เบราว์เซอร์ (ต่อฐานข้อมูลไม่ได้)');
     });
   });

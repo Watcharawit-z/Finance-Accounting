@@ -1,5 +1,5 @@
 {
-  "name": "@duly/webapp",
+  "name": "@financii/webapp",
   "version": "1.0.0",
   "private": true,
   "description": "ระบบบัญชีไทยที่รันในเบราว์เซอร์ ไฟล์เดียวจบ",

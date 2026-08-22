@@ -27,7 +27,7 @@ function startServer(env, port) {
     const { Client } = require('pg');
     const c = new Client({ connectionString: DB_URL });
     await c.connect();
-    await c.query('DROP TABLE IF EXISTS duly_state, duly_state_history');
+    await c.query('DROP TABLE IF EXISTS duly_state, duly_state_history, financii_state, financii_state_history');
     await c.end();
   }
   const PASSCODE = 'ลับสุดยอด-1234';
@@ -49,7 +49,8 @@ function startServer(env, port) {
   ok('รายงานว่าเก็บบนเซิร์ฟเวอร์', cfg.storage === 'server');
   ok('บอกว่าต้องใช้รหัสผ่าน', cfg.needsPasscode === true);
   const h = await (await fetch(base + '/health')).json();
-  ok('health บอกสถานะที่เก็บข้อมูล', h.storage === 'server', JSON.stringify(h));
+  ok('health บอกสถานะที่เก็บข้อมูล', h.storage === 'server' && h.service === 'financii-webapp',
+    JSON.stringify(h));
 
   const b64 = (s) => Buffer.from(s, 'utf8').toString('base64');
   const noPass = await fetch(base + '/api/state');
@@ -214,7 +215,7 @@ function startServer(env, port) {
   const c = new Client({ connectionString: DB_URL });
   await c.connect();
   const hist = await c.query(
-    "SELECT count(*)::int n, max(version)::int v FROM duly_state_history WHERE book NOT LIKE 'co-%'");
+    "SELECT count(*)::int n, max(version)::int v FROM financii_state_history WHERE book NOT LIKE 'co-%'");
   ok('มีประวัติทุกรุ่นที่เคยบันทึก', hist.rows[0].n >= 3, hist.rows[0].n + ' ฉบับ ล่าสุดรุ่นที่ ' + hist.rows[0].v);
   await c.end();
 

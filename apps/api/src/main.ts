@@ -18,6 +18,6 @@ async function bootstrap() {
   const dbVar = process.env.APP_DATABASE_URL ? 'APP_DATABASE_URL'
     : process.env.DATABASE_URL ? 'DATABASE_URL (ควรแยกเป็น APP_DATABASE_URL บนเครื่องจริง)'
     : 'ยังไม่ได้ตั้ง — /health จะขึ้น degraded';
-  console.log(`DULY API รันที่พอร์ต ${port} · ฐานข้อมูล: ${dbVar}`);
+  console.log(`Financii API รันที่พอร์ต ${port} · ฐานข้อมูล: ${dbVar}`);
 }
 bootstrap();

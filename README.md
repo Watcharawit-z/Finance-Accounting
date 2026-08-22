@@ -1,9 +1,9 @@
-# DULY — ระบบบัญชีและการเงินสำหรับธุรกิจไทย
+# Financii — ระบบบัญชีและการเงินสำหรับธุรกิจไทย
 
 > **ดุล** (Thai: balance) × **duly** (English: properly, on time, as required)
 > — "บัญชีที่ดุล และทำถูกต้องตรงเวลา"
 
-DULY คือระบบบัญชี–การเงิน (Accounting & Finance Platform) ที่ออกแบบมาให้ใช้ภายในบริษัทได้จริง
+Financii คือระบบบัญชี–การเงิน (Accounting & Finance Platform) ที่ออกแบบมาให้ใช้ภายในบริษัทได้จริง
 และพร้อมยกระดับเป็นผลิตภัณฑ์ SaaS ขายในตลาดไทย/อาเซียนในอนาคต โดยยึด 3 หลักการ
 
 1. **Compliance-first** — ออกแบบตามกฎหมายไทยตั้งแต่ระดับโครงสร้างข้อมูล ไม่ใช่แปะทีหลัง
@@ -80,7 +80,7 @@ cd apps/web && npm install && npm run dev    # http://localhost:5173
 ```bash
 node tools/flowaccount-import/test.js  # 71 ข้อ — ย้ายข้อมูลจาก FlowAccount เข้าระบบจริง
 node webapp/test.js              # 61 ข้อ — เครื่องบัญชีในเบราว์เซอร์ (ไม่ต้องติดตั้งอะไร)
-node webapp/uitest.js            # 107 ข้อ — หน้าเว็บจริงใน Chromium ทุกหน้าจอทุกปุ่ม
+node webapp/uitest.js            # 120 ข้อ — หน้าเว็บจริงใน Chromium ทุกหน้าจอทุกปุ่ม
 db/tests/run.sh                  # 43 ข้อ — กฎบัญชีที่บังคับในฐานข้อมูล
 cd apps/api && npm test          # 52 ข้อ — เงิน ภาษี บัญชีแยกประเภท RLS และสัญญา HTTP
 ```

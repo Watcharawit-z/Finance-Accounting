@@ -44,8 +44,8 @@
 
 **ที่ระบบทำให้:**
 
-- เก็บสมุดบัญชีทั้งเล่มเป็น JSON หนึ่งแถวในตาราง `duly_state`
-  (ข้อมูล 7 เดือนราว 0.5 MB) และเก็บฉบับก่อนหน้าไว้ 50 รุ่นในตาราง `duly_state_history`
+- เก็บสมุดบัญชีทั้งเล่มเป็น JSON หนึ่งแถวในตาราง `financii_state`
+  (ข้อมูล 7 เดือนราว 0.5 MB) และเก็บฉบับก่อนหน้าไว้ 50 รุ่นในตาราง `financii_state_history`
 - **กันการเขียนทับกัน** — ทุกครั้งที่บันทึกต้องอ้างเลขรุ่นที่ถืออยู่ ถ้ามีอีกเครื่อง
   บันทึกแทรกเข้ามา ระบบจะปฏิเสธ ดึงข้อมูลล่าสุดมาแสดง แล้วบอกว่าต้องทำซ้ำ
   ไม่ทับข้อมูลของคนอื่นหายเงียบ ๆ
@@ -57,7 +57,7 @@
 สมุดบัญชีเล่มใหม่ที่แยกจากเล่มอื่นโดยสิ้นเชิง แล้วสลับไปให้ทันที
 สลับกลับได้จากรายชื่อบริษัทที่แถบบน
 
-- แต่ละบริษัทเก็บเป็นคนละแถวในตาราง `duly_state` (คอลัมน์ `book`)
+- แต่ละบริษัทเก็บเป็นคนละแถวในตาราง `financii_state` (คอลัมน์ `book`)
   เลขรุ่นและประวัติย้อนหลังนับแยกกันคนละบริษัท
 - ผังบัญชี งวดบัญชี ลำดับเลขที่เอกสาร ทะเบียนคู่ค้า สินค้า พนักงาน
   **แยกกันทั้งหมด** ไม่มีอะไรใช้ร่วมกัน
@@ -122,9 +122,9 @@ APP_DATABASE_URL  postgresql://duly_app:BBB@postgres.railway.internal:5432/railw
 
 | ตัวแปร | ค่า |
 |---|---|
-| `API_URL` | `http://${{duly-api.RAILWAY_PRIVATE_DOMAIN}}:${{duly-api.PORT}}` |
+| `API_URL` | `http://${{financii-api.RAILWAY_PRIVATE_DOMAIN}}:${{financii-api.PORT}}` |
 
-(เปลี่ยน `duly-api` เป็นชื่อบริการ API จริงของคุณ)
+(เปลี่ยน `financii-api` เป็นชื่อบริการ API จริงของคุณ)
 
 หน้าเว็บจะส่งต่อคำขอ `/api/*` ไปยัง API ผ่านเครือข่ายภายในของ Railway
 ทำให้อยู่โดเมนเดียวกัน ไม่ต้องเปิด CORS และ API ไม่ต้องเปิดออกสู่อินเทอร์เน็ตก็ได้
@@ -150,9 +150,9 @@ APP_DATABASE_URL  postgresql://duly_app:BBB@postgres.railway.internal:5432/railw
 
 ```bash
 curl https://<โดเมนของคุณ>/health
-# ระบบไฟล์เดียว → {"ok":true,"service":"duly-webapp"}
+# ระบบไฟล์เดียว → {"ok":true,"service":"financii-webapp"}
 # หน้าเว็บ       → {"ok":true,"service":"duly-web","api":"ตั้งค่าแล้ว"}
-# API           → {"status":"ok","database":true,"service":"duly-api"}
+# API           → {"status":"ok","database":true,"service":"financii-api"}
 ```
 
 `"database": false` แปลว่าแอปต่อฐานข้อมูลไม่ได้ ให้ดู `APP_DATABASE_URL` ก่อน

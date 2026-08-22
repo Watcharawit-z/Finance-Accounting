@@ -9,6 +9,7 @@ const STATE = {
   filter: '',
   drill: null,        // บัญชีที่กำลังเจาะดู
   dashView: 'chart',  // แดชบอร์ด: กราฟ หรือ ตาราง
+  navOpen: {},        // หมวดย่อยในเมนูที่กางอยู่
   imp: null,          // สถานะการนำเข้าไฟล์
   impResult: null,
 };
@@ -137,9 +138,9 @@ const field = (o) =>
 
 /* ---------- เก็บข้อมูลไว้ในเครื่อง — หนึ่งบริษัทหนึ่งสมุด ---------- */
 const LS_OLD = 'duly.demo.v1';                 // รูปแบบเดิมสมัยรองรับบริษัทเดียว
-const LS_BOOKS = 'duly.books';
-const LS_ACTIVE = 'duly.activeBook';
-const bookKey = (id) => 'duly.book.' + id;
+const LS_BOOKS = 'financii.books';
+const LS_ACTIVE = 'financii.activeBook';
+const bookKey = (id) => 'financii.book.' + id;
 
 const lsGet = (k) => { try { return localStorage.getItem(k); } catch (e) { return null; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, v); return true; } catch (e) { return false; } };
@@ -149,6 +150,30 @@ function booksList() {
   try { return JSON.parse(lsGet(LS_BOOKS) || '[]'); } catch (e) { return []; }
 }
 function booksWrite(list) { lsSet(LS_BOOKS, JSON.stringify(list)); }
+
+/**
+ * ย้ายข้อมูลที่เก็บไว้ใต้ชื่อเดิม (duly.*) มาไว้ใต้ชื่อใหม่ (financii.*)
+ * ทำครั้งเดียวตอนเปิดครั้งแรกหลังเปลี่ยนชื่อ ไม่ลบของเดิมทิ้งจนกว่าจะคัดลอกสำเร็จ
+ */
+function booksRebrand() {
+  if (lsGet(LS_BOOKS)) return;
+  const oldBooks = lsGet('duly.books');
+  if (!oldBooks) return;
+  let moved = 0;
+  try {
+    JSON.parse(oldBooks).forEach(function (b) {
+      const data = lsGet('duly.book.' + b.id);
+      if (data && lsSet(bookKey(b.id), data)) moved++;
+    });
+    if (!lsSet(LS_BOOKS, oldBooks)) return;
+    const act = lsGet('duly.activeBook');
+    if (act) lsSet(LS_ACTIVE, act);
+    JSON.parse(oldBooks).forEach(function (b) { lsDel('duly.book.' + b.id); });
+    lsDel('duly.books');
+    lsDel('duly.activeBook');
+  } catch (e) { /* ย้ายไม่สำเร็จก็ปล่อยของเดิมไว้ ดีกว่าทำหาย */ }
+  return moved;
+}
 
 /** ย้ายข้อมูลรูปแบบเดิมมาเป็นสมุดแรก ผู้ใช้เดิมต้องไม่เสียข้อมูล */
 function booksMigrate() {
@@ -195,6 +220,7 @@ function save() {
   booksSaveActive();
 }
 function load() {
+  booksRebrand();
   booksMigrate();
   const list = booksList();
   SYNC.books = list.map((b) => ({ book: b.id, name: b.name, taxId: b.taxId, entries: b.entries || 0 }));
@@ -237,42 +263,24 @@ function navGroups() {
       ['dashboard', 'แดชบอร์ด', todo || null],
       ['close', 'ปิดงวดบัญชี', null],
     ]},
-    { g: 'ขายและลูกหนี้', items: [
+    { g: 'เอกสารขาย', items: [
       ['invoices', 'ใบกำกับภาษี', null],
       ['receipts', 'ใบเสร็จรับเงิน', null],
       ['creditnotes', 'ใบลดหนี้', null],
-      ['ar', 'อายุลูกหนี้', overdue || null],
-      ['customers', 'ทะเบียนลูกค้า', null],
     ]},
-    { g: 'ซื้อและเจ้าหนี้', items: [
+    { g: 'เอกสารซื้อ', items: [
       ['bills', 'ตั้งหนี้ผู้ขาย', null],
       ['payments', 'ใบสำคัญจ่าย', null],
-      ['ap', 'อายุเจ้าหนี้', null],
-      ['vendors', 'ทะเบียนผู้ขาย', null],
     ]},
-    { g: 'ธนาคารและเงินสด', items: [
-      ['bank', 'กระทบยอดธนาคาร', unmatched || null],
-      ['cashflow', 'งบกระแสเงินสด', null],
+    { g: 'ผู้ติดต่อ', items: [
+      ['customers', 'ลูกค้า', null],
+      ['vendors', 'ผู้ขาย', null],
     ]},
-    { g: 'บัญชีแยกประเภท', items: [
-      ['journals', 'สมุดรายวัน', null],
-      ['ledger', 'บัญชีแยกประเภท', null],
-      ['tb', 'งบทดลอง', null],
-      ['coa', 'ผังบัญชี', null],
-    ]},
-    { g: 'ภาษี', items: [
-      ['vatout', 'รายงานภาษีขาย', null],
-      ['vatin', 'รายงานภาษีซื้อ', null],
-      ['pp30', 'แบบ ภ.พ.30', null],
-      ['pnd', 'ภ.ง.ด.1 / 3 / 53', null],
-      ['whtcert', 'หนังสือรับรอง 50 ทวิ', null],
-      ['taxcal', 'ปฏิทินภาษี', null],
-    ]},
-    { g: 'สินค้าคงคลัง', items: [
+    { g: 'สินค้า', items: [
       ['items', 'ทะเบียนสินค้า', null],
       ['stockmoves', 'ความเคลื่อนไหวสต๊อก', null],
     ]},
-    { g: 'สินทรัพย์ถาวร', items: [
+    { g: 'สินทรัพย์', items: [
       ['assets', 'ทะเบียนทรัพย์สิน', null],
       ['deprec', 'ค่าเสื่อมราคา', null],
     ]},
@@ -280,13 +288,43 @@ function navGroups() {
       ['payroll', 'งวดจ่ายเงินเดือน', null],
       ['employees', 'ทะเบียนพนักงาน', null],
     ]},
-    { g: 'โครงการและงบประมาณ', items: [
-      ['projects', 'โครงการ', null],
-      ['budget', 'งบประมาณเทียบใช้จริง', null],
+    { g: 'ธนาคาร', items: [
+      ['bank', 'กระทบยอดธนาคาร', unmatched || null],
     ]},
-    { g: 'รายงานการเงิน', items: [
-      ['bs', 'งบแสดงฐานะการเงิน', null],
-      ['pl', 'งบกำไรขาดทุน', null],
+    { g: 'ยื่นแบบภาษี', items: [
+      ['pp30', 'แบบ ภ.พ.30', null],
+      ['pnd', 'ภ.ง.ด.1 / 3 / 53', null],
+      ['whtcert', 'หนังสือรับรอง 50 ทวิ', null],
+      ['taxcal', 'ปฏิทินภาษี', null],
+    ]},
+    /* รายงานทั้งหมดรวมไว้ที่เดียว แยกหมวดย่อยแบบเดียวกับที่นักบัญชีคุ้นเคย
+       เดิมกระจายอยู่ใน 6 กลุ่ม ต้องจำว่ารายงานไหนอยู่ใต้หัวข้ออะไร */
+    { g: 'รายงาน', subs: [
+      { s: 'ขาย', items: [
+        ['ar', 'อายุลูกหนี้', overdue || null],
+      ]},
+      { s: 'ซื้อ', items: [
+        ['ap', 'อายุเจ้าหนี้', null],
+      ]},
+      { s: 'ภาษี', items: [
+        ['vatout', 'รายงานภาษีขาย', null],
+        ['vatin', 'รายงานภาษีซื้อ', null],
+      ]},
+      { s: 'บัญชี', items: [
+        ['journals', 'สมุดรายวัน', null],
+        ['ledger', 'บัญชีแยกประเภท', null],
+        ['tb', 'งบทดลอง', null],
+        ['coa', 'ผังบัญชี', null],
+      ]},
+      { s: 'งบการเงิน', items: [
+        ['bs', 'งบแสดงฐานะการเงิน', null],
+        ['pl', 'งบกำไรขาดทุน', null],
+        ['cashflow', 'งบกระแสเงินสด', null],
+      ]},
+      { s: 'โครงการและงบประมาณ', items: [
+        ['projects', 'โครงการ', null],
+        ['budget', 'งบประมาณเทียบใช้จริง', null],
+      ]},
     ]},
     { g: 'ระบบ', items: [
       ['import', 'นำเข้าข้อมูลจากระบบเดิม', null],
@@ -294,6 +332,27 @@ function navGroups() {
       ['about', 'เกี่ยวกับระบบนี้', null],
     ]},
   ];
+}
+
+/** รายชื่อหน้าจอทั้งหมด ไม่ว่าจะอยู่ในหมวดย่อยชั้นไหน */
+function navScreens() {
+  const out = [];
+  navGroups().forEach(function (g) {
+    (g.items || []).forEach((i) => out.push(i[0]));
+    (g.subs || []).forEach((s) => s.items.forEach((i) => out.push(i[0])));
+  });
+  return out;
+}
+
+/** หมวดย่อยที่มีหน้าจอปัจจุบันอยู่ ต้องกางไว้เสมอ ผู้ใช้จะได้เห็นว่าตัวเองอยู่ตรงไหน */
+function navSubOf(screen) {
+  let found = null;
+  navGroups().forEach(function (g) {
+    (g.subs || []).forEach(function (s) {
+      if (s.items.some((i) => i[0] === screen)) found = s.s;
+    });
+  });
+  return found;
 }
 
 /* ---------- โครงหน้าจอ ---------- */
@@ -310,12 +369,23 @@ function render() {
     return;
   }
   const groups = navGroups();
+  const openSub = navSubOf(STATE.screen);
+  const item = (it) => '<a href="#" class="nav-i' + (STATE.screen === it[0] ? ' on' : '')
+    + '" data-act="go:' + it[0] + '">' + esc(it[1])
+    + (it[2] ? '<span class="badge">' + it[2] + '</span>' : '') + '</a>';
   let nav = '';
   groups.forEach(function (g) {
     nav += '<div class="nav-g">' + esc(g.g) + '</div>';
-    g.items.forEach(function (it) {
-      nav += '<a href="#" class="nav-i' + (STATE.screen === it[0] ? ' on' : '') + '" data-act="go:' + it[0] + '">'
-        + esc(it[1]) + (it[2] ? '<span class="badge">' + it[2] + '</span>' : '') + '</a>';
+    (g.items || []).forEach(function (it) { nav += item(it); });
+    (g.subs || []).forEach(function (s) {
+      const open = STATE.navOpen[s.s] === undefined ? s.s === openSub : STATE.navOpen[s.s];
+      nav += '<button class="nav-s' + (open ? ' open' : '') + '" data-act="nav:' + esc(s.s) + '"'
+        + ' aria-expanded="' + (open ? 'true' : 'false') + '">'
+        + '<span class="chev" aria-hidden="true">›</span>' + esc(s.s)
+        + (!open && s.items.some((i) => i[2]) ? '<span class="badge">'
+            + s.items.reduce((n, i) => n + (i[2] || 0), 0) + '</span>' : '')
+        + '</button>';
+      if (open) s.items.forEach(function (it) { nav += item(it).replace('nav-i', 'nav-i sub'); });
     });
   });
   document.getElementById('nav').innerHTML = nav;

@@ -21,7 +21,7 @@ async function withClient(fn) {
   const url = connectionString();
   const ssl = /sslmode=require/.test(url) || process.env.DATABASE_SSL === 'require'
     ? { rejectUnauthorized: false } : undefined;
-  const c = new Client({ connectionString: url, ssl, application_name: 'duly-webapp' });
+  const c = new Client({ connectionString: url, ssl, application_name: 'financii-webapp' });
   await c.connect();
   try { return await fn(c); } finally { await c.end(); }
 }
@@ -29,8 +29,22 @@ async function withClient(fn) {
 async function init() {
   if (!enabled()) return false;
   await withClient(async function (c) {
+    /* ★ เปลี่ยนชื่อระบบเป็น Financii — ย้ายตารางเดิมมาใช้ชื่อใหม่ก่อนสร้างใหม่
+       ทำแบบนี้เพื่อไม่ให้ข้อมูลที่บันทึกไว้แล้วกลายเป็นตารางกำพร้า */
     await c.query(`
-      CREATE TABLE IF NOT EXISTS duly_state (
+      DO $rb$
+      BEGIN
+        IF to_regclass('public.duly_state') IS NOT NULL
+           AND to_regclass('public.financii_state') IS NULL THEN
+          ALTER TABLE duly_state RENAME TO financii_state;
+        END IF;
+        IF to_regclass('public.duly_state_history') IS NOT NULL
+           AND to_regclass('public.financii_state_history') IS NULL THEN
+          ALTER TABLE duly_state_history RENAME TO financii_state_history;
+        END IF;
+      END $rb$`);
+    await c.query(`
+      CREATE TABLE IF NOT EXISTS financii_state (
         book        text PRIMARY KEY,
         version     bigint NOT NULL DEFAULT 0,
         data        jsonb  NOT NULL,
@@ -38,12 +52,12 @@ async function init() {
       )`);
     /* ชื่อกิจการแยกออกมาเป็นคอลัมน์ เพื่อให้แสดงรายชื่อบริษัทได้
        โดยไม่ต้องดึงข้อมูลทั้งเล่มของทุกบริษัทมาอ่าน */
-    await c.query('ALTER TABLE duly_state ADD COLUMN IF NOT EXISTS company_name text');
-    await c.query('ALTER TABLE duly_state ADD COLUMN IF NOT EXISTS company_tax_id text');
-    await c.query('ALTER TABLE duly_state ADD COLUMN IF NOT EXISTS entry_count integer NOT NULL DEFAULT 0');
+    await c.query('ALTER TABLE financii_state ADD COLUMN IF NOT EXISTS company_name text');
+    await c.query('ALTER TABLE financii_state ADD COLUMN IF NOT EXISTS company_tax_id text');
+    await c.query('ALTER TABLE financii_state ADD COLUMN IF NOT EXISTS entry_count integer NOT NULL DEFAULT 0');
     /* เก็บฉบับก่อนหน้าไว้ให้ย้อนดูได้ ข้อมูลบัญชีหายไม่ได้ */
     await c.query(`
-      CREATE TABLE IF NOT EXISTS duly_state_history (
+      CREATE TABLE IF NOT EXISTS financii_state_history (
         book        text NOT NULL,
         version     bigint NOT NULL,
         data        jsonb NOT NULL,
@@ -57,7 +71,7 @@ async function init() {
 async function read(book) {
   const key = book || DEFAULT_BOOK;
   return withClient(async function (c) {
-    const r = await c.query('SELECT version, data, updated_at FROM duly_state WHERE book = $1', [key]);
+    const r = await c.query('SELECT version, data, updated_at FROM financii_state WHERE book = $1', [key]);
     if (!r.rows.length) return { book: key, version: 0, data: null, updatedAt: null };
     return { book: key, version: Number(r.rows[0].version), data: r.rows[0].data, updatedAt: r.rows[0].updated_at };
   });
@@ -68,7 +82,7 @@ async function listBooks() {
   return withClient(async function (c) {
     const r = await c.query(`
       SELECT book, company_name, company_tax_id, version, entry_count, updated_at
-        FROM duly_state ORDER BY company_name NULLS LAST, book`);
+        FROM financii_state ORDER BY company_name NULLS LAST, book`);
     return r.rows.map((x) => ({
       book: x.book, name: x.company_name || x.book, taxId: x.company_tax_id || null,
       version: Number(x.version), entries: Number(x.entry_count || 0), updatedAt: x.updated_at,
@@ -80,15 +94,15 @@ async function listBooks() {
 async function removeBook(book) {
   if (!validBook(book)) { const e = new Error('รหัสสมุดไม่ถูกต้อง'); e.code = 'BAD_BOOK'; throw e; }
   return withClient(async function (c) {
-    const r = await c.query('SELECT entry_count FROM duly_state WHERE book = $1', [book]);
+    const r = await c.query('SELECT entry_count FROM financii_state WHERE book = $1', [book]);
     if (!r.rows.length) { const e = new Error('ไม่พบสมุดนี้'); e.code = 'NOT_FOUND'; throw e; }
     if (Number(r.rows[0].entry_count) > 0) {
       const e = new Error('สมุดนี้มีรายการบัญชีแล้ว ลบไม่ได้');
       e.code = 'HAS_ENTRIES';
       throw e;
     }
-    await c.query('DELETE FROM duly_state WHERE book = $1', [book]);
-    await c.query('DELETE FROM duly_state_history WHERE book = $1', [book]);
+    await c.query('DELETE FROM financii_state WHERE book = $1', [book]);
+    await c.query('DELETE FROM financii_state_history WHERE book = $1', [book]);
     return true;
   });
 }
@@ -109,7 +123,7 @@ async function write(book, expectedVersion, data) {
   return withClient(async function (c) {
     await c.query('BEGIN');
     try {
-      const cur = await c.query('SELECT version FROM duly_state WHERE book = $1 FOR UPDATE', [key]);
+      const cur = await c.query('SELECT version FROM financii_state WHERE book = $1 FOR UPDATE', [key]);
       const at = cur.rows.length ? Number(cur.rows[0].version) : 0;
       if (Number(expectedVersion) !== at) {
         await c.query('ROLLBACK');
@@ -123,7 +137,7 @@ async function write(book, expectedVersion, data) {
       const taxId = data && data.company ? String(data.company.taxId || '') : null;
       const entries = data && Array.isArray(data.entries) ? data.entries.length : 0;
       await c.query(`
-        INSERT INTO duly_state (book, version, data, updated_at, company_name, company_tax_id, entry_count)
+        INSERT INTO financii_state (book, version, data, updated_at, company_name, company_tax_id, entry_count)
         VALUES ($1, $2, $3, now(), $4, $5, $6)
         ON CONFLICT (book) DO UPDATE
           SET version = EXCLUDED.version, data = EXCLUDED.data, updated_at = now(),
@@ -131,11 +145,11 @@ async function write(book, expectedVersion, data) {
               entry_count = EXCLUDED.entry_count`,
         [key, next, data, name, taxId, entries]);
       await c.query(
-        'INSERT INTO duly_state_history (book, version, data) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING',
+        'INSERT INTO financii_state_history (book, version, data) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING',
         [key, next, data]);
       /* เก็บย้อนหลัง 50 ฉบับพอ ไม่ให้ฐานข้อมูลบวมโดยไม่มีที่สิ้นสุด */
       await c.query(`
-        DELETE FROM duly_state_history
+        DELETE FROM financii_state_history
          WHERE book = $1 AND version <= $2 - 50`, [key, next]);
       await c.query('COMMIT');
       return { version: next };

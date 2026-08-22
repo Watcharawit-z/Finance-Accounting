@@ -14,6 +14,26 @@ const closed = (p) => p.waitForFunction(
 
 const fmtT = (v) => (v / 10000).toLocaleString();
 
+/** หาว่าอะไรกันแน่ที่ทำให้หน้าจอล้นแนวนอน จะได้ไม่ต้องเดา */
+const overflowInfo = (page) => page.evaluate(() => {
+  const cw = document.documentElement.clientWidth;
+  const over = document.documentElement.scrollWidth - cw;
+  if (over <= 1) return { over, who: '' };
+  let worst = null;
+  document.querySelectorAll('body *').forEach(function (el) {
+    const r = el.getBoundingClientRect();
+    if (r.width === 0 || r.right <= cw + 0.5) return;
+    const scrollable = el.closest('.scroll');
+    if (scrollable && scrollable !== el) return;      // อยู่ในกล่องที่เลื่อนได้ ไม่นับ
+    if (!worst || r.right > worst.right) {
+      worst = { right: Math.round(r.right),
+        tag: el.tagName.toLowerCase() + (el.className ? '.' + String(el.className).split(' ')[0] : ''),
+        text: (el.textContent || '').trim().slice(0, 30) };
+    }
+  });
+  return { over, who: worst ? worst.tag + ' (' + worst.text + ') ขวาสุด ' + worst.right : 'ไม่พบตัวการ' };
+});
+
 (async () => {
   const browser = await chromium.launch();
   const page = await browser.newPage({ viewport: { width: 1440, height: 950 } });
@@ -26,8 +46,7 @@ const fmtT = (v) => (v / 10000).toLocaleString();
   await page.waitForSelector('#main .card, #main .kpis', { timeout: 10000 });
 
   console.log('\n[1] เปิดทุกหน้าจอ');
-  const screens = await page.evaluate(() =>
-    navGroups().flatMap((g) => g.items.map((i) => i[0])));
+  const screens = await page.evaluate(() => navScreens());
   for (const s of screens) {
     await page.evaluate((x) => { STATE.screen = x; STATE.sel = null; STATE.filter = ''; render(); }, s);
     const html = await page.$eval('#main', (e) => e.innerHTML);
@@ -54,8 +73,13 @@ const fmtT = (v) => (v / 10000).toLocaleString();
 
   console.log('\n[3] คลิกเมนูจริงทีละอัน');
   await page.evaluate(() => { STATE.screen = 'dashboard'; render(); });
+  await page.evaluate(() => {
+    navGroups().forEach((g) => (g.subs || []).forEach((s) => { STATE.navOpen[s.s] = true; }));
+    render();
+  });
   const links = await page.$$('#nav .nav-i');
-  ok('เมนูครบ', links.length === screens.length, links.length + ' รายการ');
+  ok('เมนูครบทุกหน้าเมื่อกางหมวดย่อยหมด', links.length === screens.length,
+    links.length + ' / ' + screens.length + ' รายการ');
   for (let i = 0; i < links.length; i++) {
     const l = (await page.$$('#nav .nav-i'))[i];
     await l.click();
@@ -228,15 +252,13 @@ const fmtT = (v) => (v / 10000).toLocaleString();
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.waitForTimeout(250);
-  const dashOver = await page.evaluate(() =>
-    document.documentElement.scrollWidth - document.documentElement.clientWidth);
-  ok('แดชบอร์ดบนจอ 390px ไม่ล้นแนวนอน', dashOver <= 1, 'ล้น ' + dashOver + 'px');
+  const dashOver = await overflowInfo(page);
+  ok('แดชบอร์ดบนจอ 390px ไม่ล้นแนวนอน', dashOver.over <= 1, 'ล้น ' + dashOver.over + 'px · ' + dashOver.who);
 
   await page.evaluate(() => { STATE.screen = 'invoices'; STATE.sel = null; render(); });
   await page.waitForTimeout(200);
-  const overflow = await page.evaluate(() =>
-    document.documentElement.scrollWidth - document.documentElement.clientWidth);
-  ok('จอ 390px ไม่ล้นแนวนอน', overflow <= 1, 'ล้น ' + overflow + 'px');
+  const overflow = await overflowInfo(page);
+  ok('จอ 390px ไม่ล้นแนวนอน', overflow.over <= 1, 'ล้น ' + overflow.over + 'px · ' + overflow.who);
   const navHidden = await page.evaluate(() => document.getElementById('nav').getBoundingClientRect().right <= 1);
   ok('เมนูซ่อนเป็นลิ้นชักบนจอเล็ก', navHidden);
   await page.click('#menuBtn');
@@ -484,15 +506,77 @@ const fmtT = (v) => (v / 10000).toLocaleString();
 
   /* ตรวจถึงชั้นที่เก็บจริง ว่าแยกกันคนละก้อน */
   const stored = await page.evaluate(() => {
-    const list = JSON.parse(localStorage.getItem('duly.books') || '[]');
+    const list = JSON.parse(localStorage.getItem('financii.books') || '[]');
     return list.map(function (b) {
-      const d = JSON.parse(localStorage.getItem('duly.book.' + b.id) || 'null');
+      const d = JSON.parse(localStorage.getItem('financii.book.' + b.id) || 'null');
       return { id: b.id, name: b.name, invoices: d && d.DB ? d.DB.docs.invoice.length : -1 };
     });
   });
   ok('★ แต่ละบริษัทเก็บแยกคนละก้อนในเครื่อง',
     stored.length === 3 && stored.filter((s) => s.invoices > 0).length === 1,
     stored.map((s) => s.name + '=' + s.invoices).join(' · '));
+
+  console.log('\n[15] เมนูแยกตามหมวดหมู่');
+  await page.setViewportSize({ width: 1440, height: 950 });
+  await page.evaluate(() => { STATE.screen = 'dashboard'; STATE.navOpen = {}; render(); });
+  await page.waitForTimeout(150);
+  const navShape = await page.evaluate(() => navGroups().map((g) =>
+    g.g + ':' + ((g.items || []).length + (g.subs || []).length)));
+  ok('กลุ่มเมนูเรียงตามงานที่ทำ ไม่ใช่ตามศัพท์บัญชี',
+    navShape[1].startsWith('เอกสารขาย') && navShape[2].startsWith('เอกสารซื้อ'), navShape.slice(1, 4).join(' · '));
+  ok('★ รายงานทุกตัวรวมอยู่กลุ่มเดียว',
+    (await page.evaluate(() => navGroups().find((g) => g.g === 'รายงาน').subs.length)) === 6,
+    'หมวดย่อย ' + (await page.evaluate(() => navGroups().find((g) => g.g === 'รายงาน').subs.map((s) => s.s).join(', '))));
+
+  const collapsed = await page.$$('#nav .nav-s');
+  ok('หมวดย่อยของรายงานยุบไว้ให้กดกาง', collapsed.length === 6, collapsed.length + ' หมวด');
+  const beforeOpen = (await page.$$('#nav .nav-i.sub')).length;
+  await page.click('#nav .nav-s');
+  await page.waitForTimeout(150);
+  const afterOpen = (await page.$$('#nav .nav-i.sub')).length;
+  ok('กดแล้วกางออกมาให้เห็นรายงานข้างใน', afterOpen > beforeOpen, beforeOpen + ' → ' + afterOpen);
+  await page.click('#nav .nav-s.open');
+  await page.waitForTimeout(150);
+  ok('กดอีกทีก็ยุบกลับ', (await page.$$('#nav .nav-i.sub')).length === beforeOpen);
+
+  await page.evaluate(() => { STATE.screen = 'tb'; STATE.navOpen = {}; render(); });
+  await page.waitForTimeout(150);
+  ok('★ เปิดรายงานไหนอยู่ หมวดนั้นกางให้เอง',
+    await page.$eval('#nav .nav-s.open', (e) => e.textContent.indexOf('บัญชี') >= 0));
+  ok('รายการที่เปิดอยู่ถูกไฮไลต์', await page.$('#nav .nav-i.sub.on') !== null);
+
+  console.log('\n[16] เปลี่ยนชื่อเป็น Financii แล้วข้อมูลเดิมต้องตามมาด้วย');
+  ok('ชื่อหน้าเว็บเปลี่ยนแล้ว', (await page.title()) === 'Financii', await page.title());
+  ok('ตราสัญลักษณ์บนแถบบนเป็น Financii',
+    (await page.$eval('.brand', (e) => e.textContent)).indexOf('Financii') >= 0);
+  ok('ไม่เหลือชื่อเดิมในหน้าจอ',
+    (await page.$eval('.brand', (e) => e.textContent)).indexOf('ดุลย์') < 0);
+
+  /* จำลองผู้ใช้เดิมที่มีข้อมูลเก็บไว้ใต้ชื่อเก่า แล้วเปิดเว็บรุ่นใหม่ */
+  await page.evaluate(() => {
+    const books = JSON.parse(localStorage.getItem('financii.books') || '[]');
+    const keep = books.map((b) => ({ id: b.id, data: localStorage.getItem('financii.book.' + b.id) }));
+    localStorage.clear();
+    localStorage.setItem('duly.books', JSON.stringify(books));
+    localStorage.setItem('duly.activeBook', books[0].id);
+    keep.forEach((k) => localStorage.setItem('duly.book.' + k.id, k.data));
+    localStorage.setItem('duly.passcode', 'รหัสเดิม');
+  });
+  await page.reload();
+  await page.waitForSelector('#main .kpis', { timeout: 10000 });
+  const rebranded = await page.evaluate(() => ({
+    books: SYNC.books.length,
+    company: DB.company.name,
+    invoices: DB.docs.invoice.length,
+    newKeys: Object.keys(localStorage).filter((k) => k.startsWith('financii.')).length,
+    oldKeys: Object.keys(localStorage).filter((k) => k.startsWith('duly.')).length,
+  }));
+  ok('★ ข้อมูลที่เก็บไว้ใต้ชื่อเดิมถูกย้ายมาครบ',
+    rebranded.books === 3 && rebranded.invoices === a1.invoices,
+    rebranded.books + ' บริษัท · ' + rebranded.invoices + ' ใบกำกับ · ' + rebranded.company);
+  ok('เก็บไว้ใต้ชื่อใหม่แล้ว', rebranded.newKeys >= 4, rebranded.newKeys + ' คีย์');
+  ok('เก็บกวาดคีย์ชื่อเดิมออกให้ เหลือแค่ที่ยังไม่ได้ย้าย',
+    rebranded.oldKeys <= 1, rebranded.oldKeys + ' คีย์');
 
   ok('ไม่มีข้อผิดพลาดในคอนโซลเลย', errors.length === 0, errors.slice(0, 3).join(' | '));
 

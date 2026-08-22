@@ -294,6 +294,12 @@ function dispatch(act) {
   const arg = rest.join(':');
 
   if (head === 'go')      { STATE.screen = arg; STATE.sel = null; STATE.filter = ''; render(); return; }
+  if (head === 'nav') {
+    const cur = STATE.navOpen[arg] === undefined ? arg === navSubOf(STATE.screen) : STATE.navOpen[arg];
+    STATE.navOpen[arg] = !cur;
+    render();
+    return;
+  }
   if (head === 'period')  { STATE.period = arg; STATE.sel = null; save(); render(); return; }
   if (head === 'sel')     { STATE.sel = arg || null; render(); return; }
   if (head === 'drill')   { STATE.drill = arg; STATE.screen = 'ledger'; STATE.filter = ''; render(); return; }
@@ -686,7 +692,10 @@ async function boot() {
   const onServer = await syncConfig();
 
   if (onServer) {
-    try { SYNC.passcode = localStorage.getItem('duly.passcode') || ''; } catch (e) { SYNC.passcode = ''; }
+    try {
+      SYNC.passcode = localStorage.getItem(PASS_KEY)
+        || localStorage.getItem('duly.passcode') || '';    // รับของที่เก็บไว้ใต้ชื่อเดิมด้วย
+    } catch (e) { SYNC.passcode = ''; }
     if (SYNC.needsPasscode && !SYNC.passcode) {
       setStatus('locked');
       render();
