@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/* แปลงข้อมูลดิบ → แฟ้ม duly-import/1 ที่หน้า "นำเข้าข้อมูล" ของระบบอ่านได้
+/* แปลงข้อมูลดิบ → แฟ้ม financii-import/1 ที่หน้า "นำเข้าข้อมูล" ของระบบอ่านได้
    ทุกรายการที่แปลงไม่ได้จะถูกเขียนลง errors.csv ไม่ถูกทิ้งเงียบ ๆ */
 const fs = require('fs');
 const path = require('path');
@@ -38,23 +38,23 @@ function main() {
     console.log(`
 แปลงข้อมูลดิบเป็นแฟ้มสำหรับนำเข้า
 
-  node convert.js --raw out/raw --cutoff 2026-07-31 --tb งบทดลอง.csv --out out/duly-import.json
+  node convert.js --raw out/raw --cutoff 2026-07-31 --tb งบทดลอง.csv --out out/financii-import.json
 
   --raw      โฟลเดอร์ข้อมูลดิบจาก pull.js (ค่าเริ่มต้น: out/raw)
   --cutoff   วันตัดยอด — เอกสารที่ค้างหลังวันนี้เท่านั้นที่ยกมา (จำเป็น)
   --tb       ไฟล์งบทดลอง CSV ณ วันตัดยอด (ไม่ใส่ก็ได้ ค่อยนำเข้าทีหลังในเว็บ)
-  --out      ไฟล์ผลลัพธ์ (ค่าเริ่มต้น: out/duly-import.json)
+  --out      ไฟล์ผลลัพธ์ (ค่าเริ่มต้น: out/financii-import.json)
   --ar-account  รหัสบัญชีคุมลูกหนี้ในงบทดลอง (ค่าเริ่มต้น: 1131 หรือหาจากชื่อ)
   --ap-account  รหัสบัญชีคุมเจ้าหนี้ในงบทดลอง (ค่าเริ่มต้น: 2121 หรือหาจากชื่อ)
 
-ผลลัพธ์: duly-import.json + errors.csv (ใบที่แปลงไม่ได้) + coverage.csv (ทุกแถวไปอยู่ไหน)
+ผลลัพธ์: financii-import.json + errors.csv (ใบที่แปลงไม่ได้) + coverage.csv (ทุกแถวไปอยู่ไหน)
 `);
     process.exit(a.help ? 0 : 1);
   }
   const raw = a.raw || path.join('out', 'raw');
   const cutoff = String(a.cutoff);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(cutoff)) throw new Error('--cutoff ต้องเป็นรูปแบบ YYYY-MM-DD');
-  const out = a.out || path.join('out', 'duly-import.json');
+  const out = a.out || path.join('out', 'financii-import.json');
 
   const warnings = [];
   const errors = [];
@@ -197,7 +197,7 @@ function main() {
   const sumOpen = (arr) => arr.reduce((s, d) =>
     s + core.M(d.total) - core.M(d.paid) - core.M(d.credited || '0'), 0);
   const pkg = {
-    format: 'duly-import/1',
+    format: 'financii-import/1',
     source: 'flowaccount',
     cutoff,
     generatedAt: new Date().toISOString(),

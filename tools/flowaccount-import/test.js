@@ -104,11 +104,11 @@ execFileSync(process.execPath, [path.join(__dirname, 'convert.js'),
   '--raw', path.join(__dirname, 'fixtures/raw'),
   '--cutoff', '2026-07-31',
   '--tb', path.join(__dirname, 'fixtures/trial-balance.csv'),
-  '--out', path.join(outDir, 'duly-import.json')], { stdio: 'pipe' });
+  '--out', path.join(outDir, 'financii-import.json')], { stdio: 'pipe' });
 
-const pkg = JSON.parse(fs.readFileSync(path.join(outDir, 'duly-import.json'), 'utf8'));
+const pkg = JSON.parse(fs.readFileSync(path.join(outDir, 'financii-import.json'), 'utf8'));
 const errCsv = fs.readFileSync(path.join(outDir, 'errors.csv'), 'utf8');
-ok('แฟ้มข้อมูลมีรูปแบบที่ระบบรู้จัก', pkg.format === 'duly-import/1' && pkg.cutoff === '2026-07-31');
+ok('แฟ้มข้อมูลมีรูปแบบที่ระบบรู้จัก', pkg.format === 'financii-import/1' && pkg.cutoff === '2026-07-31');
 ok('★ ใบที่แปลงไม่ได้ถูกเขียนลง errors.csv ไม่หายเงียบ',
    errCsv.indexOf('IV690720-004') > 0, errCsv.trim().split('\n').length - 1 + ' บรรทัด');
 ok('คู่ค้าที่โผล่เฉพาะบนเอกสารถูกสร้างให้ครบ', pkg.partners.length >= 4, pkg.partners.length + ' ราย');

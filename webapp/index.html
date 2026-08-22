@@ -3082,12 +3082,13 @@ function importOpeningBalances(tbRows, date, overrides) {
 }
 
 /* ===================================================================
-   แฟ้มข้อมูลจากตัวดึง FlowAccount (duly-import/1)
+   แฟ้มข้อมูลจากตัวดึง FlowAccount (financii-import/1 — รับของเดิม duly-import/1 ด้วย)
    =================================================================== */
+const PACKAGE_FORMATS = ['financii-import/1', 'duly-import/1'];   // รับของเดิมด้วย
 function validatePackage(pkg) {
-  if (!pkg || pkg.format !== 'duly-import/1') {
+  if (!pkg || PACKAGE_FORMATS.indexOf(pkg.format) < 0) {
     throw new DomainError('BAD_PACKAGE',
-      'ไฟล์นี้ไม่ใช่แฟ้มข้อมูลของระบบ (ต้องเป็น duly-import/1)',
+      'ไฟล์นี้ไม่ใช่แฟ้มข้อมูลของระบบ (ต้องเป็น financii-import/1)',
       'ใช้ไฟล์ที่ได้จากคำสั่ง flowaccount-import convert');
   }
   if (!pkg.cutoff || !/^\d{4}-\d{2}-\d{2}$/.test(pkg.cutoff)) {

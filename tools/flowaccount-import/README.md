@@ -11,7 +11,7 @@ cp tools/flowaccount-import/config.example.json config.json
 
 node tools/flowaccount-import/pull.js    --config config.json --from 2026-01-01 --to 2026-07-31
 node tools/flowaccount-import/convert.js --cutoff 2026-07-31 --tb งบทดลอง.csv
-# ได้ out/duly-import.json → ลากไปวางที่หน้า "นำเข้าข้อมูลจากระบบเดิม" ในเว็บ
+# ได้ out/financii-import.json → ลากไปวางที่หน้า "นำเข้าข้อมูลจากระบบเดิม" ในเว็บ
 ```
 
 แยกขั้น `pull` กับ `convert` ไว้เพื่อให้แปลงซ้ำได้โดยไม่ต้องยิง API ใหม่ทุกครั้ง
@@ -52,7 +52,7 @@ node tools/flowaccount-import/convert.js --cutoff 2026-07-31 --tb งบทด�
 | ไฟล์ | เนื้อหา |
 |---|---|
 | `out/raw/*.json` | ข้อมูลดิบจาก API ไม่ผ่านการแปลง |
-| `out/duly-import.json` | แฟ้ม `duly-import/1` สำหรับลากเข้าเว็บ |
+| `out/financii-import.json` | แฟ้ม `financii-import/1` สำหรับลากเข้าเว็บ |
 | `out/errors.csv` | ทุกรายการที่แปลงไม่ได้ พร้อมเหตุผล |
 
 | `out/coverage.csv` | ทุกแถวที่อ่านมา ไปอยู่ไหนบ้าง — ยกมา ปิดแล้ว ซ้ำ หรือแปลงไม่ได้ |

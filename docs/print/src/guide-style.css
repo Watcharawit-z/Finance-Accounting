@@ -1,0 +1,102 @@
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Sarabun',sans-serif;color:#17191A;font-size:11.5pt;line-height:1.65;
+  -webkit-print-color-adjust:exact;print-color-adjust:exact}
+.page{page-break-after:always;padding:16mm 15mm 14mm;min-height:297mm;position:relative}
+.page:last-child{page-break-after:auto}
+
+h1{font-size:30pt;line-height:1.25;font-weight:700;letter-spacing:-.01em}
+h2{font-size:19pt;font-weight:700;margin-bottom:12px;padding-bottom:8px;border-bottom:2.5px solid #14556F}
+h2.mt{margin-top:26px}
+h3{font-size:13.5pt;font-weight:600;margin:15px 0 8px;color:#14556F}
+p{margin-bottom:7px}
+b{font-weight:600}
+.mono{font-family:'Courier New',monospace;font-size:10.5pt;background:#EFF2F5;padding:1px 5px;border-radius:3px}
+
+/* ปก */
+.cover{padding-top:52mm;text-align:left}
+.cover .mark{width:56px;height:56px;border:3px solid #14556F;border-radius:8px;display:flex;
+  align-items:center;justify-content:center;font-size:28pt;font-weight:700;color:#14556F;margin-bottom:26px}
+.cover h1{margin-bottom:18px}
+.cover .lede{font-size:14pt;color:#3A424E;line-height:1.6;margin-bottom:46px}
+table.fill{width:100%;border-collapse:collapse;margin-bottom:30px}
+table.fill td{padding:13px 0;border-bottom:1.5px solid #C9CFD6}
+table.fill .k{width:44%;font-weight:600;font-size:11.5pt}
+.foot{font-size:10pt;color:#6E7376;position:absolute;bottom:14mm}
+.foot.end{border-top:1px solid #E1E6EB;padding-top:9px;width:calc(100% - 30mm)}
+
+.intro{font-size:12pt;color:#3A424E;margin-bottom:14px}
+
+/* แบ่งงาน */
+table.split{width:100%;border-collapse:collapse;margin-bottom:6px}
+table.split th{background:#14556F;color:#fff;padding:9px 13px;font-size:12pt;text-align:left;width:50%}
+table.split th:last-child{background:#3A424E}
+table.split td{border:1.5px solid #E1E6EB;padding:12px 13px;vertical-align:top}
+table.split ul{margin-left:17px}
+table.split li{margin-bottom:5px}
+
+/* กฎ */
+.rule{display:flex;gap:13px;margin-bottom:11px;background:#F6F7F9;padding:12px 14px;border-radius:5px}
+.rule .n{width:27px;height:27px;flex:none;background:#14556F;color:#fff;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12pt}
+.rule p{margin:2px 0 0;font-size:11pt;color:#3A424E}
+
+/* กรอบเตือน */
+.callout{border-left:5px solid #14556F;background:#E4EFF4;padding:11px 15px;margin:13px 0;border-radius:0 5px 5px 0}
+.callout.warn{border-left-color:#A32B2B;background:#FAEAEA}
+.callout.final{border-left-color:#17694A;background:#E6F2ED;margin-top:22px}
+.callout p{margin:3px 0 0;font-size:11pt}
+
+/* ขั้นตอน */
+.step{display:inline-block;background:#14556F;color:#fff;font-size:11pt;font-weight:600;
+  padding:2px 12px;border-radius:20px;margin-right:9px;vertical-align:middle}
+.task{display:flex;gap:12px;margin-bottom:13px;align-items:flex-start}
+.cb{width:20px;height:20px;flex:none;border:2.5px solid #14556F;border-radius:4px;margin-top:3px}
+.task p{margin:2px 0 0;font-size:11pt;color:#3A424E}
+.why{color:#6E7376;font-size:10.5pt}
+
+/* ไฟล์ที่ต้องดาวน์โหลด */
+.file{display:flex;gap:13px;margin-bottom:9px;border:1.5px solid #E1E6EB;border-radius:6px;padding:10px 14px}
+.file .fn{width:30px;height:30px;flex:none;background:#14556F;color:#fff;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13pt}
+.file b{font-size:12.5pt}
+.must{background:#A32B2B;color:#fff;font-size:9.5pt;padding:1px 8px;border-radius:10px;margin-left:7px;font-weight:600}
+.path{background:#F6F7F9;padding:6px 11px;border-radius:4px;margin:5px 0;font-size:11pt}
+.file p{font-size:11pt;margin-bottom:4px}
+
+.code{background:#F6F7F9;border:1.5px solid #E1E6EB;border-radius:5px;padding:11px 14px;
+  font-family:'Sarabun',sans-serif;font-size:11pt}
+.code div{padding:2px 0;color:#3A424E}
+
+table.two{width:100%;border-collapse:separate;border-spacing:9px 0;margin-top:6px}
+table.two td{border:1.5px solid #E1E6EB;border-radius:6px;padding:12px 14px;width:50%;vertical-align:top}
+.tag{display:block;font-size:9.5pt;color:#6E7376;margin-bottom:3px;letter-spacing:.04em}
+table.two p{font-size:10.5pt;color:#6E7376;margin:3px 0 0}
+
+/* ถาม-ตอบ */
+.qa{margin-bottom:13px;border-left:3px solid #C9CFD6;padding-left:13px}
+.qa .q{font-weight:600;font-size:11.5pt;margin-bottom:3px}
+.qa .a{font-size:11pt;color:#3A424E}
+
+.btn{display:inline-block;background:#14556F;color:#fff;padding:1px 10px;border-radius:4px;
+  font-size:10.5pt;font-weight:600}
+
+/* ตารางตรวจ */
+table.check{width:100%;border-collapse:collapse;margin-top:8px}
+table.check th{background:#14556F;color:#fff;padding:8px 9px;font-size:10.5pt;text-align:left;font-weight:600}
+table.check td{border:1.5px solid #E1E6EB;padding:9px;vertical-align:middle;font-size:11pt}
+table.check td span{display:block;font-size:10pt;color:#6E7376;margin-top:1px}
+.cbs{position:relative}
+.cbs::after{content:'';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+  width:17px;height:17px;border:2.5px solid #14556F;border-radius:4px}
+.in{background:#FBFCFD}
+.in.mid{text-align:center;color:#A2ABB6}
+
+/* ตารางที่ต้องกรอกเอง */
+table.manual{width:100%;border-collapse:collapse;margin-top:6px}
+table.manual th{background:#3A424E;color:#fff;padding:8px 11px;font-size:10.5pt;text-align:left}
+table.manual td{border:1.5px solid #E1E6EB;padding:9px 11px;font-size:10.5pt;vertical-align:top}
+table.manual td:first-child{width:36%}
+
+.faq{margin-bottom:12px}
+.faq .fq{font-weight:600;font-size:11.5pt;color:#A32B2B;margin-bottom:2px}
+.faq .fa{font-size:11pt;color:#3A424E}
