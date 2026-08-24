@@ -143,7 +143,14 @@ function parseAmount(s) {
   if (/^\(.*\)$/.test(t)) { neg = true; t = t.slice(1, -1); }
   t = t.replace(/[,\s฿]/g, '').replace(/^บาท/, '');
   if (t.startsWith('-')) { neg = !neg; t = t.slice(1); }
-  if (!/^\d*(\.\d+)?$/.test(t) || t === '') return null;
+  /* Excel เขียนจำนวนเล็ก ๆ เป็นรูปยกกำลัง เช่น 7.0000000000000007E-2 คือ 0.07
+     ถ้าอ่านไม่ออกแล้วข้ามไป งบทดลองจะไม่สมดุลโดยหาสาเหตุไม่เจอ */
+  if (!/^\d*(\.\d+)?([eE][+-]?\d+)?$/.test(t) || t === '') return null;
+  if (/[eE]/.test(t)) {
+    const n = Number(t);
+    if (!isFinite(n)) return null;
+    t = n.toFixed(6);
+  }
   return (neg ? '-' : '') + t;
 }
 
@@ -158,22 +165,27 @@ const COL_HINTS = {
 };
 /* คำที่บอกว่าคู่เดบิต/เครดิตนี้คือ "ยอดคงเหลือปลายงวด" ซึ่งเป็นคู่ที่เราต้องการ
    งบทดลองมักมีสามคู่: ยอดยกมา · เคลื่อนไหวระหว่างงวด · ยอดคงเหลือ */
-const BALANCE_HINTS = ['ยอดคงเหลือ', 'คงเหลือ', 'ยอดยกไป', 'ยกไป', 'ปลายงวด', 'สิ้นงวด',
-                       'balance', 'ending', 'closing', 'carryforward'];
+const BALANCE_HINTS = ['ยอดคงเหลือ', 'คงเหลือ', 'ยอดสะสม', 'สะสม', 'ยอดยกไป', 'ยกไป',
+                       'ปลายงวด', 'สิ้นงวด', 'balance', 'ending', 'closing', 'carryforward'];
+/* คำที่บอกว่าเป็นคู่ยอดยกมาต้นงวด — ห้ามหยิบคู่นี้ไปเป็นยอดคงเหลือ */
+const OPENING_HINTS = ['ยอดยกมา', 'ยกมา', 'ต้นงวด', 'opening', 'brought'];
 const norm = (s) => String(s || '').toLowerCase().replace(/\s+/g, '');
 const hitsAny = (n, list) => list.some((h) => n.indexOf(norm(h)) >= 0);
 
 /** เซลล์ที่ผสานกันใน Excel เก็บค่าไว้เฉพาะช่องซ้ายสุด ช่องที่เหลือว่าง
-    ต้องลากค่าไปทางขวาก่อน ไม่งั้นหัวกลุ่มอย่าง "ยอดคงเหลือ" จะหายไปครึ่งหนึ่ง */
+    ต้องลากค่าไปทางขวาก่อน ไม่งั้นหัวกลุ่มอย่าง "ยอดคงเหลือ" จะหายไปครึ่งหนึ่ง
+    แต่บรรทัดที่มีข้อความช่องเดียวคือชื่อรายงาน ไม่ใช่หัวกลุ่ม ห้ามลากไปทับทั้งแถว */
 function fillRight(row, width) {
-  const out = [];
-  let last = '';
+  const filled = [];
   for (let j = 0; j < width; j++) {
-    const v = String(row[j] === undefined ? '' : row[j]).trim();
-    if (v) last = v;
-    out[j] = v || last;
+    filled[j] = String(row[j] === undefined ? '' : row[j]).trim();
   }
-  return out;
+  if (filled.filter(Boolean).length < 2) return filled;
+  let last = '';
+  return filled.map(function (v) {
+    if (v) last = v;
+    return v || last;
+  });
 }
 
 /** หัวตารางอาจอยู่บรรทัดเดียว หรือกระจายสองบรรทัด (หัวกลุ่มบน หัวย่อยล่าง)
@@ -197,19 +209,37 @@ function headerCandidates(rows) {
   return out;
 }
 
+/** คอลัมน์หนึ่งอาจเข้าได้หลายคำใบ้ เช่น "ชื่อบัญชี" เข้าทั้ง code (คำว่าบัญชี)
+    และ name (คำว่าชื่อบัญชี) ต้องให้คำใบ้ที่ยาวกว่าชนะ ไม่ใช่ตัวที่เจอก่อน */
+const BARE_CODE_HEADERS = ['บัญชี', 'ผังบัญชี', 'acct', 'account', 'a/c no'];
+function bestKeyFor(text) {
+  const n = norm(text);
+  if (!n) return null;
+  /* หัวคอลัมน์ที่เขียนสั้น ๆ ว่า "บัญชี" เฉย ๆ หมายถึงรหัสบัญชี
+     ต้องตรงทั้งช่อง ไม่ใช่ไปเจอคำว่าบัญชีในชื่อรายงานยาว ๆ แล้วนับว่าใช่ */
+  if (BARE_CODE_HEADERS.indexOf(n) >= 0) return 'code';
+  let key = null, len = 0;
+  Object.keys(COL_HINTS).forEach(function (k) {
+    COL_HINTS[k].forEach(function (h) {
+      const hn = norm(h);
+      if (n.indexOf(hn) >= 0 && hn.length > len) { len = hn.length; key = k; }
+    });
+  });
+  return key;
+}
+
 function mapFromHeader(cells) {
   const found = {}, bal = {};
   cells.forEach(function (cell, j) {
     const n = norm(cell);
     if (!n) return;
-    const isBalance = hitsAny(n, BALANCE_HINTS);
-    Object.keys(COL_HINTS).forEach(function (k) {
-      if (!hitsAny(n, COL_HINTS[k])) return;
-      if (k === 'debit' || k === 'credit') {
-        found[k] = j;                                  // ไม่เจอคำว่ายอดคงเหลือ ให้เอาคู่ขวาสุด
-        if (isBalance && bal[k] === undefined) bal[k] = j;
-      } else if (found[k] === undefined) found[k] = j;
-    });
+    const isBalance = hitsAny(n, BALANCE_HINTS) && !hitsAny(n, OPENING_HINTS);
+    const k = bestKeyFor(cell);
+    if (!k) return;
+    if (k === 'debit' || k === 'credit') {
+      found[k] = j;                                    // ไม่เจอคำว่ายอดคงเหลือ ให้เอาคู่ขวาสุด
+      if (isBalance && bal[k] === undefined) bal[k] = j;
+    } else if (found[k] === undefined) found[k] = j;
   });
   if (bal.debit !== undefined && bal.credit !== undefined) {
     found.debit = bal.debit; found.credit = bal.credit;
@@ -258,8 +288,59 @@ function detectColumns(rows) {
     if (score > bestScore) { bestScore = score; best = { headerRow: c.row, map, keys, usable }; }
   });
   if (!best) return { headerRow: 0, map: {}, keys: 0, usable: 0, ok: false };
-  return { headerRow: best.headerRow, map: best.map, keys: best.keys, usable: best.usable,
-           ok: best.keys >= 3 && best.usable > 0 };
+  inferNameColumn(rows, best.map, best.headerRow);
+  const keys = Object.keys(best.map).length;
+  return { headerRow: best.headerRow, map: best.map, keys, usable: best.usable,
+           ok: keys >= 3 && best.usable > 0 };
+}
+
+/** งบทดลองบางฉบับใส่หัวคอลัมน์ไว้แค่ "บัญชี" ช่องเดียว ช่องชื่อบัญชีข้าง ๆ ไม่มีหัว
+    ถ้าปล่อยว่างไว้ บัญชีทุกตัวจะไม่มีชื่อ จับคู่ผังบัญชีไม่ได้และผู้ใช้อ่านไม่รู้เรื่อง
+    จึงมองหาคอลัมน์ถัดจากรหัสที่เป็นข้อความล้วนแล้วถือว่าเป็นชื่อบัญชี */
+function inferNameColumn(rows, map, headerRow) {
+  if (map.name !== undefined || map.code === undefined) return;
+  const body = rows.slice(headerRow + 1, headerRow + 40)
+    .filter((r) => String(r[map.code] === undefined ? '' : r[map.code]).trim() !== '');
+  if (!body.length) return;
+  for (let j = map.code + 1; j <= map.code + 4; j++) {
+    if (j === map.debit || j === map.credit) continue;
+    let text = 0, filled = 0;
+    body.forEach(function (r) {
+      const v = String(r[j] === undefined ? '' : r[j]).trim();
+      if (!v) return;
+      filled++;
+      if (parseAmount(v) === null) text++;
+    });
+    if (filled >= body.length * 0.6 && text >= filled * 0.8) { map.name = j; return; }
+  }
+}
+
+/* ---------- ไฟล์นี้คือรายงานอะไร ----------
+   งบทดลองมีบัญชีละบรรทัด ส่วนบัญชีแยกประเภทมีรายการละบรรทัด รหัสบัญชีเดิมซ้ำได้เป็นร้อย
+   ถ้าเผลอนำบัญชีแยกประเภทเข้าเป็นยอดยกมา ยอดจะกลายเป็นผลรวมรายการทั้งปี ไม่ใช่ยอดคงเหลือ */
+const LEDGER_HINTS = ['เลขที่เอกสาร', 'สมุดรายวัน', 'เลขที่อ้างอิง', 'ผู้ทำรายการ',
+                      'คำอธิบายรายการ', 'voucher', 'journal', 'document no'];
+const CHART_HINTS = ['ประเภทบัญชี', 'หมวดบัญชี', 'account type', 'category'];
+
+function detectFileKind(rows, map, headerRow) {
+  const head = (rows[headerRow] || []).concat(rows[headerRow - 1] || []);
+  const headText = head.map((c) => norm(c)).join('|');
+  const ledgerWords = LEDGER_HINTS.filter((h) => headText.indexOf(norm(h)) >= 0).length;
+
+  let repeated = 0;
+  if (map.code !== undefined) {
+    const seen = {};
+    rows.slice(headerRow + 1).forEach(function (r) {
+      const c = String(r[map.code] === undefined ? '' : r[map.code]).trim();
+      if (!c) return;
+      seen[c] = (seen[c] || 0) + 1;
+      if (seen[c] === 2) repeated++;
+    });
+  }
+  if (ledgerWords >= 2 || repeated >= 3) return 'ledger';
+  if (map.debit === undefined && map.credit === undefined
+      && CHART_HINTS.some((h) => headText.indexOf(norm(h)) >= 0)) return 'chart';
+  return 'trialBalance';
 }
 
 /* ---------- อ่านงบทดลอง ---------- */
@@ -287,6 +368,106 @@ function readTrialBalance(rows, map, headerRow) {
 }
 
 /* ---------- จับคู่กับผังบัญชีของเรา ---------- */
+/* ===================================================================
+   ผังบัญชีมาตรฐานกรมพัฒนาธุรกิจการค้า — โปรแกรมบัญชีไทยส่วนใหญ่รวมทั้ง
+   FlowAccount ใช้โครงรหัสชุดนี้ จึงเดาได้ว่าบัญชีแต่ละตัวไปอยู่บรรทัดไหนของงบ
+   เรียงจากรหัสยาวไปสั้น ตัวที่ตรงยาวที่สุดชนะ
+   =================================================================== */
+const DBD_SUBTYPE = [
+  // สินทรัพย์
+  ['11149','cash'], ['11189','cash'], ['1111','cash'],
+  ['1112','bank'],
+  ['112','short_term_investment'],
+  ['11310','trade_receivable'], ['1131','trade_receivable'],
+  ['11392','accrued_income'],
+  ['1132','other_receivable'], ['11379','other_receivable'], ['1139','other_receivable'],
+  ['114','other_receivable'],
+  ['115','inventory'],
+  ['11911','prepaid_expense'], ['1191','prepaid_expense'],
+  ['1192','deposit_paid'],
+  ['119','other_current_asset'],
+  ['122','long_term_investment'],
+  ['12619','ppe_land'], ['12618','cip'], ['126','ppe'],
+  ['127','intangible'],
+  ['123','other_asset'], ['124','other_asset'], ['125','other_asset'], ['129','other_asset'],
+  ['17113','input_vat'], ['1711','input_vat'],
+  ['17120','wht_asset'], ['1712','wht_asset'],
+  ['1713','prepaid_cit'],
+  ['17140','vat_receivable'], ['1714','vat_receivable'],
+  ['17','other_current_asset'],
+  ['182','long_term_investment'], ['183','ar_allowance'], ['184','other_asset'],
+  ['185','inventory_allowance'], ['186','accum_depreciation'], ['187','accum_amortization'],
+  ['18','other_asset'],
+  ['19','other_current_asset'],
+  // หนี้สิน
+  ['21310','trade_payable'], ['2131','trade_payable'],
+  ['21951','accrued_payroll'], ['21952','sso_payable'], ['2195','accrued_payroll'],
+  ['2191','accrued_expense'], ['2192','customer_deposit'],
+  ['211','other_payable'], ['213','other_payable'], ['214','other_payable'],
+  ['215','other_payable'], ['218','other_payable'], ['219','other_payable'],
+  ['22','long_term_loan'],
+  ['27110','output_vat'], ['2711','output_vat'],
+  ['27123','wht_payable_pnd3'], ['27124','wht_payable_pnd53'],
+  ['27121','wht_payable_pnd1'], ['27122','wht_payable_pnd1'], ['2712','wht_payable_pnd53'],
+  ['2713','cit_payable'], ['27140','vat_payable'], ['2714','vat_payable'],
+  ['27','other_payable'],
+  // ส่วนของผู้ถือหุ้น
+  ['31','paid_up_capital'], ['32','paid_up_capital'], ['33','legal_reserve'],
+  ['34','retained_earnings'], ['39','retained_earnings'],
+  // รายได้
+  ['411','sales_revenue'], ['412','service_revenue'],
+  ['49010','interest_income'], ['4901','interest_income'], ['4904','rental_revenue'],
+  ['47','other_income'], ['49','other_income'],
+  // ค่าใช้จ่าย
+  ['51111','purchases'], ['51121','purchases'], ['51','cogs'],
+  ['52','selling_expense'],
+  ['53012','sso_expense'], ['53','admin_expense'],
+  ['54','finance_cost'],
+  ['5831','bad_debt'], ['5852','inventory_writeoff'], ['5853','inventory_writeoff'],
+  ['5871','amortization'], ['586','depreciation'], ['58','depreciation'],
+  ['57','admin_expense'],
+  ['59920','non_deductible'], ['59995','non_deductible'], ['59','admin_expense'],
+];
+const DBD_BY_LEAD = { '1':'other_current_asset', '2':'other_payable', '3':'retained_earnings',
+                      '4':'other_income', '5':'admin_expense' };
+/* subType ที่โครงงบการเงินรองรับแล้ว แต่ผังบัญชีตั้งต้นของเรายังไม่มีบัญชีใช้
+   ต้องบอกประเภทไว้ตรงนี้ ไม่งั้นบัญชีที่นำเข้ามาจะไม่มีประเภทแล้วสร้างไม่ได้ */
+const EXTRA_SUBTYPE_TYPE = {
+  short_term_investment: 'asset',
+  other_current_asset: 'asset',
+};
+
+/** ประเภทบัญชีของ subType หนึ่ง ๆ อ้างจากผังบัญชีของระบบเราก่อน */
+function subTypeType(sub) {
+  const a = DB.accounts.find((x) => x.subType === sub);
+  return a ? a.type : (EXTRA_SUBTYPE_TYPE[sub] || null);
+}
+
+/** เดาว่าบัญชีรหัสนี้ควรไปอยู่บรรทัดไหนของงบการเงิน */
+function inferSubType(code) {
+  const c = String(code || '').trim().replace(/[^0-9]/g, '');
+  if (!c) return null;
+  let best = null, len = 0;
+  DBD_SUBTYPE.forEach(function (p) {
+    if (c.indexOf(p[0]) === 0 && p[0].length > len) { len = p[0].length; best = p[1]; }
+  });
+  return best || DBD_BY_LEAD[c[0]] || null;
+}
+
+/** บัญชีที่จะสร้างใหม่จากรหัสในงบทดลองของระบบเดิม */
+function proposeAccount(code, name) {
+  const sub = inferSubType(code);
+  if (!sub) return null;
+  const type = subTypeType(sub);
+  if (!type) return null;
+  return {
+    code: String(code).trim(),
+    name: String(name || '').trim() || ('บัญชี ' + String(code).trim()),
+    type, subType: sub, postable: true, requiresPartner: false,
+    level: 3, imported: true,
+  };
+}
+
 function matchAccount(code, name) {
   const byCode = DB.accounts.find((a) => a.postable && a.code === String(code).trim());
   if (byCode) return byCode.code;
@@ -296,32 +477,83 @@ function matchAccount(code, name) {
   return byName ? byName.code : null;
 }
 
+const EXTRA_SUBTYPE_LABEL = {
+  short_term_investment: 'เงินลงทุนชั่วคราว',
+  other_current_asset: 'สินทรัพย์หมุนเวียนอื่น',
+};
+/** ชื่อไทยของ subType — ยืมชื่อบัญชีตัวแรกในผังของเราที่ใช้ subType นั้น */
+function subTypeLabel(sub) {
+  const a = DB.accounts.find((x) => x.subType === sub);
+  return a ? a.name : (EXTRA_SUBTYPE_LABEL[sub] || sub);
+}
+/** บัญชี subType นี้ไปโผล่บรรทัดไหนของงบการเงิน */
+function fsLineOf(sub) {
+  let label = null;
+  BS_LINES.concat(PL_LINES).forEach(function (L) {
+    if (!label && L.k === 'd' && (L.sub || []).indexOf(sub) >= 0) label = L.label;
+  });
+  return label;
+}
+/** ตัวเลือกทั้งหมดสำหรับ "บัญชีใหม่นี้ควรอยู่บรรทัดไหนของงบ" */
+function fsChoices() {
+  const out = [];
+  BS_LINES.concat(PL_LINES).forEach(function (L) {
+    if (L.k !== 'd') return;
+    (L.sub || []).forEach(function (sub) {
+      if (subTypeType(sub)) out.push({ sub, group: L.label, label: subTypeLabel(sub) });
+    });
+  });
+  return out;
+}
+
 /**
  * ตรวจก่อนนำเข้า — บอกให้ครบว่าจะเกิดอะไรขึ้น ก่อนแตะบัญชีจริง
- * overrides: { 'รหัสเดิม': 'รหัสในผังบัญชีเรา' }
+ * overrides: { 'รหัสเดิม': 'รหัสในผังบัญชีเรา' } หรือ { 'รหัสเดิม': '+subType' }
+ *   '+subType' = ให้สร้างบัญชีใหม่ด้วยรหัสและชื่อเดิม แล้ววางไว้บรรทัดนั้นของงบ
  */
 function previewOpening(tbRows, overrides) {
   overrides = overrides || {};
-  const matched = [], unmatched = [];
+  const matched = [], creating = [], unmatched = [];
   let totalDr = 0, totalCr = 0;
   tbRows.forEach(function (r) {
     const key = r.code || r.name;
-    const target = overrides[key] || matchAccount(r.code, r.name);
+    const ov = overrides[key];
     totalDr += r.debit; totalCr += r.credit;
-    if (target) matched.push({ ...r, target, targetName: acc(target).name });
-    else unmatched.push(r);
+
+    /* ผู้ใช้สั่งให้สร้างบัญชีใหม่ในบรรทัดงบที่เลือกเอง */
+    if (ov && ov.charAt(0) === '+') {
+      const sub = ov.slice(1);
+      const t = subTypeType(sub);
+      if (t) {
+        creating.push({ ...r, subType: sub, type: t, fsLine: fsLineOf(sub) });
+        return;
+      }
+    }
+    const target = (ov && ov.charAt(0) !== '+' ? ov : null) || matchAccount(r.code, r.name);
+    if (target && acc(target)) {
+      matched.push({ ...r, target, targetName: acc(target).name });
+      return;
+    }
+    /* ไม่มีในผังของเรา แต่รหัสเป็นผังมาตรฐานกรมพัฒน์ เดาบรรทัดงบให้แล้วสร้างใหม่
+       ดีกว่าบังคับให้ผู้ใช้จับคู่บัญชีเองเป็นร้อยบรรทัด และเก็บรหัสเดิมไว้ได้ด้วย */
+    const p = proposeAccount(r.code, r.name);
+    if (p) {
+      creating.push({ ...r, subType: p.subType, type: p.type, fsLine: fsLineOf(p.subType) });
+      return;
+    }
+    unmatched.push(r);
   });
   return {
-    matched, unmatched, totalDr, totalCr,
+    matched, creating, unmatched, totalDr, totalCr,
     diff: totalDr - totalCr,
     balanced: totalDr === totalCr,
-    ready: totalDr === totalCr && unmatched.length === 0 && matched.length > 0,
+    ready: totalDr === totalCr && unmatched.length === 0 && (matched.length + creating.length) > 0,
   };
 }
 
 function importOpeningBalances(tbRows, date, overrides) {
   const p = previewOpening(tbRows, overrides);
-  if (!p.matched.length && !p.unmatched.length) {
+  if (!p.matched.length && !p.creating.length && !p.unmatched.length) {
     throw new DomainError('NOTHING_TO_IMPORT', 'ไม่พบบรรทัดที่มียอดในไฟล์นี้');
   }
   if (!p.balanced) {
@@ -341,9 +573,26 @@ function importOpeningBalances(tbRows, date, overrides) {
       'นำเข้ายอดยกมา ณ ' + thDate(date) + ' ไปแล้ว',
       'ถ้าต้องการนำเข้าใหม่ ให้กลับรายการใบสำคัญเดิมก่อน');
   }
+  /* สร้างบัญชีที่ยังไม่มีในผังก่อน โดยใช้รหัสและชื่อเดิมของระบบเก่า
+     ทำหลังผ่านการตรวจทุกข้อแล้วเท่านั้น จะได้ไม่ทิ้งบัญชีค้างไว้เวลานำเข้าไม่ผ่าน */
+  const created = [];
+  p.creating.forEach(function (r) {
+    const code = String(r.code || '').trim() || r.name;
+    if (DB.accounts.find((a) => a.code === code)) return;
+    const a = { code, name: r.name || ('บัญชี ' + code), type: r.type, subType: r.subType,
+      postable: true, requiresPartner: false, level: 3, imported: true };
+    DB.accounts.push(a);
+    created.push(a);
+  });
+  DB.accounts.sort((a, b) => (a.code < b.code ? -1 : a.code > b.code ? 1 : 0));
+
   // รวมบรรทัดที่ชี้ไปบัญชีเดียวกัน แล้วสุทธิเป็นด้านเดียว
   const net = {};
   p.matched.forEach(function (r) { net[r.target] = (net[r.target] || 0) + r.debit - r.credit; });
+  p.creating.forEach(function (r) {
+    const code = String(r.code || '').trim() || r.name;
+    net[code] = (net[code] || 0) + r.debit - r.credit;
+  });
   const lines = Object.keys(net).filter((c) => net[c] !== 0).map(function (c) {
     const a = acc(c);
     const l = net[c] > 0 ? { acc: c, dr: net[c] } : { acc: c, cr: -net[c] };
@@ -360,8 +609,9 @@ function importOpeningBalances(tbRows, date, overrides) {
     src: 'import', srcId: srcId,
     lines: lines,
   });
-  audit('import', srcId, 'run', null, { accounts: lines.length, total: fmt(p.totalDr) });
-  return { entry: je, accounts: lines.length, total: p.totalDr };
+  audit('import', srcId, 'run', null,
+    { accounts: lines.length, created: created.length, total: fmt(p.totalDr) });
+  return { entry: je, accounts: lines.length, created: created.length, total: p.totalDr };
 }
 
 /* ===================================================================

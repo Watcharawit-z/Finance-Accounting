@@ -409,7 +409,7 @@ const BS_LINES = [
   { k:'d',  label:'เงินสดและรายการเทียบเท่าเงินสด', sub:['cash','bank','cash_in_transit'], sign:1, note:2 },
   { k:'d',  label:'ลูกหนี้การค้าและลูกหนี้อื่น', sub:['trade_receivable','other_receivable','accrued_income','ar_allowance'], sign:1, note:3 },
   { k:'d',  label:'สินค้าคงเหลือ', sub:['inventory','inventory_allowance'], sign:1, note:4 },
-  { k:'d',  label:'สินทรัพย์หมุนเวียนอื่น', sub:['input_vat','vat_receivable','wht_asset','prepaid_expense','prepaid_cit','deposit_paid','suspense'], sign:1 },
+  { k:'d',  label:'สินทรัพย์หมุนเวียนอื่น', sub:['input_vat','vat_receivable','wht_asset','prepaid_expense','prepaid_cit','deposit_paid','suspense','short_term_investment','other_current_asset'], sign:1 },
   { k:'s',  label:'รวมสินทรัพย์หมุนเวียน', section:'asset' },
   { k:'h2', label:'สินทรัพย์ไม่หมุนเวียน' },
   { k:'d',  label:'ที่ดิน อาคารและอุปกรณ์', sub:['ppe_land','ppe','cip','accum_depreciation'], sign:1, note:5 },
@@ -606,12 +606,19 @@ function reconciliationChecks(asOf) {
   const arControl = balBySub(['trade_receivable'], asOf);
   const arSub = DB.docs.invoice.filter((d) => d.status !== 'draft' && d.status !== 'void' && d.date <= asOf)
     .reduce((s, d) => s + outstandingAsOf('ar', d, asOf), 0);
-  checks.push({ code:'AR_SUBLEDGER', label:'ลูกหนี้รายรายรวม = บัญชีคุมลูกหนี้', control:arControl, sub:arSub, ok:arControl === arSub });
+  checks.push({ code:'AR_SUBLEDGER', label:'ลูกหนี้รายรายรวม = บัญชีคุมลูกหนี้',
+    control:arControl, sub:arSub, ok:arControl === arSub,
+    /* ยกยอดรวมมาแต่ยังไม่ได้ยกใบที่ค้างมาด้วย เป็นคนละเรื่องกับลงบัญชีผิด ต้องบอกให้ต่างกัน */
+    why: (arControl !== arSub && arSub === 0 && arControl !== 0)
+      ? 'ยกยอดรวมลูกหนี้มาแล้ว แต่ยังไม่ได้นำใบกำกับที่ยังค้างเข้ามาเป็นรายใบ' : null });
 
   const apControl = -balBySub(['trade_payable'], asOf);
   const apSub = DB.docs.bill.filter((d) => d.status !== 'draft' && d.status !== 'void' && d.date <= asOf)
     .reduce((s, d) => s + outstandingAsOf('ap', d, asOf), 0);
-  checks.push({ code:'AP_SUBLEDGER', label:'เจ้าหนี้รายรายรวม = บัญชีคุมเจ้าหนี้', control:apControl, sub:apSub, ok:apControl === apSub });
+  checks.push({ code:'AP_SUBLEDGER', label:'เจ้าหนี้รายรายรวม = บัญชีคุมเจ้าหนี้',
+    control:apControl, sub:apSub, ok:apControl === apSub,
+    why: (apControl !== apSub && apSub === 0 && apControl !== 0)
+      ? 'ยกยอดรวมเจ้าหนี้มาแล้ว แต่ยังไม่ได้นำใบตั้งหนี้ที่ยังค้างเข้ามาเป็นรายใบ' : null });
 
   const glDiff = balanceOf(() => true, asOf);
   checks.push({ code:'GL_BALANCED', label:'เดบิตรวม = เครดิตรวม ทั้งฐานข้อมูล', control:glDiff, sub:0, ok:glDiff === 0 });

@@ -6,7 +6,9 @@ const ctx = new Function(src + '\nreturn {DB,buildSeed,trialBalance,balanceSheet
   'runPayroll,runDepreciation,fileVat,fileWht,post,reverse,fmt,M,validTaxId,DomainError,' +
   'closeChecklist,closePeriod,resolveRate,round2,pct,periodOf,computePit,ssoRate,divRound,buildBlank,' +
   'issueDebitNote,DN_REASONS,issueTradeDoc,setTradeDocStatus,convertTradeDoc,tradeDocStatus,' +
-  'detectColumns,readTrialBalance,parseCsv,parseAmount,' +
+  'detectColumns,readTrialBalance,parseCsv,parseAmount,detectFileKind,' +
+  'inferSubType,proposeAccount,previewOpening,importOpeningBalances,subTypeType,' +
+  'DBD_SUBTYPE,BS_LINES,PL_LINES,balBySub,' +
   'TRADE_DOCS,invOutstanding,outstandingAsOf,unM};')();
 
 let pass = 0, fail = 0;
@@ -323,6 +325,56 @@ ok('ขีดกลางอ่านเป็นศูนย์', ctx.parseAmou
 ok('ข้อความที่ไม่ใช่ตัวเลขอ่านไม่ออก ต้องบอกว่าอ่านไม่ออก ไม่ใช่เดาเป็นศูนย์',
    ctx.parseAmount('ยกมา') === null);
 
+console.log('\n=== 7.8 งบทดลองหน้าตาแบบ FlowAccount ของจริง ===');
+/* โครงเดียวกับไฟล์ที่ผู้ใช้ส่งมา: หัวรายงาน 4 บรรทัด · หัวตารางกินสองบรรทัด ·
+   สามคู่เดบิต–เครดิต (ยกมา / ประจำงวด / สะสม) · มีคอลัมน์ว่างคั่น ·
+   หัวคอลัมน์รหัสเขียนว่า "บัญชี" เฉย ๆ · ช่องชื่อบัญชีไม่มีหัวคอลัมน์ ·
+   บรรทัดผลรวมเขียนคำว่า "รวมทั้งสิ้น" ไว้ในช่องชื่อ ไม่ใช่ช่องรหัส ·
+   ตัวเลขบางตัวเป็นรูปยกกำลังแบบที่ Excel เขียนออกมา  ตัวเลขสมมุติทั้งหมด */
+const FA_TB = [
+  ['บริษัท ตัวอย่าง จำกัด'],
+  ['งบทดลอง'],
+  ['สิ้นสุด ณ วันที่ 31 ธันวาคม 2569'],
+  ['หน่วย:บาท'],
+  ['', '', '', 'ยอดยกมา', '', '', 'ยอดประจำงวด', '', '', 'ยอดสะสม', '', '', 'รวมทั้งสิ้น'],
+  ['บัญชี', '', '', 'เดบิต', 'เครดิต', '', 'เดบิต', 'เครดิต', '', 'เดบิต', 'เครดิต', '', ''],
+  ['11122.01', 'กสิกรไทย 0762769492', '', '9739.93', '', '', '1765701.95', '1774292.75',
+   '', '1149.1300000000001', '', '', '1149.1300000000001'],
+  ['11511', 'สินค้าสำเร็จรูปคงเหลือ', '', '230777.7', '', '', '24561.2', '186671.9',
+   '', '68667', '', '', '68667'],
+  ['17140', 'ลูกหนี้สรรพากร', '', '', '', '', '11261.56', '11261.56',
+   '', '7.0000000000000007E-2', '', '', '0.07'],
+  ['21311', 'เจ้าหนี้การค้า - ทั่วไป', '', '', '80000', '', '14160', '',
+   '', '', '65840', '', '-65840'],
+  ['34998', 'กำไร (ขาดทุน) สะสม - รายงาน', '', '', '160517.7', '', '', '',
+   '', '', '4116.26', '', '-4116.26'],
+  ['41110', 'รายได้จากการขายสินค้า', '', '', '', '', '', '260000',
+   '', '', '260000', '', '-260000'],
+  ['51140', 'ต้นทุนขายสินค้า', '', '', '', '', '260140.06', '',
+   '', '260140.06', '', '', '260140.06'],
+  ['', 'รวมทั้งสิ้น', '', '240517.63', '240517.70', '', '2075824.77', '2232226.21',
+   '', '329956.26', '329956.26', '', '0'],
+];
+const faRows = FA_TB.filter((r) => r.some((x) => String(x).trim() !== ''));
+const faDet = ctx.detectColumns(faRows);
+ok('★ หาหัวตารางเจอแม้หัวคอลัมน์รหัสเขียนแค่ว่า "บัญชี"',
+   faDet.ok && faDet.map.code === 0, 'หัวแถวที่ ' + (faDet.headerRow + 1) + ' · ' + JSON.stringify(faDet.map));
+ok('★ ช่องชื่อบัญชีที่ไม่มีหัวคอลัมน์ ระบบเดาให้จากข้อมูลข้างใต้', faDet.map.name === 1);
+ok('★ หยิบคู่ "ยอดสะสม" ไม่ใช่คู่ยอดยกมาหรือคู่ประจำงวด',
+   faDet.map.debit === 9 && faDet.map.credit === 10,
+   'เดบิตคอลัมน์ที่ ' + (faDet.map.debit + 1) + ' เครดิตคอลัมน์ที่ ' + (faDet.map.credit + 1));
+ok('ไฟล์นี้ถูกจัดว่าเป็นงบทดลอง', ctx.detectFileKind(faRows, faDet.map, faDet.headerRow) === 'trialBalance');
+const faTb = ctx.readTrialBalance(faRows, faDet.map, faDet.headerRow);
+const faDr = faTb.rows.reduce((a, r) => a + r.debit, 0);
+const faCr = faTb.rows.reduce((a, r) => a + r.credit, 0);
+ok('★ ตัวเลขรูปยกกำลังที่ Excel เขียนออกมา อ่านเป็นตัวเลขได้ ไม่ถูกทิ้ง',
+   ctx.parseAmount('7.0000000000000007E-2') !== null
+   && ctx.M(ctx.parseAmount('7.0000000000000007E-2')) === ctx.M('0.07'));
+ok('★ งบทดลองสมดุลพอดีหลังอ่านครบทุกบรรทัด', faDr === faCr, ctx.fmt(faDr) + ' = ' + ctx.fmt(faCr));
+ok('บรรทัดผลรวมที่เขียนคำว่ารวมไว้ในช่องชื่อ ถูกข้าม ไม่ถูกนับเป็นบัญชี',
+   faTb.rows.length === 7 && faTb.skipped.some((x) => x.why.indexOf('ผลรวม') >= 0),
+   faTb.rows.length + ' บัญชี');
+
 console.log('\n=== 8. ปิดงวด ===');
 const chk = ctx.closeChecklist('2026-06');
 ok('รายการตรวจสอบก่อนปิดงวดครบ', chk.items.length >= 9, chk.items.length + ' ข้อ');
@@ -333,6 +385,63 @@ if (chk.canClose) {
   throws('ลงรายการในงวดที่ปิดแล้ว', () => ctx.post({ type:'general', date:'2026-06-15', desc:'ทดสอบ',
     lines:[{acc:'1113',dr:ctx.M('100')},{acc:'4111',cr:ctx.M('100')}] }), 'PERIOD_CLOSED');
 }
+
+/* ★ ส่วนนี้ล้างข้อมูลตัวอย่างทิ้งเพื่อสร้างบริษัทเปล่า จึงต้องอยู่ท้ายสุดเสมอ
+   ถ้าย้ายขึ้นไปข้างบน ชุดทดสอบที่เหลือจะรันบนบริษัทเปล่าแล้วผลเพี้ยน */
+console.log('\n=== 9. สร้างบัญชีตามผังเดิมแทนการจับคู่ทีละบรรทัด ===');
+ok('รหัสผังกรมพัฒน์ 1112x = เงินฝากธนาคาร', ctx.inferSubType('11122.01') === 'bank');
+ok('รหัส 1131x = ลูกหนี้การค้า', ctx.inferSubType('11310') === 'trade_receivable');
+ok('รหัส 21310 = เจ้าหนี้การค้า', ctx.inferSubType('21311') === 'trade_payable');
+ok('รหัส 27110 = ภาษีขาย', ctx.inferSubType('27111') === 'output_vat');
+ok('รหัส 411xx = รายได้จากการขาย', ctx.inferSubType('41110-01') === 'sales_revenue');
+ok('รหัส 586xx = ค่าเสื่อมราคา', ctx.inferSubType('58611') === 'depreciation');
+ok('รหัสที่ไม่มีในตาราง ใช้หลักแรกตัดสินหมวด', ctx.inferSubType('19291') === 'other_current_asset');
+/* subType ทุกตัวที่ตารางนี้ชี้ไป ต้องมีที่อยู่ในงบการเงินจริง ๆ
+   ถ้าหลุดไปตัวหนึ่ง บัญชีนั้นจะหายจากงบแล้วงบไม่สมดุลโดยไม่มีอะไรเตือน */
+const fsSubs = new Set();
+ctx.BS_LINES.concat(ctx.PL_LINES).forEach((L) => (L.sub || []).forEach((x) => fsSubs.add(x)));
+const orphan = [...new Set(ctx.DBD_SUBTYPE.map((p) => p[1]))].filter((x) => !fsSubs.has(x));
+ok('★ ทุกปลายทางในตารางผังกรมพัฒน์มีบรรทัดรองรับในงบการเงิน', orphan.length === 0, orphan.join(', '));
+const noType = [...new Set(ctx.DBD_SUBTYPE.map((p) => p[1]))].filter((x) => !ctx.subTypeType(x));
+ok('ทุกปลายทางรู้ว่าเป็นบัญชีหมวดใด', noType.length === 0, noType.join(', '));
+
+/* นำเข้าจริงลงบริษัทเปล่า — ต้องไม่ต้องจับคู่บัญชีด้วยมือแม้แต่บรรทัดเดียว */
+ctx.buildBlank({ name: 'บริษัท ทดสอบผังเดิม จำกัด', year: 2026 });
+const faPrev = ctx.previewOpening(faTb.rows, {});
+ok('★ ไม่เหลือบัญชีที่ต้องจับคู่ด้วยมือเลย', faPrev.unmatched.length === 0 && faPrev.ready,
+   'สร้างใหม่ ' + faPrev.creating.length + ' · ตรงกับผังเดิม ' + faPrev.matched.length);
+const faRes = ctx.importOpeningBalances(faTb.rows, '2026-12-31', {});
+ok('ลงบัญชียอดยกมาได้ครบทุกบรรทัด', faRes.accounts === faTb.rows.length, faRes.accounts + ' บรรทัด');
+ok('สร้างบัญชีใหม่โดยเก็บรหัสเดิมไว้',
+   ctx.DB.accounts.some((a) => a.code === '11122.01' && a.imported && a.subType === 'bank'));
+ok('★ งบทดลองสมดุลหลังนำเข้า', ctx.trialBalance('2026-01-01', '2026-12-31').balanced);
+const faBs = ctx.balanceSheet('2026-12-31');
+ok('★ งบแสดงฐานะการเงินสมดุล ไม่มีบัญชีตกหล่นจากงบ', faBs.diff === 0,
+   'สินทรัพย์ ' + ctx.fmt(faBs.assets) + ' = หนี้สินและทุน ' + ctx.fmt(faBs.liabEquity));
+const faArChk = ctx.reconciliationChecks('2026-12-31').checks.find((c) => c.code === 'AP_SUBLEDGER');
+ok('ยกยอดรวมเจ้าหนี้มาแต่ยังไม่มีใบค้าง ระบบอธิบายให้ ไม่ใช่ขึ้นแดงเฉย ๆ',
+   !faArChk.ok && !!faArChk.why, faArChk.why || '');
+
+/* ไฟล์บัญชีแยกประเภทต้องไม่ถูกนับเป็นงบทดลอง */
+const LEDGER = [
+  ['บัญชีแยกประเภท'],
+  ['รหัสบัญชี', 'วันที่', 'สมุดรายวัน', 'เลขที่เอกสาร', 'ชื่อบัญชี', 'เดบิต', 'เครดิต', 'ยอดคงเหลือ'],
+  ['11121.01', '13/01/2026', 'รายวันทั่วไป', 'JV2026010009', 'กสิกรไทย 1681027862', '10000', '', '10000'],
+  ['11121.01', '14/01/2026', 'รายวันทั่วไป', 'JV2026010015', 'กสิกรไทย 1681027862', '', '10520.4', '-520.4'],
+  ['11121.01', '19/01/2026', 'รายวันทั่วไป', 'JV2026010020', 'กสิกรไทย 1681027862', '800', '', '279.6'],
+];
+const ldDet = ctx.detectColumns(LEDGER);
+ok('★ ไฟล์บัญชีแยกประเภทถูกจับได้ว่าไม่ใช่งบทดลอง',
+   ctx.detectFileKind(LEDGER, ldDet.map, ldDet.headerRow) === 'ledger',
+   'ถ้าเผลอนำเข้า ยอดจะกลายเป็นผลรวมรายการทั้งปีแทนยอดคงเหลือ');
+const CHART = [
+  ['ผังบัญชี / Chart of Accounts'],
+  ['Code', 'ชื่อบัญชี', 'Account Name', 'ประเภท', 'Category', 'ประเภทบัญชี', 'Account Type'],
+  ['11111', 'เงินสดในมือ', 'Cash on Hand', 'สินทรัพย์', 'Assets', 'บัญชีย่อย', 'Sub-Account'],
+];
+const chDet = ctx.detectColumns(CHART);
+ok('ไฟล์ผังบัญชีถูกจับได้ว่าไม่ใช่งบทดลอง',
+   ctx.detectFileKind(CHART, chDet.map, chDet.headerRow) === 'chart');
 
 console.log('\n════════════════════════════════════════');
 console.log(' ผ่าน ' + pass + ' ข้อ · ไม่ผ่าน ' + fail + ' ข้อ');

@@ -507,6 +507,84 @@ const overflowInfo = (page) => page.evaluate(() => {
   ok('คอลัมน์ยอดคงเหลือคอลัมน์เดียว ยอดติดลบไปอยู่ด้านเครดิตให้เอง',
     fixed.dr === 12000000000 && fixed.cr === 12000000000);
 
+  /* ---- ไฟล์หน้าตาเดียวกับที่ FlowAccount ส่งออกมาจริง ---- */
+  await page.evaluate(() => {
+    window.__xlsxFa = window.__mkXlsx([[
+      ['บริษัท ตัวอย่าง จำกัด'], ['งบทดลอง'], ['สิ้นสุด ณ วันที่ 31 ธันวาคม 2569'], ['หน่วย:บาท'],
+      ['', '', '', 'ยอดยกมา', '', '', 'ยอดประจำงวด', '', '', 'ยอดสะสม', '', '', 'รวมทั้งสิ้น'],
+      ['บัญชี', '', '', 'เดบิต', 'เครดิต', '', 'เดบิต', 'เครดิต', '', 'เดบิต', 'เครดิต', '', ''],
+      ['11122.01', 'กสิกรไทย 0762769492', '', '9739.93', '', '', '1765701.95', '1774292.75',
+       '', '1149.13', '', '', '1149.13'],
+      ['11511', 'สินค้าสำเร็จรูปคงเหลือ', '', '230777.7', '', '', '24561.2', '186671.9',
+       '', '68667', '', '', '68667'],
+      ['21311', 'เจ้าหนี้การค้า - ทั่วไป', '', '', '80000', '', '14160', '', '', '', '65840', '', '-65840'],
+      ['34998', 'กำไร (ขาดทุน) สะสม - รายงาน', '', '', '160517.7', '', '', '', '', '', '4116.19', '', '-4116.19'],
+      ['41110', 'รายได้จากการขายสินค้า', '', '', '', '', '', '260000', '', '', '260000', '', '-260000'],
+      ['51140', 'ต้นทุนขายสินค้า', '', '', '', '', '260140.06', '', '', '260140.06', '', '', '260140.06'],
+      ['', 'รวมทั้งสิ้น', '', '240517.63', '240517.7', '', '2064563.21', '2220964.65',
+       '', '329956.19', '329956.19', '', '0'],
+    ]], 'งบทดลอง-flowaccount.xlsx');
+  });
+  await page.evaluate(() => { STATE.screen = 'import'; STATE.imp = null; render(); });
+  await page.evaluate(() => handleFile(window.__xlsxFa));
+  await page.waitForTimeout(500);
+  const fa = await page.evaluate(() => {
+    const I = STATE.imp;
+    const pr = previewOpening(I.tb.rows, I.overrides || {});
+    return { err: I.error, kind: I.kind, needs: I.needsMapping, map: I.map,
+      tb: I.tb.rows.length, matched: pr.matched.length, creating: pr.creating.length,
+      unmatched: pr.unmatched.length, balanced: pr.balanced, ready: pr.ready };
+  });
+  ok('★ ไฟล์หน้าตาแบบ FlowAccount จริงอ่านออกโดยไม่ต้องตั้งค่าอะไรเลย',
+    !fa.err && fa.kind === 'trialBalance' && !fa.needs && fa.tb === 6,
+    fa.err || 'อ่านได้ ' + fa.tb + ' บัญชี');
+  ok('★ หัวคอลัมน์เขียนแค่ "บัญชี" และช่องชื่อไม่มีหัว ก็จับคู่ถูก',
+    fa.map.code === 0 && fa.map.name === 1 && fa.map.debit === 9 && fa.map.credit === 10,
+    JSON.stringify(fa.map));
+  ok('★ ไม่ต้องจับคู่บัญชีด้วยมือแม้แต่บรรทัดเดียว',
+    fa.unmatched === 0 && fa.creating > 0 && fa.balanced && fa.ready,
+    'สร้างใหม่ ' + fa.creating + ' · ตรงกับผังเดิม ' + fa.matched);
+  ok('มีตารางบอกว่าบัญชีใหม่แต่ละตัวจะไปอยู่บรรทัดไหนของงบ',
+    (await page.$$('#main select.impmap')).length >= fa.creating);
+
+  await page.fill('[name="cutoff"]', '2026-12-31');
+  await page.click('[data-act="imp:run"]');
+  await page.waitForTimeout(600);
+  const faAfter = await page.evaluate(() => ({
+    screen: STATE.screen,
+    created: STATE.impResult && STATE.impResult.opening ? STATE.impResult.opening.created : 0,
+    balanced: trialBalance('2026-01-01', '2026-12-31').balanced,
+    bsDiff: balanceSheet('2026-12-31').diff,
+    kept: DB.accounts.some((a) => a.code === '11122.01' && a.subType === 'bank'),
+    why: reconciliationChecks('2026-12-31').checks.filter((c) => !c.ok && c.why).length,
+  }));
+  ok('★ นำเข้าแล้วงบทดลองและงบแสดงฐานะการเงินยังสมดุล',
+    faAfter.screen === 'importResult' && faAfter.balanced && faAfter.bsDiff === 0,
+    'สร้างบัญชีใหม่ ' + faAfter.created + ' ตัว');
+  ok('บัญชีใหม่เก็บรหัสเดิมและไปอยู่บรรทัดเงินฝากธนาคาร', faAfter.kept);
+  ok('ยอดคุมที่ยังไม่ตรงมีคำอธิบายกำกับ ไม่ใช่ขึ้นแดงเปล่า ๆ', faAfter.why >= 1);
+
+  /* ---- ไฟล์บัญชีแยกประเภทต้องถูกกันไว้ ---- */
+  await page.evaluate(() => {
+    window.__xlsxGl = window.__mkXlsx([[
+      ['บัญชีแยกประเภท'],
+      ['รหัสบัญชี', 'วันที่', 'สมุดรายวัน', 'เลขที่เอกสาร', 'ชื่อบัญชี', 'เดบิต', 'เครดิต', 'ยอดคงเหลือ'],
+      ['11121.01', '13/01/2026', 'รายวันทั่วไป', 'JV2026010009', 'กสิกรไทย 1681027862', '10000', '', '10000'],
+      ['11121.01', '14/01/2026', 'รายวันทั่วไป', 'JV2026010015', 'กสิกรไทย 1681027862', '', '10520.4', '-520.4'],
+      ['11121.01', '19/01/2026', 'รายวันทั่วไป', 'JV2026010020', 'กสิกรไทย 1681027862', '800', '', '279.6'],
+    ]], 'บัญชีแยกประเภท.xlsx');
+  });
+  const entriesBeforeGl = await page.evaluate(() => DB.entries.length);
+  await page.evaluate(() => { STATE.screen = 'import'; STATE.imp = null; render(); });
+  await page.evaluate(() => handleFile(window.__xlsxGl));
+  await page.waitForTimeout(500);
+  ok('★ ไฟล์บัญชีแยกประเภทถูกกันไว้ ไม่ให้นำเข้าเป็นยอดยกมา',
+    (await page.evaluate(() => STATE.imp.kind)) === 'ledger'
+    && (await page.$('[data-act="imp:run"]')) === null
+    && (await page.evaluate(() => DB.entries.length)) === entriesBeforeGl);
+  ok('บอกด้วยว่าต้องไปเอาไฟล์ไหนมาแทน',
+    (await page.$eval('#main', (e) => e.textContent)).indexOf('งบทดลอง') >= 0);
+
   console.log('\n[14] สามบริษัทในเครื่องเดียว ข้อมูลต้องไม่ปนกัน');
   await page.evaluate(() => { STATE.screen = 'dashboard'; render(); });
   await page.waitForTimeout(150);

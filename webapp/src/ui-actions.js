@@ -789,12 +789,14 @@ async function handleFile(file) {
     /* เดาหัวตารางไม่ได้ ก็ต้องไม่ตัน — พาไปหน้าจับคู่คอลัมน์ด้วยมือแทน
        การบอกให้ผู้ใช้กลับไปแก้ไฟล์เองคือทางตันสำหรับคนที่ไม่ถนัดคอมพิวเตอร์ */
     const det = detectColumns(rows);
+    const kind = detectFileKind(rows, det.map, det.headerRow);
     STATE.imp = {
       name: file.name, rows: rows,
       headerRow: det.headerRow >= 0 ? det.headerRow : 0, map: det.map,
-      overrides: {}, cutoff: null, needsMapping: !det.ok,
+      overrides: {}, cutoff: null, needsMapping: !det.ok && kind === 'trialBalance',
+      kind: kind,
     };
-    refreshImportPreview();
+    if (kind === 'trialBalance') refreshImportPreview();
   } catch (e) {
     STATE.imp = { name: file.name, error: (e.message || String(e)) + (e.hint ? ' — ' + e.hint : '') };
     if (!(e instanceof DomainError)) console.error(e);

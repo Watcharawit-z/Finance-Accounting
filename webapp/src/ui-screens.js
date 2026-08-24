@@ -1283,6 +1283,31 @@ function scImport() {
 
   if (!IMP.rows) return step1 + blank;
 
+  /* ---- ไฟล์ไม่ใช่งบทดลอง บอกให้ชัดว่าไฟล์ไหนที่ต้องใช้ ---- */
+  if (IMP.kind === 'ledger' || IMP.kind === 'chart') {
+    const isLedger = IMP.kind === 'ledger';
+    return step1 + card({
+      title: isLedger ? 'ไฟล์นี้คือบัญชีแยกประเภท ไม่ใช่งบทดลอง' : 'ไฟล์นี้คือผังบัญชี ไม่ใช่งบทดลอง',
+      sub: esc(IMP.name) + ' · ' + IMP.rows.length + ' แถว',
+      actions: btn('imp:reset', 'เลือกไฟล์ใหม่', 'primary'),
+      body:'<div class="note warn">'
+        + (isLedger
+            ? 'ไฟล์นี้เก็บรายการเคลื่อนไหวทีละรายการตลอดทั้งปี ไม่ใช่ยอดคงเหลือ '
+              + 'ถ้านำเข้าเป็นยอดยกมา ตัวเลขจะกลายเป็นผลรวมรายการทั้งปีซึ่งไม่ใช่ยอดจริง '
+              + 'ระบบจึงไม่ยอมนำเข้าให้'
+            : 'ไฟล์ผังบัญชีมีแต่รายชื่อบัญชี ไม่มีตัวเลขยอดคงเหลือ จึงตั้งยอดยกมาไม่ได้')
+        + '</div>'
+        + '<div class="prose"><p><b>ไฟล์ที่ต้องใช้คือ งบทดลอง</b> — ใน FlowAccount ไปที่ '
+        + 'เมนู <b>รายงาน</b> → หมวด <b>บัญชี</b> → <b>งบทดลอง</b> → เลือกช่วงเวลาให้สิ้นสุดที่วันตัดยอด '
+        + '→ กดแสดงผลรายงาน → <b>ดาวน์โหลด Excel</b></p>'
+        + (isLedger
+            ? '<p class="dim">เก็บไฟล์บัญชีแยกประเภทไว้ได้ ใช้ตรวจย้อนกลับตอนยอดไม่ตรงว่ารายการไหนทำให้ต่าง</p>'
+            : '<p class="dim">ไม่ต้องนำผังบัญชีเข้ามาเอง ระบบสร้างบัญชีตามรหัสเดิมให้อัตโนมัติ'
+              + 'ตอนนำเข้างบทดลองอยู่แล้ว</p>')
+        + '</div>',
+    }) + blank;
+  }
+
   /* ---- อ่านไฟล์ได้แล้ว ให้เลือกคอลัมน์ ---- */
   const head = IMP.rows[IMP.headerRow] || [];
   const width = IMP.rows.slice(0, 40).reduce((w, r) => Math.max(w, r.length), head.length);
@@ -1377,18 +1402,52 @@ function scImport() {
 
   if (!preview) return step1 + step2 + blank;
 
+  /* ตัวเลือกบรรทัดงบสำหรับบัญชีที่จะสร้างใหม่ จัดกลุ่มตามบรรทัดงบให้เลือกง่าย */
+  const fsOpts = (function () {
+    const list = fsChoices();
+    let h = '', group = null;
+    list.forEach(function (o) {
+      if (o.group !== group) {
+        if (group !== null) h += '</optgroup>';
+        h += '<optgroup label="' + esc(o.group) + '">';
+        group = o.group;
+      }
+      h += '<option value="+' + esc(o.sub) + '">' + esc(o.label) + '</option>';
+    });
+    return h + (group !== null ? '</optgroup>' : '');
+  })();
+  const fsSelect = (key, sub) =>
+    '<select class="impmap" data-key="' + esc(key) + '">'
+    + fsOpts.replace('value="+' + esc(sub) + '"', 'value="+' + esc(sub) + '" selected')
+    + '<optgroup label="หรือรวมเข้าบัญชีที่ระบบมีอยู่แล้ว">'
+    + DB.accounts.filter((a) => a.postable && !a.imported)
+        .map((a) => '<option value="' + a.code + '">' + esc(a.code + ' ' + a.name) + '</option>').join('')
+    + '</optgroup></select>';
+
   const step3 = card({
     title:'สรุปสิ่งที่จะเกิดขึ้น',
     sub:'ยังไม่มีอะไรถูกบันทึกจนกว่าจะกดปุ่มนำเข้า',
     actions: btn('imp:run', 'นำเข้ายอดยกมา', preview.ready ? 'primary' : 'disabled'),
     body:'<div class="reco">'
-      + '<div><span>บัญชีที่จับคู่ได้</span><b>' + preview.matched.length + ' บัญชี</b></div>'
+      + '<div><span>บัญชีที่ตรงกับผังของระบบ</span><b>' + preview.matched.length + ' บัญชี</b></div>'
+      + '<div><span>บัญชีที่จะสร้างใหม่ตามรหัสเดิม</span><b>' + preview.creating.length + ' บัญชี</b></div>'
       + '<div><span>บัญชีที่ยังจับคู่ไม่ได้</span><b class="' + (preview.unmatched.length ? 'neg' : '') + '">'
         + preview.unmatched.length + ' บัญชี</b></div>'
       + '<div><span>เดบิตรวม</span><b>' + fmt(preview.totalDr) + '</b></div>'
       + '<div><span>เครดิตรวม</span><b>' + fmt(preview.totalCr) + '</b></div>'
       + '<div class="gt"><span>ผลต่าง</span><b class="' + (preview.balanced ? '' : 'neg') + '">'
         + fmt(preview.diff) + '</b></div></div>'
+      + (preview.creating.length
+          ? '<div class="sub-h">บัญชีที่ระบบจะสร้างใหม่ให้ โดยใช้รหัสและชื่อเดิมของคุณ</div>'
+            + '<div class="note">ระบบเดาให้แล้วว่าบัญชีแต่ละตัวควรอยู่บรรทัดไหนของงบการเงิน '
+            + 'ไล่ดูให้ครบ ถ้าตัวไหนไม่ถูกให้เปลี่ยนในช่องขวาสุด</div>'
+            + tbl({
+                cols:[{t:'รหัสเดิม'},{t:'ชื่อบัญชี'},{t:'เดบิต',a:'r'},{t:'เครดิต',a:'r'},{t:'จะไปอยู่บรรทัดงบ'}],
+                rows: preview.creating.map((r) => [{mono:r.code}, r.name, {n:r.debit}, {n:r.credit},
+                  {html: '<div class="dim" style="margin-bottom:4px">' + esc(r.fsLine || '—') + '</div>'
+                    + fsSelect(r.code || r.name, r.subType)}]),
+              })
+          : '')
       + (preview.unmatched.length
           ? '<div class="sub-h">เลือกบัญชีปลายทางให้ครบก่อนนำเข้า</div>'
             + tbl({
@@ -1402,6 +1461,7 @@ function scImport() {
           + 'ให้เลือกคู่ยอดคงเหลือปลายงวด</div>'),
     foot: preview.ready
       ? 'ระบบจะสร้างใบสำคัญ "ยอดยกมา" หนึ่งใบ ลงวันที่ตามที่เลือก แก้ไม่ได้ ถ้าผิดต้องกลับรายการ'
+        + (preview.creating.length ? ' · บัญชีที่สร้างใหม่จะเข้าไปอยู่ในผังบัญชีถาวร' : '')
       : 'ยังนำเข้าไม่ได้ — ' + (!preview.balanced ? 'งบทดลองไม่สมดุล' : 'ยังจับคู่บัญชีไม่ครบ'),
   });
 
@@ -1424,10 +1484,13 @@ function scImportResult() {
     ])
     + (r.opening ? '<div class="reco"><div><span>ใบสำคัญยอดยกมา</span><b>' + esc(r.opening.entry.no) + '</b></div>'
         + '<div><span>จำนวนบัญชี</span><b>' + r.opening.accounts + '</b></div>'
+        + (r.opening.created ? '<div><span>บัญชีที่สร้างใหม่ตามผังเดิม</span><b>'
+            + r.opening.created + '</b></div>' : '')
         + '<div class="gt"><span>ยอดรวมด้านเดบิต</span><b>' + fmt(r.opening.total) + '</b></div></div>' : '')
     + '<div class="sub-h">ตรวจยอดคุมหลังนำเข้า</div>'
     + '<ul class="checks">' + r.checks.map((c) =>
         '<li><span class="dot ' + (c.ok ? 'good' : 'bad') + '"></span>' + esc(c.label)
+        + (c.why ? '<span class="why-note">' + esc(c.why) + '</span>' : '')
         + '<span class="grow"></span><span class="' + (c.ok ? 'dim' : 'neg') + '">'
         + (c.ok ? 'ตรงกัน' : 'ต่าง ' + fmt(c.control - c.sub)) + '</span></li>').join('') + '</ul>'
     + ((r.coverage && r.coverage.length)
@@ -1450,6 +1513,9 @@ function scImportResult() {
         : ''),
     foot: r.allPassed
       ? 'ยอดคุมผ่านครบทุกข้อ ข้อมูลที่ย้ายมาสอดคล้องกันทั้งบัญชีคุมและบัญชีย่อย'
-      : 'มียอดคุมที่ยังไม่ตรง — แปลว่าย้ายมาไม่ครบ ตรวจรายการข้างต้นก่อนใช้งานจริง',
+      : (r.checks.some((c) => !c.ok && c.why)
+          ? 'ข้อที่ยังไม่ตรงพร้อมคำอธิบายข้างบน เป็นเรื่องที่คาดไว้เมื่อยกมาแต่ยอดรวม '
+            + 'ระบบจะไม่ยอมให้ปิดงวดจนกว่าจะนำเอกสารค้างเข้ามาครบ'
+          : 'มียอดคุมที่ยังไม่ตรง — แปลว่าย้ายมาไม่ครบ ตรวจรายการข้างต้นก่อนใช้งานจริง'),
   });
 }
