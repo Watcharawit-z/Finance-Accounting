@@ -221,6 +221,15 @@ tfoot td{padding:9px 12px; border-top:1.5px solid var(--rule); border-bottom:non
 table.fs td{border-bottom:none; padding:7px 14px; font-size:14px; white-space:normal}
 table.fs td.num,table.fs td:last-child{text-align:right; font-variant-numeric:tabular-nums; letter-spacing:-.01em; white-space:nowrap}
 table.fs td[colspan]{text-align:left}
+
+/* ตารางดิบตอนนำเข้าไฟล์ — ให้เห็นหน้าตาไฟล์เหมือนเปิดใน Excel */
+table.grid{font-size:12px; width:auto; min-width:100%; table-layout:auto}
+table.grid th{padding:5px 9px; background:var(--rule-2); color:var(--muted);
+  font-family:var(--mono); font-size:11px; text-align:center; border:1px solid var(--rule)}
+table.grid td{padding:5px 9px; border:1px solid var(--rule-2); white-space:nowrap; max-width:190px;
+  overflow:hidden; text-overflow:ellipsis}
+table.grid tbody th{text-align:right; position:sticky; inset-inline-start:0}
+table.grid tr.hd td{background:var(--accent-w); font-weight:600; color:var(--ink)}
 table.fs td.ind{padding-inline-start:30px; color:var(--ink-2)}
 table.fs tr.fs-h td{font-weight:600; padding-top:10px; padding-bottom:8px; background:var(--rule-2)}
 table.fs tr.fs-h2 td{font-weight:600; color:var(--ink-2); padding-top:12px; font-size:13px}
@@ -3215,14 +3224,28 @@ function parseSheetXml(xml, shared) {
   return rows.filter((r) => r.some((x) => String(x).trim() !== ''));
 }
 
+/** ไฟล์จากโปรแกรมบัญชีมักมีหลายแผ่นงาน และงบทดลองไม่ได้อยู่แผ่นแรกเสมอ
+    จึงอ่านทุกแผ่นแล้วเลือกแผ่นที่อ่านเป็นงบทดลองได้จริง */
 async function readXlsx(buf) {
   const files = await unzipEntries(buf, (n) =>
     n === 'xl/sharedStrings.xml' || /^xl\/worksheets\/sheet\d+\.xml$/.test(n));
   const dec = new TextDecoder();
-  const sheetName = Object.keys(files).filter((n) => n.indexOf('worksheets') >= 0).sort()[0];
-  if (!sheetName) throw new DomainError('NO_SHEET', 'ไม่พบแผ่นงานในไฟล์นี้');
+  const sheetNames = Object.keys(files).filter((n) => n.indexOf('worksheets') >= 0)
+    .sort((a, b) => (Number(a.replace(/\D+/g, '')) || 0) - (Number(b.replace(/\D+/g, '')) || 0));
+  if (!sheetNames.length) throw new DomainError('NO_SHEET', 'ไม่พบแผ่นงานในไฟล์นี้');
   const shared = parseSharedStrings(files['xl/sharedStrings.xml'] ? dec.decode(files['xl/sharedStrings.xml']) : null);
-  return parseSheetXml(dec.decode(files[sheetName]), shared);
+
+  let best = null;
+  sheetNames.forEach(function (n) {
+    const rows = parseSheetXml(dec.decode(files[n]), shared);
+    if (!rows.length) return;
+    const det = detectColumns(rows);
+    const score = (det.ok ? 1e9 : 0) + det.usable * 1000 + rows.length;
+    if (!best || score > best.score) best = { rows, score };
+  });
+  if (!best) throw new DomainError('EMPTY_FILE', 'ไฟล์นี้ไม่มีข้อมูล',
+    'ตรวจว่าเลือกไฟล์ที่ดาวน์โหลดมาจริง ไม่ใช่ไฟล์เปล่า');
+  return best.rows;
 }
 
 /* ---------- ตัวเลขจากไฟล์ภายนอก ---------- */
@@ -3239,31 +3262,117 @@ function parseAmount(s) {
 
 /* ---------- เดาคอลัมน์จากหัวตาราง ---------- */
 const COL_HINTS = {
-  code:   ['รหัสบัญชี', 'เลขที่บัญชี', 'รหัส', 'account code', 'code', 'accountcode'],
-  name:   ['ชื่อบัญชี', 'ชื่อ', 'account name', 'description', 'name'],
-  debit:  ['เดบิต', 'debit', 'dr'],
-  credit: ['เครดิต', 'credit', 'cr'],
+  code:   ['รหัสบัญชี', 'เลขที่บัญชี', 'เลขบัญชี', 'รหัสผังบัญชี', 'รหัส',
+           'account code', 'accountcode', 'acc code', 'gl code', 'code', 'a/c'],
+  name:   ['ชื่อบัญชี', 'ชื่อผังบัญชี', 'รายการบัญชี', 'ชื่อ',
+           'account name', 'accountname', 'account title', 'description', 'name'],
+  debit:  ['เดบิต', 'เดบิท', 'ดร.', 'debit', 'dr'],
+  credit: ['เครดิต', 'เครดิท', 'คร.', 'credit', 'cr'],
 };
+/* คำที่บอกว่าคู่เดบิต/เครดิตนี้คือ "ยอดคงเหลือปลายงวด" ซึ่งเป็นคู่ที่เราต้องการ
+   งบทดลองมักมีสามคู่: ยอดยกมา · เคลื่อนไหวระหว่างงวด · ยอดคงเหลือ */
+const BALANCE_HINTS = ['ยอดคงเหลือ', 'คงเหลือ', 'ยอดยกไป', 'ยกไป', 'ปลายงวด', 'สิ้นงวด',
+                       'balance', 'ending', 'closing', 'carryforward'];
 const norm = (s) => String(s || '').toLowerCase().replace(/\s+/g, '');
+const hitsAny = (n, list) => list.some((h) => n.indexOf(norm(h)) >= 0);
+
+/** เซลล์ที่ผสานกันใน Excel เก็บค่าไว้เฉพาะช่องซ้ายสุด ช่องที่เหลือว่าง
+    ต้องลากค่าไปทางขวาก่อน ไม่งั้นหัวกลุ่มอย่าง "ยอดคงเหลือ" จะหายไปครึ่งหนึ่ง */
+function fillRight(row, width) {
+  const out = [];
+  let last = '';
+  for (let j = 0; j < width; j++) {
+    const v = String(row[j] === undefined ? '' : row[j]).trim();
+    if (v) last = v;
+    out[j] = v || last;
+  }
+  return out;
+}
+
+/** หัวตารางอาจอยู่บรรทัดเดียว หรือกระจายสองบรรทัด (หัวกลุ่มบน หัวย่อยล่าง)
+    จึงต้องลองทั้งสองแบบ ไม่ใช่ดูทีละบรรทัดอย่างเดียว */
+function headerCandidates(rows) {
+  const out = [];
+  const n = Math.min(rows.length, 30);
+  for (let i = 0; i < n; i++) {
+    out.push({ row: i, span: 1, cells: (rows[i] || []).map((c) => String(c === undefined ? '' : c)) });
+    if (i + 1 < n) {
+      const w = Math.max((rows[i] || []).length, (rows[i + 1] || []).length);
+      const top = fillRight(rows[i] || [], w);
+      const bot = rows[i + 1] || [];
+      const merged = [];
+      for (let j = 0; j < w; j++) {
+        merged[j] = top[j] + ' ' + String(bot[j] === undefined ? '' : bot[j]);
+      }
+      out.push({ row: i + 1, span: 2, cells: merged });
+    }
+  }
+  return out;
+}
+
+function mapFromHeader(cells) {
+  const found = {}, bal = {};
+  cells.forEach(function (cell, j) {
+    const n = norm(cell);
+    if (!n) return;
+    const isBalance = hitsAny(n, BALANCE_HINTS);
+    Object.keys(COL_HINTS).forEach(function (k) {
+      if (!hitsAny(n, COL_HINTS[k])) return;
+      if (k === 'debit' || k === 'credit') {
+        found[k] = j;                                  // ไม่เจอคำว่ายอดคงเหลือ ให้เอาคู่ขวาสุด
+        if (isBalance && bal[k] === undefined) bal[k] = j;
+      } else if (found[k] === undefined) found[k] = j;
+    });
+  });
+  if (bal.debit !== undefined && bal.credit !== undefined) {
+    found.debit = bal.debit; found.credit = bal.credit;
+  }
+  /* บางรายงานไม่แยกเดบิต/เครดิต มีคอลัมน์ยอดคงเหลือคอลัมน์เดียวติดลบเป็นเครดิต
+     ให้ถือเป็นคอลัมน์เดบิตไว้ก่อน readTrialBalance จะพลิกยอดติดลบไปเครดิตให้เอง */
+  if (found.debit === undefined && found.credit === undefined) {
+    cells.forEach(function (cell, j) {
+      const n = norm(cell);
+      if (!n || found.debit !== undefined) return;
+      if (hitsAny(n, BALANCE_HINTS) || hitsAny(n, ['จำนวนเงิน', 'ยอดเงิน', 'amount'])) found.debit = j;
+    });
+  }
+  return found;
+}
+
+/** นับว่าใต้หัวตารางนี้มีบรรทัดที่อ่านเป็นบัญชีพร้อมยอดได้จริงกี่บรรทัด
+    หัวตารางที่เดาถูกจะมีบรรทัดใช้ได้เยอะ ตัวที่เดามั่วจะได้ศูนย์ */
+function countUsable(rows, map, headerRow) {
+  if (map.code === undefined && map.name === undefined) return 0;
+  if (map.debit === undefined && map.credit === undefined) return 0;
+  let n = 0;
+  rows.slice(headerRow + 1).forEach(function (r) {
+    const code = String(r[map.code] === undefined ? '' : r[map.code]).trim();
+    const name = String(r[map.name] === undefined ? '' : r[map.name]).trim();
+    if (!code && !name) return;
+    const dr = map.debit === undefined ? '0' : parseAmount(r[map.debit]);
+    const cr = map.credit === undefined ? '0' : parseAmount(r[map.credit]);
+    if (dr === null || cr === null) return;
+    if (M(dr) === 0 && M(cr) === 0) return;
+    n++;
+  });
+  return n;
+}
 
 function detectColumns(rows) {
-  let headerRow = -1, best = 0, map = {};
-  rows.slice(0, 25).forEach(function (r, i) {
-    const found = {};
-    r.forEach(function (cell, j) {
-      const n = norm(cell);
-      if (!n) return;
-      Object.keys(COL_HINTS).forEach(function (k) {
-        if (COL_HINTS[k].some((h) => n.indexOf(norm(h)) >= 0)) {
-          // งบทดลองมีเดบิต/เครดิตหลายคู่ เอาคู่ขวาสุดคือยอดคงเหลือปลายงวด
-          if (k === 'debit' || k === 'credit' || found[k] === undefined) found[k] = j;
-        }
-      });
-    });
-    const score = Object.keys(found).length;
-    if (score > best) { best = score; headerRow = i; map = found; }
+  let bestScore = -1, best = null;
+  headerCandidates(rows).forEach(function (c) {
+    const map = mapFromHeader(c.cells);
+    const keys = Object.keys(map).length;
+    if (keys < 2) return;
+    const usable = countUsable(rows, map, c.row);
+    /* จำนวนคอลัมน์ที่จับได้มาก่อน แล้วค่อยดูว่าอ่านข้อมูลจริงได้กี่บรรทัด
+       บรรทัดที่อ่านได้เป็นตัวตัดสินเวลาหัวตารางหน้าตาคล้ายกันหลายบรรทัด */
+    const score = keys * 100000 + Math.min(usable, 99999);
+    if (score > bestScore) { bestScore = score; best = { headerRow: c.row, map, keys, usable }; }
   });
-  return { headerRow, map, ok: best >= 3 };
+  if (!best) return { headerRow: 0, map: {}, keys: 0, usable: 0, ok: false };
+  return { headerRow: best.headerRow, map: best.map, keys: best.keys, usable: best.usable,
+           ok: best.keys >= 3 && best.usable > 0 };
 }
 
 /* ---------- อ่านงบทดลอง ---------- */
@@ -3272,11 +3381,14 @@ function readTrialBalance(rows, map, headerRow) {
   rows.slice(headerRow + 1).forEach(function (r, i) {
     const code = String(r[map.code] === undefined ? '' : r[map.code]).trim();
     const name = String(r[map.name] === undefined ? '' : r[map.name]).trim();
-    const dr = parseAmount(r[map.debit]);
-    const cr = parseAmount(r[map.credit]);
+    const dr = map.debit === undefined ? '0' : parseAmount(r[map.debit]);
+    const cr = map.credit === undefined ? '0' : parseAmount(r[map.credit]);
     if (!code && !name) return;
     if (dr === null || cr === null) { skipped.push({ line: headerRow + 2 + i, code, name, why: 'ตัวเลขอ่านไม่ออก' }); return; }
-    const debit = M(dr), credit = M(cr);
+    let debit = M(dr), credit = M(cr);
+    /* บางรายงานมีคอลัมน์ยอดคงเหลือคอลัมน์เดียว ติดลบแปลว่าด้านเครดิต */
+    if (debit < 0 && credit === 0) { credit = -debit; debit = 0; }
+    else if (credit < 0 && debit === 0) { debit = -credit; credit = 0; }
     if (debit === 0 && credit === 0) return;
     if (/^(รวม|total|ยอดรวม)/i.test(name) || /^(รวม|total)/i.test(code)) {
       skipped.push({ line: headerRow + 2 + i, code, name, why: 'บรรทัดผลรวม ข้ามอัตโนมัติ' });
@@ -4928,14 +5040,15 @@ function scImport() {
     title:'นำเข้าข้อมูลจากระบบบัญชีเดิม',
     sub:'รองรับไฟล์ .xlsx และ .csv ที่ส่งออกจากโปรแกรมบัญชีเดิม และแฟ้ม .json จากตัวดึงข้อมูล FlowAccount',
     body:'<div class="drop" id="drop">'
-      + '<input type="file" id="file" accept=".xlsx,.csv,.txt,.json" hidden>'
+      + '<input type="file" id="file" accept=".xlsx,.xls,.csv,.txt,.json" hidden>'
       + '<div class="drop-in">'
       + '<b>ลากไฟล์มาวางที่นี่</b>'
       + '<div class="dim">หรือ</div>'
       + btn('pick:file', 'เลือกไฟล์จากเครื่อง', 'primary')
       + '<div class="dim" style="margin-top:14px">'
-      + 'งบทดลอง — FlowAccount: รายงานด้านบัญชี → งบทดลอง → เลือกรอบระยะเวลา → ดาวน์โหลด Excel<br>'
-      + 'ผังบัญชี — บริหารบัญชี → ผังบัญชี → เพิ่มเติม → ดาวน์โหลด Excel</div>'
+      + 'งบทดลอง — FlowAccount: เมนู รายงาน → หมวด บัญชี → งบทดลอง → เลือกช่วงเวลา → ดาวน์โหลด Excel<br>'
+      + 'ผังบัญชี — เมนู บริหารบัญชี → ผังบัญชี → ปุ่ม เพิ่มเติม → ดาวน์โหลด Excel<br>'
+      + 'ไม่ต้องแก้ไฟล์ก่อน ลากไฟล์ที่ดาวน์โหลดมาได้เลย ระบบจะถามเองถ้าอ่านไม่ออก</div>'
       + '</div></div>'
       + (IMP.error ? '<div class="note warn">' + esc(IMP.error) + '</div>' : ''),
     foot:'ไฟล์ถูกอ่านในเครื่องคุณเท่านั้น ไม่ได้อัปโหลดไปที่ใด',
@@ -4959,17 +5072,72 @@ function scImport() {
 
   /* ---- อ่านไฟล์ได้แล้ว ให้เลือกคอลัมน์ ---- */
   const head = IMP.rows[IMP.headerRow] || [];
-  const colOpts = (sel) => '<option value="">— ไม่ใช้ —</option>'
-    + head.map((h, i) => '<option value="' + i + '"' + (String(i) === String(sel) ? ' selected' : '') + '>'
-        + esc((h || '').trim() || 'คอลัมน์ที่ ' + (i + 1)) + '</option>').join('');
+  const width = IMP.rows.slice(0, 40).reduce((w, r) => Math.max(w, r.length), head.length);
+  const colLetter = (i) => (i < 26 ? String.fromCharCode(65 + i)
+    : String.fromCharCode(64 + Math.floor(i / 26)) + String.fromCharCode(65 + (i % 26)));
+  /* ตัวอย่างข้อมูลจริงในคอลัมน์นั้น ช่วยให้เลือกถูกแม้หัวตารางจะว่างหรืออ่านไม่ออก */
+  const sampleOf = (i) => {
+    const r = IMP.rows.slice(IMP.headerRow + 1).find((x) => String(x[i] || '').trim() !== '');
+    const v = r ? String(r[i]).trim() : '';
+    return v.length > 18 ? v.slice(0, 18) + '…' : v;
+  };
+  const colOpts = function (sel) {
+    let h = '<option value="">— ไม่ใช้ —</option>';
+    for (let i = 0; i < width; i++) {
+      const label = String(head[i] === undefined ? '' : head[i]).trim();
+      const sample = sampleOf(i);
+      h += '<option value="' + i + '"' + (String(i) === String(sel) ? ' selected' : '') + '>'
+        + esc(colLetter(i) + ' · ' + (label || '(ไม่มีหัวคอลัมน์)')
+          + (sample ? ' — เช่น ' + sample : '')) + '</option>';
+    }
+    return h;
+  };
+  const rowOpts = function () {
+    let h = '';
+    const n = Math.min(IMP.rows.length, 30);
+    for (let i = 0; i < n; i++) {
+      const txt = IMP.rows[i].map((c) => String(c || '').trim()).filter(Boolean).join(' | ');
+      h += '<option value="' + i + '"' + (i === IMP.headerRow ? ' selected' : '') + '>'
+        + esc('แถวที่ ' + (i + 1) + ': ' + (txt.length > 60 ? txt.slice(0, 60) + '…' : txt || '(แถวว่าง)'))
+        + '</option>';
+    }
+    return h;
+  };
+  /* ตารางดิบให้เห็นหน้าตาไฟล์จริง ๆ พร้อมตัวอักษรคอลัมน์เหมือนใน Excel */
+  const rawGrid = function () {
+    const n = Math.min(IMP.rows.length, 12);
+    let h = '<div class="scroll"><table class="grid"><thead><tr><th></th>';
+    for (let i = 0; i < width; i++) h += '<th>' + colLetter(i) + '</th>';
+    h += '</tr></thead><tbody>';
+    for (let i = 0; i < n; i++) {
+      h += '<tr' + (i === IMP.headerRow ? ' class="hd"' : '') + '><th>' + (i + 1) + '</th>';
+      for (let j = 0; j < width; j++) {
+        const v = String(IMP.rows[i][j] === undefined ? '' : IMP.rows[i][j]).trim();
+        h += '<td>' + esc(v.length > 22 ? v.slice(0, 22) + '…' : v) + '</td>';
+      }
+      h += '</tr>';
+    }
+    return h + '</tbody></table></div>';
+  };
 
   const preview = IMP.tb ? previewOpening(IMP.tb.rows, IMP.overrides || {}) : null;
+  const readCount = IMP.tb ? IMP.tb.rows.length : 0;
 
   const step2 = card({
-    title:'ตรวจไฟล์ก่อนนำเข้า',
-    sub: esc(IMP.name) + ' · ' + IMP.rows.length + ' แถว · หัวตารางอยู่แถวที่ ' + (IMP.headerRow + 1),
+    title: IMP.needsMapping ? 'บอกระบบหน่อยว่าคอลัมน์ไหนคืออะไร' : 'ตรวจไฟล์ก่อนนำเข้า',
+    sub: esc(IMP.name) + ' · ' + IMP.rows.length + ' แถว · '
+      + (readCount ? 'อ่านบัญชีที่มียอดได้ ' + readCount + ' บัญชี' : 'ยังอ่านบัญชีไม่ได้'),
     actions: btn('imp:reset', 'เลือกไฟล์ใหม่'),
-    body:'<div class="flds">'
+    body:(IMP.needsMapping
+        ? '<div class="note warn">ระบบเดาหัวตารางเองไม่ได้ แต่ไม่ต้องแก้ไฟล์ '
+          + 'ดูตารางข้างล่างว่าคอลัมน์ไหนคือรหัสบัญชี ชื่อบัญชี เดบิต เครดิต '
+          + 'แล้วเลือกตัวอักษรคอลัมน์ให้ตรงกัน — เลือกเสร็จตัวเลขจะขึ้นให้ตรวจทันที</div>'
+        : '')
+      + '<div class="sub-h">หน้าตาไฟล์จริง 12 แถวแรก (แถวที่ระบายสีคือหัวตาราง)</div>'
+      + rawGrid()
+      + '<div class="flds">'
+      + '<div class="fld-w"><label for="impHeaderRow">หัวตารางอยู่แถวไหน</label>'
+        + '<select id="impHeaderRow">' + rowOpts() + '</select></div>'
       + '<div class="fld-w"><label for="c_code">คอลัมน์รหัสบัญชี</label><select id="c_code" class="impcol" data-k="code">' + colOpts(IMP.map.code) + '</select></div>'
       + '<div class="fld-w"><label for="c_name">คอลัมน์ชื่อบัญชี</label><select id="c_name" class="impcol" data-k="name">' + colOpts(IMP.map.name) + '</select></div>'
       + '<div class="fld-w"><label for="c_debit">คอลัมน์เดบิต</label><select id="c_debit" class="impcol" data-k="debit">' + colOpts(IMP.map.debit) + '</select></div>'
@@ -4985,7 +5153,7 @@ function scImport() {
             return [{mono:r.code}, r.name, {n:r.debit}, {n:r.credit},
               t ? {dim: t + ' ' + acc(t).name} : {st:['late','ยังไม่จับคู่']}];
           }),
-          empty:'อ่านบรรทัดที่มียอดไม่ได้เลย ลองเลือกคอลัมน์ใหม่',
+          empty:'ยังอ่านบรรทัดที่มียอดไม่ได้ — เลือกคอลัมน์ให้ตรงกับตารางข้างบนก่อน',
         })
       + (IMP.tb && IMP.tb.skipped.length
           ? '<div class="note">ข้ามไป ' + IMP.tb.skipped.length + ' แถว: '
@@ -5624,6 +5792,17 @@ function bindEvents() {
       if (t.files && t.files[0]) handleFile(t.files[0]);
       return;
     }
+    if (t.id === 'impHeaderRow') {
+      const I = STATE.imp;
+      if (I) {
+        I.headerRow = Number(t.value) || 0;
+        const re = detectColumns(I.rows.slice(I.headerRow));
+        /* เลือกบรรทัดหัวตารางใหม่ ให้ลองเดาคอลัมน์ใหม่จากบรรทัดนั้นด้วย */
+        if (re.keys >= 2 && re.headerRow === 0) I.map = re.map;
+        refreshImportPreview(); render();
+      }
+      return;
+    }
     if (t.classList.contains('impcol')) {
       const I = STATE.imp;
       if (I) { I.map[t.getAttribute('data-k')] = t.value === '' ? undefined : Number(t.value); refreshImportPreview(); render(); }
@@ -5842,20 +6021,23 @@ async function handleFile(file) {
       runImportPackage(pkg);
       return;
     }
+    if (lower.endsWith('.xls')) {
+      throw new DomainError('XLS_OLD_FORMAT',
+        'ไฟล์ .xls เป็นรูปแบบ Excel รุ่นเก่า ระบบอ่านไม่ได้',
+        'เปิดไฟล์ใน Excel แล้วสั่ง File → Save As เลือกชนิด "Excel Workbook (.xlsx)" หรือ "CSV" แล้วลากไฟล์ใหม่มาวาง');
+    }
     let rows;
     if (lower.endsWith('.xlsx')) rows = await readXlsx(await file.arrayBuffer());
     else rows = parseCsv(await file.text());
     if (!rows.length) throw new DomainError('EMPTY_FILE', 'ไฟล์นี้ไม่มีข้อมูล');
 
+    /* เดาหัวตารางไม่ได้ ก็ต้องไม่ตัน — พาไปหน้าจับคู่คอลัมน์ด้วยมือแทน
+       การบอกให้ผู้ใช้กลับไปแก้ไฟล์เองคือทางตันสำหรับคนที่ไม่ถนัดคอมพิวเตอร์ */
     const det = detectColumns(rows);
-    if (!det.ok) {
-      throw new DomainError('COLUMNS_NOT_FOUND',
-        'หาหัวตารางไม่เจอ ต้องมีคอลัมน์รหัสบัญชี ชื่อบัญชี เดบิต และเครดิต',
-        'ถ้าไฟล์มีหัวรายงานหลายบรรทัด ให้ลบบรรทัดบนออกแล้วบันทึกใหม่');
-    }
     STATE.imp = {
-      name: file.name, rows: rows, headerRow: det.headerRow, map: det.map,
-      overrides: {}, cutoff: null,
+      name: file.name, rows: rows,
+      headerRow: det.headerRow >= 0 ? det.headerRow : 0, map: det.map,
+      overrides: {}, cutoff: null, needsMapping: !det.ok,
     };
     refreshImportPreview();
   } catch (e) {
@@ -5869,7 +6051,10 @@ function refreshImportPreview() {
   const I = STATE.imp;
   if (!I || !I.rows) return;
   const m = I.map;
-  if (m.code === undefined || m.debit === undefined || m.credit === undefined) { I.tb = null; return; }
+  /* ต้องรู้อย่างน้อยว่าบัญชีไหน (รหัสหรือชื่อ) และยอดอยู่คอลัมน์ไหน
+     บางรายงานมีคอลัมน์ยอดคงเหลือคอลัมน์เดียว จึงไม่บังคับว่าต้องมีทั้งเดบิตและเครดิต */
+  if (m.code === undefined && m.name === undefined) { I.tb = null; return; }
+  if (m.debit === undefined && m.credit === undefined) { I.tb = null; return; }
   I.tb = readTrialBalance(I.rows, m, I.headerRow);
 }
 

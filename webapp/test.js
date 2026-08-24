@@ -1,11 +1,12 @@
 /* ทดสอบเครื่องบัญชีในเบราว์เซอร์ — รันด้วย node webapp/test.js */
 const fs = require('fs');
-const src = ['engine','operations','seed'].map(f => fs.readFileSync(__dirname + '/src/' + f + '.js','utf8')).join('\n');
+const src = ['engine','operations','seed','import'].map(f => fs.readFileSync(__dirname + '/src/' + f + '.js','utf8')).join('\n');
 const ctx = new Function(src + '\nreturn {DB,buildSeed,trialBalance,balanceSheet,incomeStatement,cashFlow,' +
   'reconciliationChecks,aging,issueInvoice,receivePayment,issueCreditNote,recordBill,payBill,' +
   'runPayroll,runDepreciation,fileVat,fileWht,post,reverse,fmt,M,validTaxId,DomainError,' +
   'closeChecklist,closePeriod,resolveRate,round2,pct,periodOf,computePit,ssoRate,divRound,buildBlank,' +
   'issueDebitNote,DN_REASONS,issueTradeDoc,setTradeDocStatus,convertTradeDoc,tradeDocStatus,' +
+  'detectColumns,readTrialBalance,parseCsv,parseAmount,' +
   'TRADE_DOCS,invOutstanding,outstandingAsOf,unM};')();
 
 let pass = 0, fail = 0;
@@ -257,6 +258,70 @@ ok('งบทดลองยังสมดุลหลังแปลงเอ�
    ctx.trialBalance('2026-01-01', '2026-12-31').balanced);
 ok('ตัวแปลงกลับค่าเงิน unM() ส่งเข้า M() แล้วได้ค่าเดิม',
    ctx.M(ctx.unM(ctx.M('12345.6789'))) === ctx.M('12345.6789'), ctx.unM(ctx.M('12345.6789')));
+
+console.log('\n=== 7.7 อ่านไฟล์งบทดลองจากโปรแกรมอื่น ===');
+/* หน้าตาไฟล์จริงที่โปรแกรมบัญชีส่งออกมา ไม่ใช่ตารางสะอาด ๆ ที่เราสมมุติเอง */
+const LAYOUTS = [
+  { name: 'หัวตารางสองบรรทัด สามคู่เดบิต/เครดิต (แบบ FlowAccount)',
+    rows: [
+      ['รายงานงบทดลอง'],
+      ['บริษัท ทดสอบ จำกัด'],
+      ['ตั้งแต่ 01/01/2569 ถึง 31/07/2569'],
+      ['รหัสบัญชี', 'ชื่อบัญชี', 'ยอดยกมา', '', 'เคลื่อนไหวระหว่างงวด', '', 'ยอดคงเหลือ', ''],
+      ['', '', 'เดบิต', 'เครดิต', 'เดบิต', 'เครดิต', 'เดบิต', 'เครดิต'],
+      ['1113', 'เงินฝากธนาคาร', '1,000.00', '', '500.00', '', '1,500.00', ''],
+      ['2121', 'เจ้าหนี้การค้า', '', '200.00', '', '300.00', '', '500.00'],
+      ['รวม', '', '1,000.00', '200.00', '500.00', '300.00', '1,500.00', '500.00'],
+    ], cols: 6 },
+  { name: 'หัวรายงาน 6 บรรทัดก่อนถึงหัวตาราง',
+    rows: [
+      ['บริษัท ทดสอบ จำกัด'], ['งบทดลอง'], ['ณ 31 กรกฎาคม 2569'], ['หน่วย: บาท'],
+      ['เลขที่บัญชี', 'ชื่อผังบัญชี', 'เดบิต', 'เครดิต'],
+      ['1113', 'เงินฝากธนาคาร', '1500.00', ''],
+      ['2121', 'เจ้าหนี้การค้า', '', '500.00'],
+    ], cols: 2 },
+  { name: 'หัวตารางภาษาอังกฤษ',
+    rows: [
+      ['Trial Balance'],
+      ['Account Code', 'Account Name', 'Debit', 'Credit'],
+      ['1113', 'Cash at bank', '1500.00', '0'],
+      ['2121', 'Trade payable', '0', '500.00'],
+    ], cols: 2 },
+  { name: 'ยอดคงเหลือคอลัมน์เดียว ติดลบคือด้านเครดิต',
+    rows: [
+      ['รหัส', 'ชื่อบัญชี', 'ยอดคงเหลือ'],
+      ['1113', 'เงินฝากธนาคาร', '1500.00'],
+      ['2121', 'เจ้าหนี้การค้า', '(500.00)'],
+    ], cols: 2 },
+];
+LAYOUTS.forEach(function (L) {
+  const rows = L.rows.filter((r) => r.some((x) => String(x).trim() !== ''));
+  const det = ctx.detectColumns(rows);
+  const tb = det.ok ? ctx.readTrialBalance(rows, det.map, det.headerRow) : { rows: [] };
+  const dr = tb.rows.reduce((a, r) => a + r.debit, 0);
+  const cr = tb.rows.reduce((a, r) => a + r.credit, 0);
+  ok('★ อ่านได้: ' + L.name,
+     det.ok && tb.rows.length === 2 && dr === ctx.M('1500') && cr === ctx.M('500'),
+     det.ok ? 'หัวแถวที่ ' + (det.headerRow + 1) + ' · เดบิต ' + ctx.fmt(dr) + ' เครดิต ' + ctx.fmt(cr)
+            : 'เดาหัวตารางไม่ได้');
+});
+/* คู่เดบิต/เครดิตมีสามคู่ ต้องหยิบคู่ยอดคงเหลือ ไม่ใช่คู่ยอดยกมา */
+const three = LAYOUTS[0].rows.filter((r) => r.some((x) => String(x).trim() !== ''));
+const detThree = ctx.detectColumns(three);
+ok('★ เลือกคู่ยอดคงเหลือปลายงวด ไม่ใช่คู่ยอดยกมา',
+   detThree.map.debit === 6 && detThree.map.credit === 7,
+   'เดบิตคอลัมน์ที่ ' + (detThree.map.debit + 1) + ' เครดิตคอลัมน์ที่ ' + (detThree.map.credit + 1));
+ok('บรรทัดผลรวมถูกข้าม ไม่ถูกนับเป็นบัญชี',
+   ctx.readTrialBalance(three, detThree.map, detThree.headerRow).skipped
+     .some((x) => x.why.indexOf('ผลรวม') >= 0));
+/* ไฟล์ที่ไม่มีหัวตารางเลย ต้องไม่ระเบิด แต่บอกว่าเดาไม่ได้ เพื่อให้หน้าจอพาไปจับคู่เอง */
+const noHead = ctx.detectColumns([['อะไรก็ไม่รู้'], ['1', '2', '3']]);
+ok('ไฟล์ที่เดาหัวตารางไม่ได้ คืนค่าให้ไปจับคู่ด้วยมือ ไม่โยนข้อผิดพลาด',
+   noHead.ok === false && typeof noHead.headerRow === 'number' && noHead.map !== null);
+ok('ตัวเลขในวงเล็บอ่านเป็นค่าติดลบ', ctx.parseAmount('(1,234.50)') === '-1234.50');
+ok('ขีดกลางอ่านเป็นศูนย์', ctx.parseAmount('-') === '0' && ctx.parseAmount('—') === '0');
+ok('ข้อความที่ไม่ใช่ตัวเลขอ่านไม่ออก ต้องบอกว่าอ่านไม่ออก ไม่ใช่เดาเป็นศูนย์',
+   ctx.parseAmount('ยกมา') === null);
 
 console.log('\n=== 8. ปิดงวด ===');
 const chk = ctx.closeChecklist('2026-06');

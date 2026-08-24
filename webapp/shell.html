@@ -221,6 +221,15 @@ tfoot td{padding:9px 12px; border-top:1.5px solid var(--rule); border-bottom:non
 table.fs td{border-bottom:none; padding:7px 14px; font-size:14px; white-space:normal}
 table.fs td.num,table.fs td:last-child{text-align:right; font-variant-numeric:tabular-nums; letter-spacing:-.01em; white-space:nowrap}
 table.fs td[colspan]{text-align:left}
+
+/* ตารางดิบตอนนำเข้าไฟล์ — ให้เห็นหน้าตาไฟล์เหมือนเปิดใน Excel */
+table.grid{font-size:12px; width:auto; min-width:100%; table-layout:auto}
+table.grid th{padding:5px 9px; background:var(--rule-2); color:var(--muted);
+  font-family:var(--mono); font-size:11px; text-align:center; border:1px solid var(--rule)}
+table.grid td{padding:5px 9px; border:1px solid var(--rule-2); white-space:nowrap; max-width:190px;
+  overflow:hidden; text-overflow:ellipsis}
+table.grid tbody th{text-align:right; position:sticky; inset-inline-start:0}
+table.grid tr.hd td{background:var(--accent-w); font-weight:600; color:var(--ink)}
 table.fs td.ind{padding-inline-start:30px; color:var(--ink-2)}
 table.fs tr.fs-h td{font-weight:600; padding-top:10px; padding-bottom:8px; background:var(--rule-2)}
 table.fs tr.fs-h2 td{font-weight:600; color:var(--ink-2); padding-top:12px; font-size:13px}

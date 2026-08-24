@@ -1253,14 +1253,15 @@ function scImport() {
     title:'นำเข้าข้อมูลจากระบบบัญชีเดิม',
     sub:'รองรับไฟล์ .xlsx และ .csv ที่ส่งออกจากโปรแกรมบัญชีเดิม และแฟ้ม .json จากตัวดึงข้อมูล FlowAccount',
     body:'<div class="drop" id="drop">'
-      + '<input type="file" id="file" accept=".xlsx,.csv,.txt,.json" hidden>'
+      + '<input type="file" id="file" accept=".xlsx,.xls,.csv,.txt,.json" hidden>'
       + '<div class="drop-in">'
       + '<b>ลากไฟล์มาวางที่นี่</b>'
       + '<div class="dim">หรือ</div>'
       + btn('pick:file', 'เลือกไฟล์จากเครื่อง', 'primary')
       + '<div class="dim" style="margin-top:14px">'
-      + 'งบทดลอง — FlowAccount: รายงานด้านบัญชี → งบทดลอง → เลือกรอบระยะเวลา → ดาวน์โหลด Excel<br>'
-      + 'ผังบัญชี — บริหารบัญชี → ผังบัญชี → เพิ่มเติม → ดาวน์โหลด Excel</div>'
+      + 'งบทดลอง — FlowAccount: เมนู รายงาน → หมวด บัญชี → งบทดลอง → เลือกช่วงเวลา → ดาวน์โหลด Excel<br>'
+      + 'ผังบัญชี — เมนู บริหารบัญชี → ผังบัญชี → ปุ่ม เพิ่มเติม → ดาวน์โหลด Excel<br>'
+      + 'ไม่ต้องแก้ไฟล์ก่อน ลากไฟล์ที่ดาวน์โหลดมาได้เลย ระบบจะถามเองถ้าอ่านไม่ออก</div>'
       + '</div></div>'
       + (IMP.error ? '<div class="note warn">' + esc(IMP.error) + '</div>' : ''),
     foot:'ไฟล์ถูกอ่านในเครื่องคุณเท่านั้น ไม่ได้อัปโหลดไปที่ใด',
@@ -1284,17 +1285,72 @@ function scImport() {
 
   /* ---- อ่านไฟล์ได้แล้ว ให้เลือกคอลัมน์ ---- */
   const head = IMP.rows[IMP.headerRow] || [];
-  const colOpts = (sel) => '<option value="">— ไม่ใช้ —</option>'
-    + head.map((h, i) => '<option value="' + i + '"' + (String(i) === String(sel) ? ' selected' : '') + '>'
-        + esc((h || '').trim() || 'คอลัมน์ที่ ' + (i + 1)) + '</option>').join('');
+  const width = IMP.rows.slice(0, 40).reduce((w, r) => Math.max(w, r.length), head.length);
+  const colLetter = (i) => (i < 26 ? String.fromCharCode(65 + i)
+    : String.fromCharCode(64 + Math.floor(i / 26)) + String.fromCharCode(65 + (i % 26)));
+  /* ตัวอย่างข้อมูลจริงในคอลัมน์นั้น ช่วยให้เลือกถูกแม้หัวตารางจะว่างหรืออ่านไม่ออก */
+  const sampleOf = (i) => {
+    const r = IMP.rows.slice(IMP.headerRow + 1).find((x) => String(x[i] || '').trim() !== '');
+    const v = r ? String(r[i]).trim() : '';
+    return v.length > 18 ? v.slice(0, 18) + '…' : v;
+  };
+  const colOpts = function (sel) {
+    let h = '<option value="">— ไม่ใช้ —</option>';
+    for (let i = 0; i < width; i++) {
+      const label = String(head[i] === undefined ? '' : head[i]).trim();
+      const sample = sampleOf(i);
+      h += '<option value="' + i + '"' + (String(i) === String(sel) ? ' selected' : '') + '>'
+        + esc(colLetter(i) + ' · ' + (label || '(ไม่มีหัวคอลัมน์)')
+          + (sample ? ' — เช่น ' + sample : '')) + '</option>';
+    }
+    return h;
+  };
+  const rowOpts = function () {
+    let h = '';
+    const n = Math.min(IMP.rows.length, 30);
+    for (let i = 0; i < n; i++) {
+      const txt = IMP.rows[i].map((c) => String(c || '').trim()).filter(Boolean).join(' | ');
+      h += '<option value="' + i + '"' + (i === IMP.headerRow ? ' selected' : '') + '>'
+        + esc('แถวที่ ' + (i + 1) + ': ' + (txt.length > 60 ? txt.slice(0, 60) + '…' : txt || '(แถวว่าง)'))
+        + '</option>';
+    }
+    return h;
+  };
+  /* ตารางดิบให้เห็นหน้าตาไฟล์จริง ๆ พร้อมตัวอักษรคอลัมน์เหมือนใน Excel */
+  const rawGrid = function () {
+    const n = Math.min(IMP.rows.length, 12);
+    let h = '<div class="scroll"><table class="grid"><thead><tr><th></th>';
+    for (let i = 0; i < width; i++) h += '<th>' + colLetter(i) + '</th>';
+    h += '</tr></thead><tbody>';
+    for (let i = 0; i < n; i++) {
+      h += '<tr' + (i === IMP.headerRow ? ' class="hd"' : '') + '><th>' + (i + 1) + '</th>';
+      for (let j = 0; j < width; j++) {
+        const v = String(IMP.rows[i][j] === undefined ? '' : IMP.rows[i][j]).trim();
+        h += '<td>' + esc(v.length > 22 ? v.slice(0, 22) + '…' : v) + '</td>';
+      }
+      h += '</tr>';
+    }
+    return h + '</tbody></table></div>';
+  };
 
   const preview = IMP.tb ? previewOpening(IMP.tb.rows, IMP.overrides || {}) : null;
+  const readCount = IMP.tb ? IMP.tb.rows.length : 0;
 
   const step2 = card({
-    title:'ตรวจไฟล์ก่อนนำเข้า',
-    sub: esc(IMP.name) + ' · ' + IMP.rows.length + ' แถว · หัวตารางอยู่แถวที่ ' + (IMP.headerRow + 1),
+    title: IMP.needsMapping ? 'บอกระบบหน่อยว่าคอลัมน์ไหนคืออะไร' : 'ตรวจไฟล์ก่อนนำเข้า',
+    sub: esc(IMP.name) + ' · ' + IMP.rows.length + ' แถว · '
+      + (readCount ? 'อ่านบัญชีที่มียอดได้ ' + readCount + ' บัญชี' : 'ยังอ่านบัญชีไม่ได้'),
     actions: btn('imp:reset', 'เลือกไฟล์ใหม่'),
-    body:'<div class="flds">'
+    body:(IMP.needsMapping
+        ? '<div class="note warn">ระบบเดาหัวตารางเองไม่ได้ แต่ไม่ต้องแก้ไฟล์ '
+          + 'ดูตารางข้างล่างว่าคอลัมน์ไหนคือรหัสบัญชี ชื่อบัญชี เดบิต เครดิต '
+          + 'แล้วเลือกตัวอักษรคอลัมน์ให้ตรงกัน — เลือกเสร็จตัวเลขจะขึ้นให้ตรวจทันที</div>'
+        : '')
+      + '<div class="sub-h">หน้าตาไฟล์จริง 12 แถวแรก (แถวที่ระบายสีคือหัวตาราง)</div>'
+      + rawGrid()
+      + '<div class="flds">'
+      + '<div class="fld-w"><label for="impHeaderRow">หัวตารางอยู่แถวไหน</label>'
+        + '<select id="impHeaderRow">' + rowOpts() + '</select></div>'
       + '<div class="fld-w"><label for="c_code">คอลัมน์รหัสบัญชี</label><select id="c_code" class="impcol" data-k="code">' + colOpts(IMP.map.code) + '</select></div>'
       + '<div class="fld-w"><label for="c_name">คอลัมน์ชื่อบัญชี</label><select id="c_name" class="impcol" data-k="name">' + colOpts(IMP.map.name) + '</select></div>'
       + '<div class="fld-w"><label for="c_debit">คอลัมน์เดบิต</label><select id="c_debit" class="impcol" data-k="debit">' + colOpts(IMP.map.debit) + '</select></div>'
@@ -1310,7 +1366,7 @@ function scImport() {
             return [{mono:r.code}, r.name, {n:r.debit}, {n:r.credit},
               t ? {dim: t + ' ' + acc(t).name} : {st:['late','ยังไม่จับคู่']}];
           }),
-          empty:'อ่านบรรทัดที่มียอดไม่ได้เลย ลองเลือกคอลัมน์ใหม่',
+          empty:'ยังอ่านบรรทัดที่มียอดไม่ได้ — เลือกคอลัมน์ให้ตรงกับตารางข้างบนก่อน',
         })
       + (IMP.tb && IMP.tb.skipped.length
           ? '<div class="note">ข้ามไป ' + IMP.tb.skipped.length + ' แถว: '

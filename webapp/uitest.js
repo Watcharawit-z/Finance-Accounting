@@ -363,8 +363,8 @@ const overflowInfo = (page) => page.evaluate(() => {
       ['3310', 'กำไรสะสมยังไม่ได้จัดสรร', '', '254570'],
     ];
     const esc2 = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
-    const sheet = '<?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>'
-      + rows.map(function (r, ri) {
+    const toSheet = (rs) => '<?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>'
+      + rs.map(function (r, ri) {
           return '<row r="' + (ri + 1) + '">' + r.map(function (c, ci) {
             if (c === '') return '';
             const ref = String.fromCharCode(65 + ci) + (ri + 1);
@@ -374,11 +374,16 @@ const overflowInfo = (page) => page.evaluate(() => {
           }).join('') + '</row>';
         }).join('')
       + '</sheetData></worksheet>';
-    const blob = zip([
-      { name: '[Content_Types].xml', text: '<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"/>' },
-      { name: 'xl/worksheets/sheet1.xml', text: sheet },
-    ]);
-    window.__xlsx = new File([blob], 'งบทดลอง.xlsx');
+    /* ทำไฟล์ .xlsx หลายแผ่นงานได้ เพื่อทดสอบไฟล์หน้าตาแบบที่โปรแกรมอื่นส่งออกมาจริง */
+    window.__mkXlsx = function (sheets, fileName) {
+      const files = [{ name: '[Content_Types].xml',
+        text: '<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"/>' }];
+      sheets.forEach(function (rs, i) {
+        files.push({ name: 'xl/worksheets/sheet' + (i + 1) + '.xml', text: toSheet(rs) });
+      });
+      return new File([zip(files)], fileName || 'ทดสอบ.xlsx');
+    };
+    window.__xlsx = window.__mkXlsx([rows], 'งบทดลอง.xlsx');
   });
   await page.evaluate(() => handleFile(window.__xlsx));
   await page.waitForTimeout(400);
@@ -417,6 +422,90 @@ const overflowInfo = (page) => page.evaluate(() => {
   await page.waitForTimeout(300);
   ok('★ ตั้งยอดยกมาวันเดิมซ้ำถูกปฏิเสธ', await page.evaluate(() =>
     DB.entries.length === 1 && document.getElementById('toast').className.indexOf('err') >= 0));
+
+  /* ---- ไฟล์หน้าตาแบบที่โปรแกรมบัญชีส่งออกมาจริง ต้องไม่ตัน ---- */
+  console.log('\n[13.1] ไฟล์งบทดลองหน้าตาแปลก ๆ ต้องนำเข้าได้');
+  await page.evaluate(() => {
+    /* แผ่นแรกเป็นหน้าปกเปล่า ๆ งบทดลองอยู่แผ่นที่สอง และหัวตารางกินสองบรรทัด */
+    const cover = [['บริษัท ทดสอบ จำกัด'], ['รายงานประจำเดือน']];
+    const tb = [
+      ['รายงานงบทดลอง'],
+      ['ตั้งแต่ 01/01/2569 ถึง 31/07/2569'],
+      ['รหัสบัญชี', 'ชื่อบัญชี', 'ยอดยกมา', '', 'เคลื่อนไหวระหว่างงวด', '', 'ยอดคงเหลือ', ''],
+      ['', '', 'เดบิต', 'เครดิต', 'เดบิต', 'เครดิต', 'เดบิต', 'เครดิต'],
+      ['1113', 'เงินฝากธนาคาร–กระแสรายวัน', '900000', '', '300000', '', '1200000', ''],
+      ['1131', 'ลูกหนี้การค้า–ในประเทศ', '100000', '', '48730', '', '148730', ''],
+      ['2121', 'เจ้าหนี้การค้า–ในประเทศ', '', '80000', '', '14160', '', '94160'],
+      ['3120', 'ทุนที่ออกและชำระแล้ว', '', '1000000', '', '', '', '1000000'],
+      ['3310', 'กำไรสะสมยังไม่ได้จัดสรร', '', '200000', '', '54570', '', '254570'],
+      ['รวมทั้งสิ้น', '', '1000000', '1280000', '348730', '68730', '1348730', '1348730'],
+    ];
+    window.__xlsx2 = window.__mkXlsx([cover, tb], 'งบทดลอง-หัวสองบรรทัด.xlsx');
+  });
+  await page.evaluate(() => { STATE.screen = 'import'; STATE.imp = null; render(); });
+  await page.evaluate(() => handleFile(window.__xlsx2));
+  await page.waitForTimeout(400);
+  const hard = await page.evaluate(() => ({
+    err: STATE.imp && STATE.imp.error,
+    needsMapping: STATE.imp && STATE.imp.needsMapping,
+    header: STATE.imp && STATE.imp.headerRow,
+    map: STATE.imp && STATE.imp.map,
+    tb: STATE.imp && STATE.imp.tb ? STATE.imp.tb.rows.length : 0,
+    dr: STATE.imp && STATE.imp.tb ? STATE.imp.tb.rows.reduce((s, r) => s + r.debit, 0) : 0,
+    cr: STATE.imp && STATE.imp.tb ? STATE.imp.tb.rows.reduce((s, r) => s + r.credit, 0) : 0,
+  }));
+  ok('★ หัวตารางกินสองบรรทัดก็อ่านออก ไม่ต้องให้ผู้ใช้ไปแก้ไฟล์',
+    !hard.err && !hard.needsMapping && hard.tb === 5,
+    hard.err || 'หัวแถวที่ ' + (hard.header + 1) + ' · อ่านได้ ' + hard.tb + ' บัญชี');
+  ok('★ หยิบคู่ยอดคงเหลือปลายงวด ไม่ใช่คู่ยอดยกมา',
+    hard.map.debit === 6 && hard.map.credit === 7 && hard.dr === hard.cr && hard.dr === 13487300000,
+    'เดบิต ' + fmtT(hard.dr) + ' เครดิต ' + fmtT(hard.cr));
+  ok('งบทดลองอยู่แผ่นงานที่สองก็หาเจอ', hard.tb === 5);
+
+  /* ---- ไฟล์ที่เดาหัวตารางไม่ได้เลย ต้องพาไปจับคู่คอลัมน์เอง ไม่ใช่ขึ้นข้อความแล้วจบ ---- */
+  await page.evaluate(() => {
+    window.__xlsx3 = window.__mkXlsx([[
+      ['ผังบัญชีและยอด'],
+      ['ลำดับ', 'บช.', 'รายละเอียด', 'ยกมา', 'สิ้นงวด'],
+      ['1', '1113', 'เงินฝากธนาคาร–กระแสรายวัน', '900000', '1200000'],
+      ['2', '2121', 'เจ้าหนี้การค้า–ในประเทศ', '-80000', '-1200000'],
+    ]], 'ไฟล์หัวตารางแปลก.xlsx');
+  });
+  await page.evaluate(() => { STATE.screen = 'import'; STATE.imp = null; render(); });
+  await page.evaluate(() => handleFile(window.__xlsx3));
+  await page.waitForTimeout(400);
+  const odd = await page.evaluate(() => ({
+    err: STATE.imp && STATE.imp.error,
+    needsMapping: STATE.imp && STATE.imp.needsMapping,
+    rows: STATE.imp && STATE.imp.rows ? STATE.imp.rows.length : 0,
+  }));
+  ok('★ ไฟล์ที่เดาไม่ออกไม่ขึ้นข้อความผิดพลาดแล้วจบ แต่พาไปจับคู่คอลัมน์',
+    !odd.err && odd.needsMapping === true && odd.rows === 4, odd.err || odd.rows + ' แถว');
+  ok('มีตารางให้ดูหน้าตาไฟล์จริง', await page.$('#main table.grid') !== null);
+  ok('มีช่องให้เลือกว่าหัวตารางอยู่แถวไหน', await page.$('#impHeaderRow') !== null);
+  ok('มีช่องเลือกคอลัมน์ครบทั้งสี่',
+    (await page.$$('#main select.impcol')).length === 4);
+
+  /* ผู้ใช้เลือกเอง: บช. = รหัส, รายละเอียด = ชื่อ, สิ้นงวด = ยอด (ติดลบคือเครดิต) */
+  await page.selectOption('#impHeaderRow', '1');
+  await page.waitForTimeout(150);
+  await page.selectOption('#c_code', '1');
+  await page.waitForTimeout(120);
+  await page.selectOption('#c_name', '2');
+  await page.waitForTimeout(120);
+  await page.selectOption('#c_debit', '4');
+  await page.waitForTimeout(120);
+  await page.selectOption('#c_credit', '');
+  await page.waitForTimeout(200);
+  const fixed = await page.evaluate(() => ({
+    tb: STATE.imp.tb ? STATE.imp.tb.rows.length : 0,
+    dr: STATE.imp.tb ? STATE.imp.tb.rows.reduce((s, r) => s + r.debit, 0) : 0,
+    cr: STATE.imp.tb ? STATE.imp.tb.rows.reduce((s, r) => s + r.credit, 0) : 0,
+  }));
+  ok('★ เลือกคอลัมน์เองแล้วอ่านตัวเลขได้ทันที', fixed.tb === 2,
+    'อ่านได้ ' + fixed.tb + ' บัญชี · เดบิต ' + fmtT(fixed.dr) + ' เครดิต ' + fmtT(fixed.cr));
+  ok('คอลัมน์ยอดคงเหลือคอลัมน์เดียว ยอดติดลบไปอยู่ด้านเครดิตให้เอง',
+    fixed.dr === 12000000000 && fixed.cr === 12000000000);
 
   console.log('\n[14] สามบริษัทในเครื่องเดียว ข้อมูลต้องไม่ปนกัน');
   await page.evaluate(() => { STATE.screen = 'dashboard'; render(); });

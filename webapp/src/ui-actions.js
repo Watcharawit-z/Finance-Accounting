@@ -547,6 +547,17 @@ function bindEvents() {
       if (t.files && t.files[0]) handleFile(t.files[0]);
       return;
     }
+    if (t.id === 'impHeaderRow') {
+      const I = STATE.imp;
+      if (I) {
+        I.headerRow = Number(t.value) || 0;
+        const re = detectColumns(I.rows.slice(I.headerRow));
+        /* เลือกบรรทัดหัวตารางใหม่ ให้ลองเดาคอลัมน์ใหม่จากบรรทัดนั้นด้วย */
+        if (re.keys >= 2 && re.headerRow === 0) I.map = re.map;
+        refreshImportPreview(); render();
+      }
+      return;
+    }
     if (t.classList.contains('impcol')) {
       const I = STATE.imp;
       if (I) { I.map[t.getAttribute('data-k')] = t.value === '' ? undefined : Number(t.value); refreshImportPreview(); render(); }
@@ -765,20 +776,23 @@ async function handleFile(file) {
       runImportPackage(pkg);
       return;
     }
+    if (lower.endsWith('.xls')) {
+      throw new DomainError('XLS_OLD_FORMAT',
+        'ไฟล์ .xls เป็นรูปแบบ Excel รุ่นเก่า ระบบอ่านไม่ได้',
+        'เปิดไฟล์ใน Excel แล้วสั่ง File → Save As เลือกชนิด "Excel Workbook (.xlsx)" หรือ "CSV" แล้วลากไฟล์ใหม่มาวาง');
+    }
     let rows;
     if (lower.endsWith('.xlsx')) rows = await readXlsx(await file.arrayBuffer());
     else rows = parseCsv(await file.text());
     if (!rows.length) throw new DomainError('EMPTY_FILE', 'ไฟล์นี้ไม่มีข้อมูล');
 
+    /* เดาหัวตารางไม่ได้ ก็ต้องไม่ตัน — พาไปหน้าจับคู่คอลัมน์ด้วยมือแทน
+       การบอกให้ผู้ใช้กลับไปแก้ไฟล์เองคือทางตันสำหรับคนที่ไม่ถนัดคอมพิวเตอร์ */
     const det = detectColumns(rows);
-    if (!det.ok) {
-      throw new DomainError('COLUMNS_NOT_FOUND',
-        'หาหัวตารางไม่เจอ ต้องมีคอลัมน์รหัสบัญชี ชื่อบัญชี เดบิต และเครดิต',
-        'ถ้าไฟล์มีหัวรายงานหลายบรรทัด ให้ลบบรรทัดบนออกแล้วบันทึกใหม่');
-    }
     STATE.imp = {
-      name: file.name, rows: rows, headerRow: det.headerRow, map: det.map,
-      overrides: {}, cutoff: null,
+      name: file.name, rows: rows,
+      headerRow: det.headerRow >= 0 ? det.headerRow : 0, map: det.map,
+      overrides: {}, cutoff: null, needsMapping: !det.ok,
     };
     refreshImportPreview();
   } catch (e) {
@@ -792,7 +806,10 @@ function refreshImportPreview() {
   const I = STATE.imp;
   if (!I || !I.rows) return;
   const m = I.map;
-  if (m.code === undefined || m.debit === undefined || m.credit === undefined) { I.tb = null; return; }
+  /* ต้องรู้อย่างน้อยว่าบัญชีไหน (รหัสหรือชื่อ) และยอดอยู่คอลัมน์ไหน
+     บางรายงานมีคอลัมน์ยอดคงเหลือคอลัมน์เดียว จึงไม่บังคับว่าต้องมีทั้งเดบิตและเครดิต */
+  if (m.code === undefined && m.name === undefined) { I.tb = null; return; }
+  if (m.debit === undefined && m.credit === undefined) { I.tb = null; return; }
   I.tb = readTrialBalance(I.rows, m, I.headerRow);
 }
 

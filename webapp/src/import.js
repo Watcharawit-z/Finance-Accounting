@@ -111,14 +111,28 @@ function parseSheetXml(xml, shared) {
   return rows.filter((r) => r.some((x) => String(x).trim() !== ''));
 }
 
+/** ไฟล์จากโปรแกรมบัญชีมักมีหลายแผ่นงาน และงบทดลองไม่ได้อยู่แผ่นแรกเสมอ
+    จึงอ่านทุกแผ่นแล้วเลือกแผ่นที่อ่านเป็นงบทดลองได้จริง */
 async function readXlsx(buf) {
   const files = await unzipEntries(buf, (n) =>
     n === 'xl/sharedStrings.xml' || /^xl\/worksheets\/sheet\d+\.xml$/.test(n));
   const dec = new TextDecoder();
-  const sheetName = Object.keys(files).filter((n) => n.indexOf('worksheets') >= 0).sort()[0];
-  if (!sheetName) throw new DomainError('NO_SHEET', 'ไม่พบแผ่นงานในไฟล์นี้');
+  const sheetNames = Object.keys(files).filter((n) => n.indexOf('worksheets') >= 0)
+    .sort((a, b) => (Number(a.replace(/\D+/g, '')) || 0) - (Number(b.replace(/\D+/g, '')) || 0));
+  if (!sheetNames.length) throw new DomainError('NO_SHEET', 'ไม่พบแผ่นงานในไฟล์นี้');
   const shared = parseSharedStrings(files['xl/sharedStrings.xml'] ? dec.decode(files['xl/sharedStrings.xml']) : null);
-  return parseSheetXml(dec.decode(files[sheetName]), shared);
+
+  let best = null;
+  sheetNames.forEach(function (n) {
+    const rows = parseSheetXml(dec.decode(files[n]), shared);
+    if (!rows.length) return;
+    const det = detectColumns(rows);
+    const score = (det.ok ? 1e9 : 0) + det.usable * 1000 + rows.length;
+    if (!best || score > best.score) best = { rows, score };
+  });
+  if (!best) throw new DomainError('EMPTY_FILE', 'ไฟล์นี้ไม่มีข้อมูล',
+    'ตรวจว่าเลือกไฟล์ที่ดาวน์โหลดมาจริง ไม่ใช่ไฟล์เปล่า');
+  return best.rows;
 }
 
 /* ---------- ตัวเลขจากไฟล์ภายนอก ---------- */
@@ -135,31 +149,117 @@ function parseAmount(s) {
 
 /* ---------- เดาคอลัมน์จากหัวตาราง ---------- */
 const COL_HINTS = {
-  code:   ['รหัสบัญชี', 'เลขที่บัญชี', 'รหัส', 'account code', 'code', 'accountcode'],
-  name:   ['ชื่อบัญชี', 'ชื่อ', 'account name', 'description', 'name'],
-  debit:  ['เดบิต', 'debit', 'dr'],
-  credit: ['เครดิต', 'credit', 'cr'],
+  code:   ['รหัสบัญชี', 'เลขที่บัญชี', 'เลขบัญชี', 'รหัสผังบัญชี', 'รหัส',
+           'account code', 'accountcode', 'acc code', 'gl code', 'code', 'a/c'],
+  name:   ['ชื่อบัญชี', 'ชื่อผังบัญชี', 'รายการบัญชี', 'ชื่อ',
+           'account name', 'accountname', 'account title', 'description', 'name'],
+  debit:  ['เดบิต', 'เดบิท', 'ดร.', 'debit', 'dr'],
+  credit: ['เครดิต', 'เครดิท', 'คร.', 'credit', 'cr'],
 };
+/* คำที่บอกว่าคู่เดบิต/เครดิตนี้คือ "ยอดคงเหลือปลายงวด" ซึ่งเป็นคู่ที่เราต้องการ
+   งบทดลองมักมีสามคู่: ยอดยกมา · เคลื่อนไหวระหว่างงวด · ยอดคงเหลือ */
+const BALANCE_HINTS = ['ยอดคงเหลือ', 'คงเหลือ', 'ยอดยกไป', 'ยกไป', 'ปลายงวด', 'สิ้นงวด',
+                       'balance', 'ending', 'closing', 'carryforward'];
 const norm = (s) => String(s || '').toLowerCase().replace(/\s+/g, '');
+const hitsAny = (n, list) => list.some((h) => n.indexOf(norm(h)) >= 0);
+
+/** เซลล์ที่ผสานกันใน Excel เก็บค่าไว้เฉพาะช่องซ้ายสุด ช่องที่เหลือว่าง
+    ต้องลากค่าไปทางขวาก่อน ไม่งั้นหัวกลุ่มอย่าง "ยอดคงเหลือ" จะหายไปครึ่งหนึ่ง */
+function fillRight(row, width) {
+  const out = [];
+  let last = '';
+  for (let j = 0; j < width; j++) {
+    const v = String(row[j] === undefined ? '' : row[j]).trim();
+    if (v) last = v;
+    out[j] = v || last;
+  }
+  return out;
+}
+
+/** หัวตารางอาจอยู่บรรทัดเดียว หรือกระจายสองบรรทัด (หัวกลุ่มบน หัวย่อยล่าง)
+    จึงต้องลองทั้งสองแบบ ไม่ใช่ดูทีละบรรทัดอย่างเดียว */
+function headerCandidates(rows) {
+  const out = [];
+  const n = Math.min(rows.length, 30);
+  for (let i = 0; i < n; i++) {
+    out.push({ row: i, span: 1, cells: (rows[i] || []).map((c) => String(c === undefined ? '' : c)) });
+    if (i + 1 < n) {
+      const w = Math.max((rows[i] || []).length, (rows[i + 1] || []).length);
+      const top = fillRight(rows[i] || [], w);
+      const bot = rows[i + 1] || [];
+      const merged = [];
+      for (let j = 0; j < w; j++) {
+        merged[j] = top[j] + ' ' + String(bot[j] === undefined ? '' : bot[j]);
+      }
+      out.push({ row: i + 1, span: 2, cells: merged });
+    }
+  }
+  return out;
+}
+
+function mapFromHeader(cells) {
+  const found = {}, bal = {};
+  cells.forEach(function (cell, j) {
+    const n = norm(cell);
+    if (!n) return;
+    const isBalance = hitsAny(n, BALANCE_HINTS);
+    Object.keys(COL_HINTS).forEach(function (k) {
+      if (!hitsAny(n, COL_HINTS[k])) return;
+      if (k === 'debit' || k === 'credit') {
+        found[k] = j;                                  // ไม่เจอคำว่ายอดคงเหลือ ให้เอาคู่ขวาสุด
+        if (isBalance && bal[k] === undefined) bal[k] = j;
+      } else if (found[k] === undefined) found[k] = j;
+    });
+  });
+  if (bal.debit !== undefined && bal.credit !== undefined) {
+    found.debit = bal.debit; found.credit = bal.credit;
+  }
+  /* บางรายงานไม่แยกเดบิต/เครดิต มีคอลัมน์ยอดคงเหลือคอลัมน์เดียวติดลบเป็นเครดิต
+     ให้ถือเป็นคอลัมน์เดบิตไว้ก่อน readTrialBalance จะพลิกยอดติดลบไปเครดิตให้เอง */
+  if (found.debit === undefined && found.credit === undefined) {
+    cells.forEach(function (cell, j) {
+      const n = norm(cell);
+      if (!n || found.debit !== undefined) return;
+      if (hitsAny(n, BALANCE_HINTS) || hitsAny(n, ['จำนวนเงิน', 'ยอดเงิน', 'amount'])) found.debit = j;
+    });
+  }
+  return found;
+}
+
+/** นับว่าใต้หัวตารางนี้มีบรรทัดที่อ่านเป็นบัญชีพร้อมยอดได้จริงกี่บรรทัด
+    หัวตารางที่เดาถูกจะมีบรรทัดใช้ได้เยอะ ตัวที่เดามั่วจะได้ศูนย์ */
+function countUsable(rows, map, headerRow) {
+  if (map.code === undefined && map.name === undefined) return 0;
+  if (map.debit === undefined && map.credit === undefined) return 0;
+  let n = 0;
+  rows.slice(headerRow + 1).forEach(function (r) {
+    const code = String(r[map.code] === undefined ? '' : r[map.code]).trim();
+    const name = String(r[map.name] === undefined ? '' : r[map.name]).trim();
+    if (!code && !name) return;
+    const dr = map.debit === undefined ? '0' : parseAmount(r[map.debit]);
+    const cr = map.credit === undefined ? '0' : parseAmount(r[map.credit]);
+    if (dr === null || cr === null) return;
+    if (M(dr) === 0 && M(cr) === 0) return;
+    n++;
+  });
+  return n;
+}
 
 function detectColumns(rows) {
-  let headerRow = -1, best = 0, map = {};
-  rows.slice(0, 25).forEach(function (r, i) {
-    const found = {};
-    r.forEach(function (cell, j) {
-      const n = norm(cell);
-      if (!n) return;
-      Object.keys(COL_HINTS).forEach(function (k) {
-        if (COL_HINTS[k].some((h) => n.indexOf(norm(h)) >= 0)) {
-          // งบทดลองมีเดบิต/เครดิตหลายคู่ เอาคู่ขวาสุดคือยอดคงเหลือปลายงวด
-          if (k === 'debit' || k === 'credit' || found[k] === undefined) found[k] = j;
-        }
-      });
-    });
-    const score = Object.keys(found).length;
-    if (score > best) { best = score; headerRow = i; map = found; }
+  let bestScore = -1, best = null;
+  headerCandidates(rows).forEach(function (c) {
+    const map = mapFromHeader(c.cells);
+    const keys = Object.keys(map).length;
+    if (keys < 2) return;
+    const usable = countUsable(rows, map, c.row);
+    /* จำนวนคอลัมน์ที่จับได้มาก่อน แล้วค่อยดูว่าอ่านข้อมูลจริงได้กี่บรรทัด
+       บรรทัดที่อ่านได้เป็นตัวตัดสินเวลาหัวตารางหน้าตาคล้ายกันหลายบรรทัด */
+    const score = keys * 100000 + Math.min(usable, 99999);
+    if (score > bestScore) { bestScore = score; best = { headerRow: c.row, map, keys, usable }; }
   });
-  return { headerRow, map, ok: best >= 3 };
+  if (!best) return { headerRow: 0, map: {}, keys: 0, usable: 0, ok: false };
+  return { headerRow: best.headerRow, map: best.map, keys: best.keys, usable: best.usable,
+           ok: best.keys >= 3 && best.usable > 0 };
 }
 
 /* ---------- อ่านงบทดลอง ---------- */
@@ -168,11 +268,14 @@ function readTrialBalance(rows, map, headerRow) {
   rows.slice(headerRow + 1).forEach(function (r, i) {
     const code = String(r[map.code] === undefined ? '' : r[map.code]).trim();
     const name = String(r[map.name] === undefined ? '' : r[map.name]).trim();
-    const dr = parseAmount(r[map.debit]);
-    const cr = parseAmount(r[map.credit]);
+    const dr = map.debit === undefined ? '0' : parseAmount(r[map.debit]);
+    const cr = map.credit === undefined ? '0' : parseAmount(r[map.credit]);
     if (!code && !name) return;
     if (dr === null || cr === null) { skipped.push({ line: headerRow + 2 + i, code, name, why: 'ตัวเลขอ่านไม่ออก' }); return; }
-    const debit = M(dr), credit = M(cr);
+    let debit = M(dr), credit = M(cr);
+    /* บางรายงานมีคอลัมน์ยอดคงเหลือคอลัมน์เดียว ติดลบแปลว่าด้านเครดิต */
+    if (debit < 0 && credit === 0) { credit = -debit; debit = 0; }
+    else if (credit < 0 && debit === 0) { debit = -credit; credit = 0; }
     if (debit === 0 && credit === 0) return;
     if (/^(รวม|total|ยอดรวม)/i.test(name) || /^(รวม|total)/i.test(code)) {
       skipped.push({ line: headerRow + 2 + i, code, name, why: 'บรรทัดผลรวม ข้ามอัตโนมัติ' });
