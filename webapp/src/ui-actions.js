@@ -144,6 +144,35 @@ function modalCreditNote(no) {
   });
 }
 
+/* ---------- ยกเลิกการนำเข้า ---------- */
+function modalUndoImport(no) {
+  const im = listImports().find((x) => x.no === no);
+  if (!im) return;
+  modal({
+    title:'ยกเลิกการนำเข้า ' + no,
+    sub: (im.kind === 'movement' ? 'ยอดเคลื่อนไหว ' + thPeriod(im.key) : 'ยอดยกมา')
+      + ' · ' + im.lines + ' บัญชี · รวม ' + fmt(im.total) + ' บาท',
+    body:'<div class="prose"><p>ระบบจะสร้างใบสำคัญ<b>กลับรายการ</b>คู่กับใบเดิม '
+      + 'ไม่ได้ลบใบเดิมทิ้ง ตาม พ.ร.บ.การบัญชี มาตรา 20 '
+      + 'หลังจากนี้ยอดจะกลับไปเหมือนก่อนนำเข้า และนำเข้าไฟล์ใหม่ทับได้เลย</p>'
+      + '<p class="dim">บัญชีที่ระบบสร้างไว้ตอนนำเข้ายังอยู่ในผังบัญชี ยอดเป็นศูนย์ '
+      + 'ไม่ต้องลบ เพราะไฟล์ที่นำเข้าใหม่จะใช้รหัสเดียวกัน</p></div>'
+      + '<div class="flds">'
+      + field({ name:'reason', label:'เหตุผล (ผู้สอบบัญชีจะเห็นข้อความนี้)', wide:true,
+          value:'นำเข้าผิดชุดตัวเลข ต้องนำเข้าใหม่ให้ถูกต้อง' })
+      + '</div>',
+    submitLabel:'ยกเลิกการนำเข้า',
+    onSubmit: function () {
+      submitAction(function () {
+        const rev = reverseImport(no, val('reason'));
+        STATE.screen = 'import'; STATE.imp = null;
+        toast('ยกเลิกการนำเข้า ' + no + ' แล้ว', 'ok', 'ใบกลับรายการ ' + rev.no);
+        return rev;
+      });
+    },
+  });
+}
+
 function modalDebitNote(no) {
   const inv = DB.docs.invoice.find((d) => d.no === no);
   if (!inv) return;
@@ -426,17 +455,23 @@ function dispatch(act) {
       const I = STATE.imp;
       if (!I || !I.tb) return;
       runAction(function () {
-        const r = importOpeningBalances(I.tb.rows, val('cutoff') || pStart(), I.overrides || {});
+        const movement = I.mode === 'movement';
+        const period = I.period || STATE.period;
+        const asOf = movement ? endOfMonth(period + '-01') : (val('cutoff') || pStart());
+        const r = movement
+          ? importPeriodMovement(I.tb.rows, period, I.overrides || {})
+          : importOpeningBalances(I.tb.rows, asOf, I.overrides || {});
+        const rec = reconciliationChecks(asOf);
         STATE.impResult = {
-          cutoff: val('cutoff') || pStart(), source: 'ไฟล์ ' + I.name,
+          cutoff: asOf, source: 'ไฟล์ ' + I.name, mode: I.mode || 'opening', period: period,
           partners: 0, partnersSeen: 0, items: 0, itemsSeen: 0, invoices: 0, bills: 0,
-          opening: r, warnings: [],
-          checks: reconciliationChecks(val('cutoff') || pStart()).checks,
-          allPassed: reconciliationChecks(val('cutoff') || pStart()).allPassed,
+          opening: r, warnings: [], checks: rec.checks, allPassed: rec.allPassed,
         };
         STATE.screen = 'importResult';
         STATE.imp = null;
-        toast('ตั้งยอดยกมา ' + r.accounts + ' บัญชีแล้ว', 'ok', 'ใบสำคัญ ' + r.entry.no);
+        toast(movement
+          ? 'ลงยอดเคลื่อนไหวงวด ' + thPeriod(period) + ' แล้ว'
+          : 'ตั้งยอดยกมา ' + r.accounts + ' บัญชีแล้ว', 'ok', 'ใบสำคัญ ' + r.entry.no);
       });
     }
     return;
@@ -462,6 +497,7 @@ function dispatch(act) {
     return;
   }
   if (head === 'pay')     { modalReceive(arg); return; }
+  if (head === 'impundo') { modalUndoImport(arg); return; }
   if (head === 'cn')      { modalCreditNote(arg); return; }
   if (head === 'dn')      { modalDebitNote(arg); return; }
   if (head === 'trade') {
@@ -545,6 +581,39 @@ function bindEvents() {
     if (t.id === 'accSel')    { STATE.drill = t.value; render(); return; }
     if (t.id === 'file') {
       if (t.files && t.files[0]) handleFile(t.files[0]);
+      return;
+    }
+    if (t.id === 'impMode') {
+      const I = STATE.imp;
+      if (I) {
+        I.mode = t.value;
+        /* สลับไปแบบยอดเคลื่อนไหว ให้เด้งไปชุด "ยอดประจำงวด" ให้เลย
+           ถ้าปล่อยค้างที่ชุดยอดสะสม ตัวเลขจะถูกนับซ้ำกับเดือนก่อนโดยไม่รู้ตัว */
+        if (I.mode === 'movement') {
+          const mv = (I.pairs || []).find((p) => !/สะสม|คงเหลือ|balance/i.test(p.label)
+            && !/ยกมา|opening/i.test(p.label));
+          if (mv) { I.map.debit = mv.debit; I.map.credit = mv.credit; }
+          if (!I.period) I.period = STATE.period;
+        } else {
+          const bal = (I.pairs || []).find((p) => /สะสม|คงเหลือ|balance/i.test(p.label));
+          if (bal) { I.map.debit = bal.debit; I.map.credit = bal.credit; }
+        }
+        refreshImportPreview(); render();
+      }
+      return;
+    }
+    if (t.id === 'impPair') {
+      const I = STATE.imp;
+      if (I) {
+        const pr = (I.pairs || [])[Number(t.value)];
+        if (pr) { I.map.debit = pr.debit; I.map.credit = pr.credit; refreshImportPreview(); }
+        render();
+      }
+      return;
+    }
+    if (t.name === 'impPeriod') {
+      const I = STATE.imp;
+      if (I) { I.period = t.value; render(); }
       return;
     }
     if (t.id === 'impHeaderRow') {
@@ -793,6 +862,7 @@ async function handleFile(file) {
     STATE.imp = {
       name: file.name, rows: rows,
       headerRow: det.headerRow >= 0 ? det.headerRow : 0, map: det.map,
+      pairs: det.pairs || [], mode: 'opening', period: null,
       overrides: {}, cutoff: null, needsMapping: !det.ok && kind === 'trialBalance',
       kind: kind,
     };

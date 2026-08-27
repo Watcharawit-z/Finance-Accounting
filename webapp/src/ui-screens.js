@@ -1281,7 +1281,26 @@ function scImport() {
     foot:'ข้อมูลเดิมทั้งหมดจะหายถาวร ระบบจะถามยืนยันอีกครั้งก่อนทำ',
   });
 
-  if (!IMP.rows) return step1 + blank;
+  /* ประวัติการนำเข้า — ต้องเห็นและย้อนกลับได้ ไม่งั้นนำเข้าผิดแล้วไปต่อไม่ถูก */
+  const past = listImports();
+  const history = past.length ? card({
+    title:'สิ่งที่นำเข้าไปแล้ว',
+    sub:'นำเข้าผิดก็ยกเลิกได้ ระบบจะกลับรายการให้ตามกฎหมาย แล้วนำเข้าใหม่ได้ทันที',
+    body: tbl({
+      cols:[{t:'ใบสำคัญ'},{t:'วันที่'},{t:'นำเข้าเป็น'},{t:'จำนวนบัญชี',a:'r'},{t:'ยอดรวม',a:'r'},{t:'สถานะ'},{t:''}],
+      rows: past.map((im) => [{mono:im.no}, thDateNum(im.date),
+        im.kind === 'movement' ? 'ยอดเคลื่อนไหว ' + thPeriod(im.key) : 'ยอดยกมา',
+        {c:String(im.lines)}, {n:im.total},
+        im.status === 'reversed' ? {st:['late','ยกเลิกแล้ว']} : {st:['paid','ใช้งานอยู่']},
+        im.status === 'reversed'
+          ? {dim:'กลับรายการด้วย ' + im.reversedBy}
+          : {html: btn('impundo:' + im.no, 'ยกเลิกการนำเข้านี้')}]),
+    }),
+    foot:'การยกเลิกไม่ได้ลบใบเดิมทิ้ง แต่สร้างใบกลับรายการคู่กัน ตาม พ.ร.บ.การบัญชี มาตรา 20 '
+      + 'บัญชีที่สร้างไว้จากการนำเข้ายังอยู่ในผังบัญชี ยอดเป็นศูนย์ ใช้ต่อได้เลย',
+  }) : '';
+
+  if (!IMP.rows) return step1 + history + blank;
 
   /* ---- ไฟล์ไม่ใช่งบทดลอง บอกให้ชัดว่าไฟล์ไหนที่ต้องใช้ ---- */
   if (IMP.kind === 'ledger' || IMP.kind === 'chart') {
@@ -1305,7 +1324,7 @@ function scImport() {
             : '<p class="dim">ไม่ต้องนำผังบัญชีเข้ามาเอง ระบบสร้างบัญชีตามรหัสเดิมให้อัตโนมัติ'
               + 'ตอนนำเข้างบทดลองอยู่แล้ว</p>')
         + '</div>',
-    }) + blank;
+    }) + history + blank;
   }
 
   /* ---- อ่านไฟล์ได้แล้ว ให้เลือกคอลัมน์ ---- */
@@ -1360,6 +1379,23 @@ function scImport() {
 
   const preview = IMP.tb ? previewOpening(IMP.tb.rows, IMP.overrides || {}) : null;
   const readCount = IMP.tb ? IMP.tb.rows.length : 0;
+  const mode = IMP.mode || 'opening';
+  const pairs = IMP.pairs || [];
+  const curPair = pairs.find((pr) => pr.debit === IMP.map.debit && pr.credit === IMP.map.credit);
+  /* คำเตือนที่ตรงกับสิ่งที่ผู้ใช้กำลังจะทำ ไม่ใช่คำอธิบายรวม ๆ ที่อ่านแล้วยังไม่รู้ว่าต้องทำอะไร */
+  const looksCumulative = !!(curPair && /สะสม|คงเหลือ|balance/i.test(curPair.label));
+  const modeNote = mode === 'movement'
+    ? '<div class="note' + (looksCumulative ? ' warn' : '') + '">'
+      + (looksCumulative
+          ? '<b>ชุดที่เลือกอยู่คือยอดสะสม ไม่ใช่ยอดของเดือนเดียว</b> ถ้าลงเป็นยอดเคลื่อนไหว '
+            + 'ตัวเลขจะถูกนับซ้ำกับเดือนก่อนหน้า — ให้เลือกชุด <b>ยอดประจำงวด</b> แทน'
+          : 'ไฟล์ที่ใช้ต้องเป็นงบทดลองที่ดึงมา<b>เฉพาะเดือนนั้นเดือนเดียว</b> '
+            + '(ตั้งช่วงเวลาใน FlowAccount เป็นวันที่ 1 ถึงวันสิ้นเดือน) ถ้าใช้ไฟล์รายปี '
+            + 'ตัวเลขทั้งปีจะไปกองอยู่เดือนเดียว')
+      + '</div>'
+    : '<div class="note">ยอดยกมาลงใบสำคัญ<b>ใบเดียว</b> ณ วันตัดยอด ใช้ชุด<b>ยอดสะสมหรือยอดคงเหลือ</b> '
+      + 'เหมาะกับการเริ่มใช้ระบบ ถ้าอยากให้งบกำไรขาดทุน<b>รายเดือน</b>ของปีนี้ถูกต้องด้วย '
+      + 'ให้เปลี่ยนเป็นแบบยอดเคลื่อนไหวแล้วนำเข้าเดือนละไฟล์</div>';
 
   const step2 = card({
     title: IMP.needsMapping ? 'บอกระบบหน่อยว่าคอลัมน์ไหนคืออะไร' : 'ตรวจไฟล์ก่อนนำเข้า',
@@ -1374,15 +1410,44 @@ function scImport() {
       + '<div class="sub-h">หน้าตาไฟล์จริง 12 แถวแรก (แถวที่ระบายสีคือหัวตาราง)</div>'
       + rawGrid()
       + '<div class="flds">'
+      + '<div class="fld-w"><label for="impMode">จะนำตัวเลขชุดนี้เข้าเป็นอะไร</label>'
+        + '<select id="impMode">'
+        + '<option value="opening"' + (mode === 'opening' ? ' selected' : '') + '>'
+          + 'ยอดยกมา — ตั้งต้นครั้งเดียว ณ วันตัดยอด</option>'
+        + '<option value="movement"' + (mode === 'movement' ? ' selected' : '') + '>'
+          + 'ยอดเคลื่อนไหวของเดือนเดียว — ลงเดือนละไฟล์</option>'
+        + '</select></div>'
+      + (pairs.length > 1
+          ? '<div class="fld-w"><label for="impPair">ใช้ตัวเลขชุดไหนในไฟล์</label>'
+            + '<select id="impPair">'
+            + pairs.map((pr, i) => '<option value="' + i + '"'
+                + (pr.debit === IMP.map.debit && pr.credit === IMP.map.credit ? ' selected' : '') + '>'
+                + esc(pr.label) + ' (คอลัมน์ ' + colLetter(pr.debit) + '/' + colLetter(pr.credit) + ')'
+                + '</option>').join('')
+            + '</select></div>'
+          : '')
+      + (mode === 'movement'
+          ? field({ name:'impPeriod', label:'ตัวเลขชุดนี้เป็นของเดือนไหน', type:'select',
+              value: IMP.period || STATE.period,
+              options: DB.periods.map((pd) => [pd.code, thPeriod(pd.code)
+                + (pd.status === 'open' ? '' : ' (ปิดแล้ว)')]),
+              hint:'ระบบจะลงใบสำคัญวันสิ้นเดือนของเดือนนี้' })
+          : field({ name:'cutoff', label:'วันตัดยอด (ยอดยกมาจะลงบัญชีวันนี้)', type:'date',
+              value: IMP.cutoff || pStart(), hint:'ต้องอยู่ในงวดที่ยังเปิดอยู่' }))
+      + '</div>'
+      /* เดาไม่ออกหรืออ่านไม่ได้สักบรรทัด ต้องกางช่องเลือกคอลัมน์ให้เห็นทันที
+         ไม่ใช่ซ่อนไว้ใต้หัวข้อที่ผู้ใช้ไม่รู้ว่าต้องกด */
+      + '<details class="adv"' + (IMP.needsMapping || !readCount ? ' open' : '')
+      + '><summary>เลือกคอลัมน์เองทีละช่อง (ปกติไม่ต้องแตะ)</summary>'
+      + '<div class="flds">'
       + '<div class="fld-w"><label for="impHeaderRow">หัวตารางอยู่แถวไหน</label>'
         + '<select id="impHeaderRow">' + rowOpts() + '</select></div>'
       + '<div class="fld-w"><label for="c_code">คอลัมน์รหัสบัญชี</label><select id="c_code" class="impcol" data-k="code">' + colOpts(IMP.map.code) + '</select></div>'
       + '<div class="fld-w"><label for="c_name">คอลัมน์ชื่อบัญชี</label><select id="c_name" class="impcol" data-k="name">' + colOpts(IMP.map.name) + '</select></div>'
       + '<div class="fld-w"><label for="c_debit">คอลัมน์เดบิต</label><select id="c_debit" class="impcol" data-k="debit">' + colOpts(IMP.map.debit) + '</select></div>'
       + '<div class="fld-w"><label for="c_credit">คอลัมน์เครดิต</label><select id="c_credit" class="impcol" data-k="credit">' + colOpts(IMP.map.credit) + '</select></div>'
-      + field({ name:'cutoff', label:'วันตัดยอด (ยอดยกมาจะลงบัญชีวันนี้)', type:'date',
-          value: IMP.cutoff || pStart(), hint:'ต้องอยู่ในงวดที่ยังเปิดอยู่' })
-      + '</div>'
+      + '</div></details>'
+      + modeNote
       + '<div class="sub-h">ตัวอย่าง 8 แถวแรกที่อ่านได้</div>'
       + tbl({
           cols:[{t:'รหัส'},{t:'ชื่อบัญชี'},{t:'เดบิต',a:'r'},{t:'เครดิต',a:'r'},{t:'จับคู่กับ'}],
@@ -1400,7 +1465,7 @@ function scImport() {
           : ''),
   });
 
-  if (!preview) return step1 + step2 + blank;
+  if (!preview) return step1 + step2 + history + blank;
 
   /* ตัวเลือกบรรทัดงบสำหรับบัญชีที่จะสร้างใหม่ จัดกลุ่มตามบรรทัดงบให้เลือกง่าย */
   const fsOpts = (function () {
@@ -1426,8 +1491,11 @@ function scImport() {
 
   const step3 = card({
     title:'สรุปสิ่งที่จะเกิดขึ้น',
-    sub:'ยังไม่มีอะไรถูกบันทึกจนกว่าจะกดปุ่มนำเข้า',
-    actions: btn('imp:run', 'นำเข้ายอดยกมา', preview.ready ? 'primary' : 'disabled'),
+    sub: mode === 'movement'
+      ? 'จะลงใบสำคัญของงวด ' + thPeriod(IMP.period || STATE.period) + ' หนึ่งใบ'
+      : 'ยังไม่มีอะไรถูกบันทึกจนกว่าจะกดปุ่มนำเข้า',
+    actions: btn('imp:run', mode === 'movement' ? 'ลงยอดเคลื่อนไหวของเดือนนี้' : 'นำเข้ายอดยกมา',
+      preview.ready ? 'primary' : 'disabled'),
     body:'<div class="reco">'
       + '<div><span>บัญชีที่ตรงกับผังของระบบ</span><b>' + preview.matched.length + ' บัญชี</b></div>'
       + '<div><span>บัญชีที่จะสร้างใหม่ตามรหัสเดิม</span><b>' + preview.creating.length + ' บัญชี</b></div>'
@@ -1465,7 +1533,7 @@ function scImport() {
       : 'ยังนำเข้าไม่ได้ — ' + (!preview.balanced ? 'งบทดลองไม่สมดุล' : 'ยังจับคู่บัญชีไม่ครบ'),
   });
 
-  return step1 + step2 + step3 + blank;
+  return step1 + step2 + step3 + history + blank;
 }
 
 function scImportResult() {

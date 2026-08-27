@@ -72,6 +72,11 @@ table.two{width:100%;border-collapse:separate;border-spacing:9px 0;margin-top:6p
 table.two td{border:1.5px solid #E1E6EB;border-radius:6px;padding:12px 14px;width:50%;vertical-align:top}
 .tag{display:block;font-size:9.5pt;color:#6E7376;margin-bottom:3px;letter-spacing:.04em}
 table.two p{font-size:10.5pt;color:#6E7376;margin:3px 0 0}
+table.two.pick td{width:50%}
+table.two.pick td>b{font-size:12.5pt;display:block;margin-bottom:5px}
+table.two.pick p{color:#3A424E;font-size:10.5pt;margin:5px 0 0}
+table.two.pick p b{font-weight:600}
+table.two.pick p.why{color:#6E7376;margin-top:6px}
 
 /* ถาม-ตอบ */
 .qa{margin-bottom:13px;border-left:3px solid #C9CFD6;padding-left:13px}

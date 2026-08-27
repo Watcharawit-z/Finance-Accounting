@@ -8,6 +8,7 @@ const ctx = new Function(src + '\nreturn {DB,buildSeed,trialBalance,balanceSheet
   'issueDebitNote,DN_REASONS,issueTradeDoc,setTradeDocStatus,convertTradeDoc,tradeDocStatus,' +
   'detectColumns,readTrialBalance,parseCsv,parseAmount,detectFileKind,' +
   'inferSubType,proposeAccount,previewOpening,importOpeningBalances,subTypeType,' +
+  'importPeriodMovement,listImports,reverseImport,endOfMonth,' +
   'DBD_SUBTYPE,BS_LINES,PL_LINES,balBySub,' +
   'TRADE_DOCS,invOutstanding,outstandingAsOf,unM};')();
 
@@ -342,17 +343,17 @@ const FA_TB = [
    '', '1149.1300000000001', '', '', '1149.1300000000001'],
   ['11511', 'สินค้าสำเร็จรูปคงเหลือ', '', '230777.7', '', '', '24561.2', '186671.9',
    '', '68667', '', '', '68667'],
-  ['17140', 'ลูกหนี้สรรพากร', '', '', '', '', '11261.56', '11261.56',
+  ['17140', 'ลูกหนี้สรรพากร', '', '', '', '', '11261.63', '11261.56',
    '', '7.0000000000000007E-2', '', '', '0.07'],
   ['21311', 'เจ้าหนี้การค้า - ทั่วไป', '', '', '80000', '', '14160', '',
    '', '', '65840', '', '-65840'],
-  ['34998', 'กำไร (ขาดทุน) สะสม - รายงาน', '', '', '160517.7', '', '', '',
+  ['34998', 'กำไร (ขาดทุน) สะสม - รายงาน', '', '', '160517.63', '', '156401.37', '',
    '', '', '4116.26', '', '-4116.26'],
   ['41110', 'รายได้จากการขายสินค้า', '', '', '', '', '', '260000',
    '', '', '260000', '', '-260000'],
   ['51140', 'ต้นทุนขายสินค้า', '', '', '', '', '260140.06', '',
    '', '260140.06', '', '', '260140.06'],
-  ['', 'รวมทั้งสิ้น', '', '240517.63', '240517.70', '', '2075824.77', '2232226.21',
+  ['', 'รวมทั้งสิ้น', '', '240517.63', '240517.63', '', '2232226.21', '2232226.21',
    '', '329956.26', '329956.26', '', '0'],
 ];
 const faRows = FA_TB.filter((r) => r.some((x) => String(x).trim() !== ''));
@@ -421,6 +422,53 @@ ok('★ งบแสดงฐานะการเงินสมดุล ไ�
 const faArChk = ctx.reconciliationChecks('2026-12-31').checks.find((c) => c.code === 'AP_SUBLEDGER');
 ok('ยกยอดรวมเจ้าหนี้มาแต่ยังไม่มีใบค้าง ระบบอธิบายให้ ไม่ใช่ขึ้นแดงเฉย ๆ',
    !faArChk.ok && !!faArChk.why, faArChk.why || '');
+const faVatChk = ctx.reconciliationChecks('2026-12-31').checks.find((c) => c.code === 'OUTPUT_VAT');
+ok('ยอดที่ยกมาจากระบบเดิมไม่ถูกเอาไปเทียบกับทะเบียนภาษี เพราะไม่มีเอกสารรองรับ', faVatChk.ok);
+
+console.log('\n=== 10. ยกเลิกการนำเข้า แล้วนำเข้าใหม่แบบรายเดือน ===');
+/* น้องบัญชีนำงบทดลองรายปีเข้าเป็นยอดยกมา ตัวเลขทั้งปีจึงไปกองอยู่เดือนเดียว
+   ต้องยกเลิกได้ แล้วนำเข้าใหม่แบบยอดเคลื่อนไหวรายเดือน */
+const imp1 = ctx.listImports();
+ok('เห็นรายการนำเข้าที่ทำไปแล้ว', imp1.length === 1 && imp1[0].status === 'posted'
+   && imp1[0].kind === 'opening', imp1.length + ' รายการ');
+const plBefore = ctx.incomeStatement('2026-12-01', '2026-12-31');
+ok('ตัวเลขทั้งปีไปกองอยู่เดือนเดียวจริง ๆ ตามที่ผู้ใช้เจอ', plBefore.net !== 0, ctx.fmt(plBefore.net));
+
+const undo = ctx.reverseImport(imp1[0].no, 'นำเข้าผิดชุด ต้องนำเข้าใหม่แบบรายเดือน');
+ok('★ ยกเลิกแล้วยอดกลับไปเป็นศูนย์ทั้งงบ',
+   ctx.balanceSheet('2026-12-31').assets === 0
+   && ctx.incomeStatement('2026-12-01', '2026-12-31').net === 0);
+ok('ใบเดิมไม่ถูกลบทิ้ง แต่ถูกทำเครื่องหมายกลับรายการ ตาม พ.ร.บ.การบัญชี ม.20',
+   ctx.listImports()[0].status === 'reversed' && ctx.listImports()[0].reversedBy === undo.no);
+ok('งบทดลองยังสมดุลหลังยกเลิก', ctx.trialBalance('2026-01-01', '2026-12-31').balanced);
+ok('บัญชีที่สร้างไว้ตอนนำเข้ายังอยู่ ไม่ต้องสร้างใหม่',
+   ctx.DB.accounts.some((a) => a.code === '11122.01' && a.imported));
+
+/* ยอดเคลื่อนไหวของเดือน — ใช้คอลัมน์ยอดประจำงวด ลงวันสิ้นเดือนที่เลือก */
+const movRows = ctx.readTrialBalance(faRows, { code:0, name:1, debit:6, credit:7 }, faDet.headerRow);
+const movDr = movRows.rows.reduce((a, r) => a + r.debit, 0);
+const movCr = movRows.rows.reduce((a, r) => a + r.credit, 0);
+ok('ชุดยอดประจำงวดก็สมดุลเหมือนกัน', movDr === movCr, ctx.fmt(movDr));
+const mov = ctx.importPeriodMovement(movRows.rows, '2026-11', {});
+ok('★ ยอดเคลื่อนไหวลงใบสำคัญวันสิ้นเดือนที่เลือก',
+   mov.entry.date === ctx.endOfMonth('2026-11-01') && mov.entry.type === 'general',
+   mov.entry.no + ' ลงวันที่ ' + mov.entry.date);
+ok('ยอดเคลื่อนไหวเข้างบกำไรขาดทุนของเดือนนั้น ไม่ใช่เดือนอื่น',
+   ctx.incomeStatement('2026-11-01', '2026-11-30').net !== 0
+   && ctx.incomeStatement('2026-12-01', '2026-12-31').net === 0);
+ok('งบทดลองยังสมดุล', ctx.trialBalance('2026-01-01', '2026-12-31').balanced);
+throws('นำเข้ายอดเคลื่อนไหวเดือนเดิมซ้ำ',
+  () => ctx.importPeriodMovement(movRows.rows, '2026-11', {}), 'ALREADY_IMPORTED');
+throws('ไม่เลือกเดือนก็ลงไม่ได้',
+  () => ctx.importPeriodMovement(movRows.rows, '', {}), 'PERIOD_REQUIRED');
+ok('รายการนำเข้าทั้งสองแบบขึ้นในประวัติครบ',
+   ctx.listImports().length === 2
+   && ctx.listImports().some((i) => i.kind === 'movement' && i.key === '2026-11'));
+
+/* ยกเลิกแล้วต้องนำเข้าซ้ำวันเดิมได้ ไม่ถูกกันว่าซ้ำ */
+const again = ctx.importOpeningBalances(faTb.rows, '2026-12-31', {});
+ok('★ ยกเลิกแล้วนำเข้าวันเดิมใหม่ได้ ไม่ติดว่าซ้ำ', !!again.entry.no, again.entry.no);
+ok('คราวนี้ไม่ต้องสร้างบัญชีใหม่แล้ว เพราะรหัสเดิมอยู่ในผังแล้ว', again.created === 0);
 
 /* ไฟล์บัญชีแยกประเภทต้องไม่ถูกนับเป็นงบทดลอง */
 const LEDGER = [

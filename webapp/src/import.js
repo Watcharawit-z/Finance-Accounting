@@ -228,8 +228,17 @@ function bestKeyFor(text) {
   return key;
 }
 
+/** ชื่อชุดตัวเลข เอาจากหัวกลุ่มที่อยู่เหนือคำว่าเดบิต/เครดิต เช่น "ยอดยกมา" */
+function pairLabel(text) {
+  let t = String(text || '');
+  ['เดบิต', 'เดบิท', 'debit', 'dr', 'เครดิต', 'เครดิท', 'credit', 'cr']
+    .forEach(function (w) { t = t.replace(new RegExp(w, 'gi'), ' '); });
+  return t.replace(/\s+/g, ' ').trim();
+}
+
 function mapFromHeader(cells) {
   const found = {}, bal = {};
+  const drCols = [], crCols = [];
   cells.forEach(function (cell, j) {
     const n = norm(cell);
     if (!n) return;
@@ -238,9 +247,17 @@ function mapFromHeader(cells) {
     if (!k) return;
     if (k === 'debit' || k === 'credit') {
       found[k] = j;                                    // ไม่เจอคำว่ายอดคงเหลือ ให้เอาคู่ขวาสุด
+      (k === 'debit' ? drCols : crCols).push({ col: j, label: pairLabel(cell) });
       if (isBalance && bal[k] === undefined) bal[k] = j;
     } else if (found[k] === undefined) found[k] = j;
   });
+  /* งบทดลองมักมีหลายชุด (ยอดยกมา / ยอดประจำงวด / ยอดสะสม) เก็บไว้ให้ผู้ใช้เลือกได้
+     ว่าจะตั้งยอดยกมาจากชุดไหน หรือจะลงยอดเคลื่อนไหวของเดือนจากชุดประจำงวด */
+  found.pairs = [];
+  for (let i = 0; i < Math.min(drCols.length, crCols.length); i++) {
+    found.pairs.push({ debit: drCols[i].col, credit: crCols[i].col,
+      label: drCols[i].label || crCols[i].label || ('ชุดที่ ' + (i + 1)) });
+  }
   if (bal.debit !== undefined && bal.credit !== undefined) {
     found.debit = bal.debit; found.credit = bal.credit;
   }
@@ -275,11 +292,14 @@ function countUsable(rows, map, headerRow) {
   return n;
 }
 
+const COL_KEYS = ['code', 'name', 'debit', 'credit'];
+const countKeys = (map) => COL_KEYS.filter((k) => map[k] !== undefined).length;
+
 function detectColumns(rows) {
   let bestScore = -1, best = null;
   headerCandidates(rows).forEach(function (c) {
     const map = mapFromHeader(c.cells);
-    const keys = Object.keys(map).length;
+    const keys = countKeys(map);
     if (keys < 2) return;
     const usable = countUsable(rows, map, c.row);
     /* จำนวนคอลัมน์ที่จับได้มาก่อน แล้วค่อยดูว่าอ่านข้อมูลจริงได้กี่บรรทัด
@@ -289,9 +309,9 @@ function detectColumns(rows) {
   });
   if (!best) return { headerRow: 0, map: {}, keys: 0, usable: 0, ok: false };
   inferNameColumn(rows, best.map, best.headerRow);
-  const keys = Object.keys(best.map).length;
+  const keys = countKeys(best.map);
   return { headerRow: best.headerRow, map: best.map, keys, usable: best.usable,
-           ok: keys >= 3 && best.usable > 0 };
+           pairs: best.map.pairs || [], ok: keys >= 3 && best.usable > 0 };
 }
 
 /** งบทดลองบางฉบับใส่หัวคอลัมน์ไว้แค่ "บัญชี" ช่องเดียว ช่องชื่อบัญชีข้าง ๆ ไม่มีหัว
@@ -551,28 +571,40 @@ function previewOpening(tbRows, overrides) {
   };
 }
 
-function importOpeningBalances(tbRows, date, overrides) {
+/* ===================================================================
+   นำตัวเลขจากงบทดลองเข้าระบบ — มีสองแบบ อย่าสับกัน
+   1. ยอดยกมา (opening)  ใช้คอลัมน์ยอดคงเหลือ/ยอดสะสม ลงใบสำคัญใบเดียว ณ วันตัดยอด
+      เหมาะกับการเริ่มใช้ระบบ ไม่สนใจว่ารายได้ค่าใช้จ่ายเกิดเดือนไหน
+   2. ยอดเคลื่อนไหวรายเดือน (movement)  ใช้คอลัมน์ยอดประจำงวด ลงใบสำคัญเดือนละใบ
+      เหมาะกับการย้ายปีปัจจุบันเข้ามาให้งบกำไรขาดทุนรายเดือนถูกต้อง
+      ต้องโหลดงบทดลองแยกเดือนละไฟล์ ไม่ใช่ไฟล์รายปีไฟล์เดียว
+   =================================================================== */
+function importedEntry(srcId) {
+  return DB.entries.find((e) => e.src === 'import' && e.srcId === srcId && e.status === 'posted');
+}
+
+function runImport(tbRows, overrides, o) {
   const p = previewOpening(tbRows, overrides);
   if (!p.matched.length && !p.creating.length && !p.unmatched.length) {
     throw new DomainError('NOTHING_TO_IMPORT', 'ไม่พบบรรทัดที่มียอดในไฟล์นี้');
   }
   if (!p.balanced) {
     throw new DomainError('IMPORT_UNBALANCED',
-      'งบทดลองในไฟล์ไม่สมดุล เดบิตรวม ' + fmt(p.totalDr) + ' เครดิตรวม ' + fmt(p.totalCr)
+      'ตัวเลขในไฟล์ไม่สมดุล เดบิตรวม ' + fmt(p.totalDr) + ' เครดิตรวม ' + fmt(p.totalCr)
         + ' ต่างกัน ' + fmt(p.diff),
-      'ตรวจว่าเลือกคอลัมน์เดบิตและเครดิตถูกคู่ และไฟล์ครอบคลุมทุกบัญชี');
+      'ตรวจว่าเลือกชุดตัวเลขถูกชุด — งบทดลองมักมีทั้งยอดยกมา ยอดประจำงวด และยอดสะสม');
   }
   if (p.unmatched.length) {
     throw new DomainError('ACCOUNT_UNMATCHED',
       'ยังจับคู่บัญชีไม่ครบ เหลือ ' + p.unmatched.length + ' บัญชี',
       'เลือกบัญชีปลายทางให้ครบทุกบรรทัดก่อนนำเข้า');
   }
-  const srcId = 'opening|' + date;
-  if (DB.entries.find((e) => e.src === 'import' && e.srcId === srcId)) {
-    throw new DomainError('ALREADY_IMPORTED',
-      'นำเข้ายอดยกมา ณ ' + thDate(date) + ' ไปแล้ว',
-      'ถ้าต้องการนำเข้าใหม่ ให้กลับรายการใบสำคัญเดิมก่อน');
+  /* ใบที่กลับรายการไปแล้วไม่นับว่าซ้ำ ไม่งั้นยกเลิกแล้วนำเข้าใหม่ไม่ได้ */
+  if (importedEntry(o.srcId)) {
+    throw new DomainError('ALREADY_IMPORTED', o.dupMessage,
+      'ถ้าต้องการนำเข้าใหม่ ให้กดยกเลิกการนำเข้าครั้งนั้นก่อน');
   }
+
   /* สร้างบัญชีที่ยังไม่มีในผังก่อน โดยใช้รหัสและชื่อเดิมของระบบเก่า
      ทำหลังผ่านการตรวจทุกข้อแล้วเท่านั้น จะได้ไม่ทิ้งบัญชีค้างไว้เวลานำเข้าไม่ผ่าน */
   const created = [];
@@ -604,14 +636,59 @@ function importOpeningBalances(tbRows, date, overrides) {
       branch:'00000', entityType:'juristic', kind:'customer', termDays:0, active:false });
   }
   const je = post({
-    type: 'opening', date: date,
-    desc: 'ยอดยกมาจากระบบเดิม ณ ' + thDate(date),
-    src: 'import', srcId: srcId,
+    type: o.type, date: o.date, desc: o.desc,
+    src: 'import', srcId: o.srcId,
     lines: lines,
   });
-  audit('import', srcId, 'run', null,
+  audit('import', o.srcId, 'run', null,
     { accounts: lines.length, created: created.length, total: fmt(p.totalDr) });
   return { entry: je, accounts: lines.length, created: created.length, total: p.totalDr };
+}
+
+/** ยอดยกมา — ใบสำคัญใบเดียว ณ วันตัดยอด */
+function importOpeningBalances(tbRows, date, overrides) {
+  return runImport(tbRows, overrides, {
+    date: date, type: 'opening', srcId: 'opening|' + date,
+    desc: 'ยอดยกมาจากระบบเดิม ณ ' + thDate(date),
+    dupMessage: 'นำเข้ายอดยกมา ณ ' + thDate(date) + ' ไปแล้ว',
+  });
+}
+
+/** ยอดเคลื่อนไหวของเดือนหนึ่ง — ใบสำคัญเดือนละใบ ลงวันสิ้นเดือน */
+function importPeriodMovement(tbRows, period, overrides) {
+  if (!/^\d{4}-\d{2}$/.test(String(period || ''))) {
+    throw new DomainError('PERIOD_REQUIRED', 'ต้องเลือกเดือนของยอดเคลื่อนไหวก่อน');
+  }
+  const date = endOfMonth(period + '-01');
+  return runImport(tbRows, overrides, {
+    date: date, type: 'general', srcId: 'movement|' + period,
+    desc: 'ยอดเคลื่อนไหวจากระบบเดิม งวด ' + thPeriod(period),
+    dupMessage: 'นำเข้ายอดเคลื่อนไหวงวด ' + thPeriod(period) + ' ไปแล้ว',
+  });
+}
+
+/** รายการนำเข้าทั้งหมดที่เคยทำ พร้อมสถานะ เพื่อให้ย้อนกลับได้ */
+function listImports() {
+  return DB.entries.filter((e) => e.src === 'import').map(function (e) {
+    const kind = String(e.srcId || '').split('|')[0];
+    return {
+      no: e.no, date: e.date, desc: e.desc, status: e.status,
+      kind: kind === 'movement' ? 'movement' : 'opening',
+      key: String(e.srcId || '').split('|')[1] || '',
+      lines: e.lines.length,
+      total: e.lines.reduce((s, l) => s + (l.dr || 0), 0),
+      reversedBy: e.reversedBy || null,
+    };
+  });
+}
+
+/** ยกเลิกการนำเข้า — กลับรายการตามกฎหมาย ไม่ลบทิ้ง แล้วนำเข้าใหม่ได้ */
+function reverseImport(entryNo, reason) {
+  const e = DB.entries.find((x) => x.no === entryNo);
+  if (!e || e.src !== 'import') {
+    throw new DomainError('NOT_AN_IMPORT', 'ใบสำคัญ ' + entryNo + ' ไม่ใช่รายการที่มาจากการนำเข้า');
+  }
+  return reverse(entryNo, reason || 'ยกเลิกการนำเข้าเพื่อนำเข้าใหม่ให้ถูกต้อง', e.date);
 }
 
 /* ===================================================================

@@ -585,6 +585,63 @@ const overflowInfo = (page) => page.evaluate(() => {
   ok('บอกด้วยว่าต้องไปเอาไฟล์ไหนมาแทน',
     (await page.$eval('#main', (e) => e.textContent)).indexOf('งบทดลอง') >= 0);
 
+  /* ---- นำเข้าผิดแล้วต้องยกเลิกได้ แล้วนำเข้าใหม่แบบรายเดือน ---- */
+  console.log('\n[13.2] ยกเลิกการนำเข้าแล้วนำเข้าใหม่');
+  await page.evaluate(() => { STATE.screen = 'import'; STATE.imp = null; render(); });
+  await page.waitForTimeout(200);
+  const hist = await page.evaluate(() => listImports().filter((i) => i.status === 'posted'));
+  ok('หน้านำเข้ามีรายการที่นำเข้าไปแล้วให้เห็น', hist.length >= 1 && (await 1),
+    hist.length + ' รายการ');
+  ok('มีปุ่มยกเลิกการนำเข้าให้กด',
+    (await page.$('[data-act="impundo:' + hist[hist.length - 1].no + '"]')) !== null);
+
+  const undoNo = hist[hist.length - 1].no;
+  const beforeUndo = await page.evaluate((n) => ({
+    entries: DB.entries.length,
+    total: DB.entries.find((e) => e.no === n).lines.reduce((s, l) => s + (l.dr || 0), 0),
+  }), undoNo);
+  await page.click('[data-act="impundo:' + undoNo + '"]');
+  await page.waitForSelector('#modal.show');
+  await page.click('[data-act="modal:submit"]');
+  await closed(page);
+  const afterUndo = await page.evaluate((n) => {
+    const im = listImports().find((i) => i.no === n);
+    return { status: im.status, reversedBy: im.reversedBy,
+      entries: DB.entries.length,
+      balanced: trialBalance('2026-01-01', '2026-12-31').balanced,
+      stillHasAccounts: DB.accounts.some((a) => a.imported) };
+  }, undoNo);
+  ok('★ ยกเลิกการนำเข้าแล้วระบบสร้างใบกลับรายการให้ ไม่ได้ลบใบเดิมทิ้ง',
+    afterUndo.status === 'reversed' && !!afterUndo.reversedBy
+    && afterUndo.entries === beforeUndo.entries + 1, 'ใบกลับรายการ ' + afterUndo.reversedBy);
+  ok('งบทดลองยังสมดุลหลังยกเลิก', afterUndo.balanced);
+  ok('บัญชีที่สร้างไว้ตอนนำเข้ายังอยู่ ไม่ต้องสร้างใหม่', afterUndo.stillHasAccounts);
+
+  /* สลับไปโหมดยอดเคลื่อนไหว ต้องเด้งไปชุดยอดประจำงวดให้เอง */
+  await page.evaluate(() => { STATE.screen = 'import'; STATE.imp = null; render(); });
+  await page.evaluate(() => handleFile(window.__xlsxFa));
+  await page.waitForTimeout(500);
+  const pairsSeen = await page.evaluate(() => STATE.imp.pairs.map((p) => p.label));
+  ok('★ ระบบอ่านออกว่าไฟล์มีตัวเลขกี่ชุด และชุดไหนคืออะไร',
+    pairsSeen.join(' · ') === 'ยอดยกมา · ยอดประจำงวด · ยอดสะสม', pairsSeen.join(' · '));
+  const defPair = await page.evaluate(() => ({ d: STATE.imp.map.debit, c: STATE.imp.map.credit }));
+  ok('ค่าเริ่มต้นคือชุดยอดสะสม เพราะเป็นยอดคงเหลือปลายงวด',
+    defPair.d === 9 && defPair.c === 10);
+  await page.selectOption('#impMode', 'movement');
+  await page.waitForTimeout(300);
+  const movPair = await page.evaluate(() => ({ d: STATE.imp.map.debit, c: STATE.imp.map.credit,
+    mode: STATE.imp.mode }));
+  ok('★ เลือกโหมดยอดเคลื่อนไหว ระบบเด้งไปชุดยอดประจำงวดให้เอง',
+    movPair.mode === 'movement' && movPair.d === 6 && movPair.c === 7,
+    'คอลัมน์ที่ ' + (movPair.d + 1) + '/' + (movPair.c + 1));
+  ok('มีช่องให้เลือกว่าเป็นยอดของเดือนไหน', (await page.$('[name="impPeriod"]')) !== null);
+  ok('มีคำเตือนว่าต้องใช้ไฟล์ของเดือนนั้นเดือนเดียว',
+    (await page.$eval('#main', (e) => e.textContent)).indexOf('เดือนนั้นเดือนเดียว') >= 0);
+  await page.selectOption('#impMode', 'opening');
+  await page.waitForTimeout(300);
+  ok('สลับกลับเป็นยอดยกมา ระบบเด้งกลับไปชุดยอดสะสม',
+    (await page.evaluate(() => STATE.imp.map.debit)) === 9);
+
   console.log('\n[14] สามบริษัทในเครื่องเดียว ข้อมูลต้องไม่ปนกัน');
   await page.evaluate(() => { STATE.screen = 'dashboard'; render(); });
   await page.waitForTimeout(150);

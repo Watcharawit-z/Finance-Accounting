@@ -628,7 +628,9 @@ function reconciliationChecks(asOf) {
   //   - ไม่รวมยอดยกมาจากระบบเดิม เพราะเป็นยอดสะสมก่อนเริ่มใช้ระบบ ไม่มีเอกสารในทะเบียนภาษีรองรับ
   const period = periodOf(asOf);
   const start = period + '-01', end = endOfMonth(start);
-  const notFiling = (e) => e.src !== 'filing' && e.type !== 'opening';
+  /* ไม่รวมใบสำคัญที่ยกยอดมาจากระบบเดิม ทั้งยอดยกมาและยอดเคลื่อนไหวรายเดือน
+     เพราะไม่มีเอกสารในทะเบียนภาษีรองรับ ถ้านับด้วยการเทียบจะไม่มีวันตรง */
+  const notFiling = (e) => e.src !== 'filing' && e.src !== 'import' && e.type !== 'opening';
 
   const vatOutReport = DB.taxTx.filter((t) => t.kind === 'vat_output' && t.period === period)
     .reduce((s, t) => s + t.tax, 0);
