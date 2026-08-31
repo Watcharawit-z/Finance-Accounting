@@ -144,6 +144,174 @@ function modalCreditNote(no) {
   });
 }
 
+/* ===================================================================
+   ทะเบียนต่าง ๆ — เพิ่มและแก้ไข
+   =================================================================== */
+function modalPartner(kind, code) {
+  const p = code ? DB.partners.find((x) => x.code === code) : null;
+  if (code && !p) return;
+  const k = p ? p.kind : kind;
+  const isVendor = k === 'vendor';
+  const label = isVendor ? 'ผู้ขาย' : 'ลูกค้า';
+  modal({
+    title: p ? 'แก้ไข' + label + ' ' + p.code : 'เพิ่ม' + label + 'รายใหม่',
+    sub: p ? 'ข้อมูลที่แก้จะใช้กับเอกสารที่ออกหลังจากนี้ ใบเดิมยังเก็บข้อมูล ณ วันที่ออกไว้เหมือนเดิม'
+      : 'ระบบตั้งรหัสให้อัตโนมัติ กรอกเท่าที่รู้ก่อนได้ แล้วมาเติมทีหลัง',
+    body:'<div class="flds">'
+      + field({ name:'name', label:'ชื่อ' + label + ' (ตามหนังสือรับรอง)', wide:true,
+          value: p ? p.name : '', placeholder:'เช่น บริษัท ตัวอย่างการค้า จำกัด' })
+      + field({ name:'entityType', label:'ประเภท', type:'select',
+          value: p ? p.entityType : 'juristic',
+          options:[['juristic','นิติบุคคล'],['individual','บุคคลธรรมดา']] })
+      + field({ name:'taxId', label:'เลขประจำตัวผู้เสียภาษี 13 หลัก',
+          value: p && p.taxId ? p.taxId : '',
+          hint:'ระบบตรวจหลักที่ 13 ให้ แต่ไม่ได้ดึงชื่อ–ที่อยู่มาให้เอง' })
+      + field({ name:'branch', label:'สาขา', value: p ? (p.branch || '00000') : '00000',
+          hint:'สำนักงานใหญ่ใช้ 00000 · สาขาที่ 1 ใช้ 00001' })
+      + field({ name:'address', label:'ที่อยู่ตามใบกำกับภาษี', wide:true, value: p ? (p.address || '') : '' })
+      + field({ name:'phone', label:'เบอร์โทร', value: p ? (p.phone || '') : '' })
+      + field({ name:'termDays', label:'เครดิต (วัน)', value: p ? String(p.termDays || 0) : '30' })
+      + (isVendor ? field({ name:'wht', label:'ประเภทเงินได้ที่ต้องหักภาษี ณ ที่จ่าย', type:'select',
+          value: p && p.whtCode ? p.whtCode : '', options: optWht(),
+          hint:'ตั้งไว้ให้ระบบเลือกให้อัตโนมัติตอนจ่ายเงิน' }) : '')
+      + '</div>',
+    submitLabel: p ? 'บันทึกการแก้ไข' : 'เพิ่ม' + label,
+    note:'ยังไม่รู้เลขผู้เสียภาษีเว้นว่างไว้ก่อนได้ แต่ออกใบกำกับภาษีให้ไม่ได้จนกว่าจะกรอก · '
+      + 'ค้นชื่อบริษัทจากเลขผู้เสียภาษีได้ที่คลังข้อมูลธุรกิจกรมพัฒนาธุรกิจการค้า '
+      + '(datawarehouse.dbd.go.th) แล้วคัดลอกมากรอก'
+      + (p ? '' : ' · ถ้าเลขซ้ำกับรายที่มีอยู่แล้ว ระบบจะเตือนและไม่ให้สร้างซ้ำ'),
+    onSubmit: function () {
+      submitAction(function () {
+        const r = savePartner({
+          code: p ? p.code : null, kind: k,
+          name: val('name'), entityType: val('entityType'), taxId: val('taxId'),
+          branch: val('branch'), address: val('address'), phone: val('phone'),
+          termDays: val('termDays'), whtCode: isVendor ? (val('wht') || null) : null,
+        });
+        toast((r.created ? 'เพิ่ม' : 'แก้ไข') + label + ' ' + r.partner.code + ' แล้ว', 'ok', r.partner.name);
+        return r;
+      });
+    },
+  });
+}
+
+function modalItem(code) {
+  const it = code ? DB.items.find((x) => x.code === code) : null;
+  if (code && !it) return;
+  modal({
+    title: it ? 'แก้ไข ' + it.code : 'เพิ่มสินค้าหรือบริการ',
+    sub: it && it.type === 'stock'
+      ? 'คงเหลือ ' + it.qty + ' ' + it.uom + ' · ต้นทุนเฉลี่ย ' + fmt(it.avgCost)
+        + ' — จำนวนและต้นทุนแก้ที่นี่ไม่ได้ ต้องมาจากเอกสารซื้อขาย'
+      : 'สินค้าจะตัดสต๊อกและต้นทุนขายอัตโนมัติ ส่วนบริการไม่แตะสต๊อก',
+    body:'<div class="flds">'
+      + field({ name:'name', label:'ชื่อสินค้าหรือบริการ', wide:true, value: it ? it.name : '' })
+      + field({ name:'type', label:'ประเภท', type:'select', value: it ? it.type : 'stock',
+          options:[['stock','สินค้า (มีสต๊อก)'],['service','บริการ (ไม่มีสต๊อก)']] })
+      + (it ? '' : field({ name:'newCode', label:'รหัสสินค้า (เว้นว่างให้ระบบตั้งให้)', value:'' }))
+      + field({ name:'category', label:'หมวด', value: it ? it.category : '' })
+      + field({ name:'uom', label:'หน่วยนับ', value: it ? it.uom : '', placeholder:'ชิ้น กล่อง งาน' })
+      + field({ name:'price', label:'ราคาขายต่อหน่วย (ก่อนภาษี)', value: it ? unM(it.price) : '' })
+      + field({ name:'reorder', label:'จุดสั่งซื้อ (เตือนเมื่อคงเหลือต่ำกว่านี้)',
+          value: it ? String(it.reorder) : '0' })
+      + '</div>',
+    submitLabel: it ? 'บันทึกการแก้ไข' : 'เพิ่มสินค้า',
+    onSubmit: function () {
+      submitAction(function () {
+        const r = saveItem({
+          code: it ? it.code : null, newCode: val('newCode'),
+          name: val('name'), type: val('type'), category: val('category'),
+          uom: val('uom'), price: val('price'), reorder: val('reorder'),
+        });
+        toast((r.created ? 'เพิ่ม' : 'แก้ไข') + 'สินค้า ' + r.item.code + ' แล้ว', 'ok', r.item.name);
+        return r;
+      });
+    },
+  });
+}
+
+function modalEmployee(code) {
+  const e = code ? DB.employees.find((x) => x.code === code) : null;
+  if (code && !e) return;
+  modal({
+    title: e ? 'แก้ไขพนักงาน ' + e.code : 'เพิ่มพนักงาน',
+    sub:'ข้อมูลชุดนี้ใช้คำนวณภาษีเงินได้ ประกันสังคม และกองทุนสำรองเลี้ยงชีพตอนทำเงินเดือน',
+    body:'<div class="flds">'
+      + field({ name:'name', label:'ชื่อ-สกุล', wide:true, value: e ? e.name : '' })
+      + field({ name:'dept', label:'แผนก', value: e ? e.dept : '' })
+      + field({ name:'hired', label:'วันเริ่มงาน', type:'date', value: e && e.hired ? e.hired : '' })
+      + field({ name:'nationalId', label:'เลขประจำตัวประชาชน',
+          value: e && e.nationalId ? e.nationalId : '',
+          hint:'ใช้ตอนยื่น ภ.ง.ด.1 และขึ้นทะเบียนประกันสังคม' })
+      + field({ name:'ssoNumber', label:'เลขที่ประกันสังคม', value: e && e.ssoNumber ? e.ssoNumber : '' })
+      + field({ name:'salary', label:'เงินเดือน', value: e ? unM(e.salary) : '' })
+      + field({ name:'otHours', label:'ชั่วโมงล่วงเวลาต่อเดือน (ถ้ามีประจำ)',
+          value: e ? String(e.otHours || 0) : '0' })
+      + field({ name:'pvdRate', label:'อัตราสะสมกองทุนสำรองเลี้ยงชีพ (%)',
+          value: e ? String(e.pvdRate || 0) : '0', hint:'0 ถึง 15 · ใส่ 0 ถ้าไม่เข้าร่วม' })
+      + field({ name:'active', label:'สถานะ', type:'select',
+          value: e && e.active === false ? 'no' : 'yes',
+          options:[['yes','ทำงานอยู่'],['no','พ้นสภาพแล้ว']] })
+      + '</div>',
+    submitLabel: e ? 'บันทึกการแก้ไข' : 'เพิ่มพนักงาน',
+    onSubmit: function () {
+      submitAction(function () {
+        const r = saveEmployee({
+          code: e ? e.code : null, name: val('name'), dept: val('dept'), hired: val('hired') || null,
+          nationalId: val('nationalId'), ssoNumber: val('ssoNumber'),
+          salary: val('salary'), otHours: val('otHours'), pvdRate: val('pvdRate'),
+          active: val('active') !== 'no',
+        });
+        toast((r.created ? 'เพิ่ม' : 'แก้ไข') + 'พนักงาน ' + r.employee.code + ' แล้ว', 'ok', r.employee.name);
+        return r;
+      });
+    },
+  });
+}
+
+function modalAsset(code) {
+  const a = code ? DB.assets.find((x) => x.code === code) : null;
+  if (code && !a) return;
+  const depreciated = a && DB.docs.depreciation.some((d) => (d.rows || []).some((r) => r.code === a.code));
+  const clsOpts = Object.keys(TAX_DEPRECIATION).map((k) => [k,
+    TAX_DEPRECIATION[k].label + (TAX_DEPRECIATION[k].rate ? ' · ภาษี ' + TAX_DEPRECIATION[k].rate + '%' : '')]);
+  modal({
+    title: a ? 'แก้ไขทรัพย์สิน ' + a.code : 'เพิ่มทรัพย์สินถาวร',
+    sub: depreciated
+      ? 'ทรัพย์สินนี้คิดค่าเสื่อมไปแล้ว แก้ราคาทุน วันที่เริ่มใช้ และประเภทไม่ได้'
+      : 'ค่าเสื่อมทางบัญชีคิดตามอายุที่กรอก ส่วนทางภาษีคิดตามอัตราในพระราชกฤษฎีกา 145',
+    body:'<div class="flds">'
+      + field({ name:'name', label:'ชื่อทรัพย์สิน', wide:true, value: a ? a.name : '' })
+      + field({ name:'class', label:'ประเภทตามพระราชกฤษฎีกา 145', type:'select', wide:true,
+          value: a ? a.class : 'OFFICE', options: clsOpts })
+      + field({ name:'inService', label:'วันที่เริ่มใช้งาน', type:'date',
+          value: a ? a.inService : defaultDate() })
+      + field({ name:'cost', label:'ราคาทุน (ไม่รวมภาษีซื้อที่ขอคืนได้)', value: a ? unM(a.cost) : '' })
+      + field({ name:'bookYears', label:'อายุการใช้งานทางบัญชี (ปี)',
+          value: a ? String(a.bookYears) : '5' })
+      + field({ name:'accumBook', label:'ค่าเสื่อมสะสมทางบัญชียกมา', value: a ? unM(a.accumBook) : '0',
+          hint:'ทรัพย์สินที่ใช้มาก่อนย้ายระบบ ให้กรอกยอดสะสม ณ วันตัดยอด' })
+      + field({ name:'accumTax', label:'ค่าเสื่อมสะสมทางภาษียกมา', value: a ? unM(a.accumTax) : '0' })
+      + field({ name:'status', label:'สถานะ', type:'select',
+          value: a && a.status === 'disposed' ? 'disposed' : 'in_use',
+          options:[['in_use','ใช้งานอยู่'],['disposed','จำหน่ายออกแล้ว']] })
+      + '</div>',
+    submitLabel: a ? 'บันทึกการแก้ไข' : 'เพิ่มทรัพย์สิน',
+    note:'ยอดค่าเสื่อมสะสมที่กรอกต้องตรงกับบัญชีค่าเสื่อมราคาสะสมในงบทดลอง',
+    onSubmit: function () {
+      submitAction(function () {
+        const r = saveAsset({
+          code: a ? a.code : null, name: val('name'), class: val('class'),
+          inService: val('inService'), cost: val('cost'), bookYears: val('bookYears'),
+          accumBook: val('accumBook'), accumTax: val('accumTax'), status: val('status'),
+        });
+        toast((r.created ? 'เพิ่ม' : 'แก้ไข') + 'ทรัพย์สิน ' + r.asset.code + ' แล้ว', 'ok', r.asset.name);
+        return r;
+      });
+    },
+  });
+}
+
 /* ---------- ยกเลิกการนำเข้า ---------- */
 function modalUndoImport(no) {
   const im = listImports().find((x) => x.no === no);
@@ -498,6 +666,27 @@ function dispatch(act) {
   }
   if (head === 'pay')     { modalReceive(arg); return; }
   if (head === 'impundo') { modalUndoImport(arg); return; }
+  if (head === 'partner') {
+    const [what, v] = rest;
+    if (what === 'new') modalPartner(v, null);
+    if (what === 'edit') modalPartner(null, v);
+    return;
+  }
+  if (head === 'item') {
+    if (rest[0] === 'new') modalItem(null);
+    if (rest[0] === 'edit') modalItem(rest[1]);
+    return;
+  }
+  if (head === 'emp') {
+    if (rest[0] === 'new') modalEmployee(null);
+    if (rest[0] === 'edit') modalEmployee(rest[1]);
+    return;
+  }
+  if (head === 'asset') {
+    if (rest[0] === 'new') modalAsset(null);
+    if (rest[0] === 'edit') modalAsset(rest[1]);
+    return;
+  }
   if (head === 'cn')      { modalCreditNote(arg); return; }
   if (head === 'dn')      { modalDebitNote(arg); return; }
   if (head === 'trade') {

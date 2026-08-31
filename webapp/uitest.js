@@ -864,6 +864,116 @@ const overflowInfo = (page) => page.evaluate(() => {
     cycle.dnOnInvoice && cycle.out === cycle.invTotal + cycle.dnTotal);
   ok('งบทดลองยังสมดุลหลังเดินเอกสารครบวงจรบนหน้าจอ', cycle.balanced);
 
+  console.log('\n[18] เพิ่มผู้ขาย สินค้า พนักงาน ทรัพย์สิน เองได้จากหน้าจอ');
+  await page.evaluate(() => { STATE.screen = 'vendors'; STATE.sel = null; STATE.filter = ''; render(); });
+  await page.waitForTimeout(150);
+  ok('★ หน้าทะเบียนผู้ขายมีปุ่มเพิ่มผู้ขาย', await page.$('[data-act="partner:new:vendor"]') !== null);
+  const vendBefore = await page.evaluate(() => DB.partners.filter((p) => p.kind === 'vendor').length);
+  await page.click('[data-act="partner:new:vendor"]');
+  await page.waitForSelector('#modal.show');
+  await page.fill('[name="name"]', 'บริษัท ยาสีฟันไทย จำกัด');
+  await page.fill('[name="taxId"]', '0105536000003');
+  await page.fill('[name="address"]', '99 ถนนทดสอบ แขวงทดสอบ เขตทดสอบ กรุงเทพมหานคร 10110');
+  await page.fill('[name="termDays"]', '30');
+  await page.click('[data-act="modal:submit"]');
+  await closed(page);
+  const vendAfter = await page.evaluate(() => {
+    const v = DB.partners.filter((p) => p.kind === 'vendor');
+    return { n: v.length, made: v.find((x) => x.name === 'บริษัท ยาสีฟันไทย จำกัด') || null };
+  });
+  ok('★ เพิ่มผู้ขายจากหน้าจอได้ ระบบตั้งรหัสให้เอง',
+    vendAfter.n === vendBefore + 1 && !!vendAfter.made
+    && /^VEN-\d{4}$/.test(vendAfter.made.code) && vendAfter.made.taxId === '0105536000003',
+    vendAfter.made ? vendAfter.made.code + ' ' + vendAfter.made.name : 'ไม่พบ');
+  ok('ผู้ขายรายใหม่ขึ้นในทะเบียนทันที',
+    (await page.$eval('#main', (e) => e.textContent)).indexOf('ยาสีฟันไทย') >= 0);
+
+  /* ค้นหาแล้วต้องเจอ — คำถามตรง ๆ ของผู้ใช้ */
+  await page.fill('#q', 'ยาสีฟัน');
+  await page.waitForTimeout(250);
+  ok('★ ค้นหาชื่อผู้ขายที่เพิ่งเพิ่มแล้วเจอ',
+    (await page.$eval('#main', (e) => e.textContent)).indexOf('ยาสีฟันไทย') >= 0);
+  await page.fill('#q', '');
+  await page.waitForTimeout(200);
+
+  /* เพิ่มซ้ำด้วยเลขผู้เสียภาษีเดิมต้องถูกปฏิเสธ */
+  await page.click('[data-act="partner:new:vendor"]');
+  await page.waitForSelector('#modal.show');
+  await page.fill('[name="name"]', 'บริษัท ยาสีฟันไทย จำกัด (คีย์ซ้ำ)');
+  await page.fill('[name="taxId"]', '0105536000003');
+  await page.click('[data-act="modal:submit"]');
+  await page.waitForTimeout(400);
+  ok('★ คีย์ผู้ขายซ้ำด้วยเลขผู้เสียภาษีเดิม ระบบเตือนและไม่สร้างซ้ำ',
+    await page.evaluate(() => document.getElementById('modal').classList.contains('show')
+      && document.getElementById('toast').className.indexOf('err') >= 0));
+  await page.click('[data-act="modal:close"]');
+  await page.waitForTimeout(200);
+
+  /* แก้ไขรายเดิมโดยกดที่แถว */
+  await page.click('[data-act="partner:edit:' + vendAfter.made.code + '"]');
+  await page.waitForSelector('#modal.show');
+  await page.fill('[name="termDays"]', '45');
+  await page.click('[data-act="modal:submit"]');
+  await closed(page);
+  ok('กดที่แถวเพื่อแก้ไขได้ และไม่สร้างรายใหม่',
+    await page.evaluate(([c, n]) => DB.partners.find((p) => p.code === c).termDays === 45
+      && DB.partners.filter((p) => p.kind === 'vendor').length === n,
+      [vendAfter.made.code, vendAfter.n]));
+
+  /* สินค้า พนักงาน ทรัพย์สิน */
+  await page.evaluate(() => { STATE.screen = 'items'; STATE.filter = ''; render(); });
+  await page.waitForTimeout(150);
+  await page.click('[data-act="item:new"]');
+  await page.waitForSelector('#modal.show');
+  await page.fill('[name="name"]', 'ยาสีฟันสมุนไพร 160 กรัม');
+  await page.fill('[name="uom"]', 'หลอด');
+  await page.fill('[name="price"]', '89');
+  await page.click('[data-act="modal:submit"]');
+  await closed(page);
+  ok('★ เพิ่มสินค้าจากหน้าจอได้ และเริ่มที่คงเหลือศูนย์',
+    await page.evaluate(() => {
+      const i = DB.items.find((x) => x.name === 'ยาสีฟันสมุนไพร 160 กรัม');
+      return !!i && i.qty === 0 && i.price === 890000;
+    }));
+
+  await page.evaluate(() => { STATE.screen = 'employees'; STATE.filter = ''; render(); });
+  await page.waitForTimeout(150);
+  await page.click('[data-act="emp:new"]');
+  await page.waitForSelector('#modal.show');
+  await page.fill('[name="name"]', 'นางสาวทดสอบ ระบบ');
+  await page.fill('[name="dept"]', 'บัญชี');
+  await page.fill('[name="salary"]', '28000');
+  await page.click('[data-act="modal:submit"]');
+  await closed(page);
+  ok('เพิ่มพนักงานจากหน้าจอได้',
+    await page.evaluate(() => DB.employees.some((e) => e.name === 'นางสาวทดสอบ ระบบ')));
+
+  await page.evaluate(() => { STATE.screen = 'assets'; STATE.filter = ''; render(); });
+  await page.waitForTimeout(150);
+  await page.click('[data-act="asset:new"]');
+  await page.waitForSelector('#modal.show');
+  await page.fill('[name="name"]', 'ชั้นวางสินค้า');
+  await page.selectOption('[name="class"]', 'FURNITURE');
+  await page.fill('[name="cost"]', '80000');
+  await page.fill('[name="bookYears"]', '5');
+  await page.click('[data-act="modal:submit"]');
+  await closed(page);
+  const madeAsset = await page.evaluate(() => DB.assets.find((a) => a.name === 'ชั้นวางสินค้า') || null);
+  ok('เพิ่มทรัพย์สินจากหน้าจอได้ พร้อมคิดค่าเสื่อมงวดถัดไป',
+    !!madeAsset && madeAsset.accumBook === 0 && madeAsset.cost === 800000000,
+    madeAsset ? madeAsset.code + ' ราคาทุน ' + fmtT(madeAsset.cost) : 'ไม่พบ');
+
+  /* ผู้ขายที่เพิ่งเพิ่มต้องเลือกได้ในหน้าตั้งหนี้ทันที */
+  await page.evaluate(() => { STATE.screen = 'bills'; STATE.sel = null; render(); });
+  await page.waitForTimeout(150);
+  await page.click('[data-act="new:bill"]');
+  await page.waitForSelector('#modal.show');
+  const inList = await page.$$eval('[name="partner"] option', (os) =>
+    os.some((o) => o.textContent.indexOf('ยาสีฟันไทย') >= 0));
+  ok('★ ผู้ขายที่เพิ่งเพิ่มเลือกได้ในหน้าตั้งหนี้ทันที', inList);
+  await page.click('[data-act="modal:close"]');
+  await page.waitForTimeout(200);
+
   ok('ไม่มีข้อผิดพลาดในคอนโซลเลย', errors.length === 0, errors.slice(0, 3).join(' | '));
 
   await page.setViewportSize({ width: 1440, height: 950 });

@@ -117,8 +117,15 @@ function modal(o) {
     + '</div></div>';
   m.classList.add('show');
   modalSubmit = o.onSubmit || null;
+  /* โฟกัสช่องแรกให้ แต่ห้ามแย่งโฟกัสถ้าผู้ใช้กดเข้าช่องอื่นไปแล้ว
+     ของเดิมหน่วง 30 มิลลิวินาทีแล้วโฟกัสทันที ใครพิมพ์เร็วกว่านั้นตัวอักษร
+     จะเด้งไปลงช่องแรกแทนช่องที่กดอยู่ */
   const first = m.querySelector('input,select,textarea');
-  if (first) setTimeout(() => first.focus(), 30);
+  if (first) {
+    requestAnimationFrame(function () {
+      if (!m.contains(document.activeElement)) first.focus();
+    });
+  }
 }
 function closeModal() {
   document.getElementById('modal').classList.remove('show');

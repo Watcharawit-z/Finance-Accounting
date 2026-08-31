@@ -64,6 +64,215 @@ function syncInvStatus(inv) {
   else inv.status = 'issued';
 }
 
+/* ===================================================================
+   ทะเบียนต่าง ๆ — เพิ่มและแก้ไขด้วยมือ
+   เดิมทะเบียนคู่ค้า สินค้า พนักงาน และทรัพย์สิน เข้ามาได้ทางเดียวคือการนำเข้า
+   พอเจอผู้ขายรายใหม่ระหว่างทำงานจริงจึงบันทึกอะไรไม่ได้เลย ต้องเพิ่มเองได้
+   =================================================================== */
+function nextRegCode(prefix, list) {
+  let n = 0;
+  const re = new RegExp('^' + prefix + '-(\\d+)$');
+  list.forEach(function (x) {
+    const m = String(x.code || '').match(re);
+    if (m) n = Math.max(n, Number(m[1]));
+  });
+  return prefix + '-' + String(n + 1).padStart(4, '0');
+}
+
+function assertBranch(branch, entityType) {
+  if (entityType === 'individual') return null;
+  const b = String(branch === undefined || branch === null ? '00000' : branch).trim() || '00000';
+  if (!/^\d{5}$/.test(b)) {
+    throw new DomainError('BRANCH_INVALID',
+      'รหัสสาขาต้องเป็นตัวเลข 5 หลัก (สำนักงานใหญ่คือ 00000)',
+      'ดูจากหน้าใบกำกับภาษีของคู่ค้า');
+  }
+  return b;
+}
+
+/** เพิ่มหรือแก้ไขลูกค้า/ผู้ขาย — ใช้ทั้งตอนสร้างใหม่และตอนแก้ */
+function savePartner(input) {
+  const kind = input.kind === 'vendor' ? 'vendor' : 'customer';
+  const label = kind === 'vendor' ? 'ผู้ขาย' : 'ลูกค้า';
+  const name = String(input.name || '').trim();
+  if (!name) throw new DomainError('PARTNER_NAME_REQUIRED', 'ต้องกรอกชื่อ' + label);
+
+  const entityType = input.entityType === 'individual' ? 'individual' : 'juristic';
+  const taxId = String(input.taxId || '').replace(/[^0-9]/g, '');
+  if (taxId && !validTaxId(taxId)) {
+    throw new DomainError('TAX_ID_INVALID',
+      'เลขประจำตัวผู้เสียภาษี ' + taxId + ' ไม่ผ่านการตรวจหลักที่ 13',
+      'ตรวจเลขกับหน้าใบกำกับภาษีของคู่ค้าอีกครั้ง หรือเว้นว่างไว้ก่อน');
+  }
+  const branch = assertBranch(input.branch, entityType);
+  const existing = input.code ? DB.partners.find((x) => x.code === input.code) : null;
+  if (input.code && !existing) {
+    throw new DomainError('PARTNER_NOT_FOUND', 'ไม่พบคู่ค้ารหัส ' + input.code);
+  }
+  /* กันสร้างคู่ค้าซ้ำด้วยเลขผู้เสียภาษีเดียวกัน เป็นความผิดพลาดที่เจอบ่อยที่สุด
+     เพราะทำให้ยอดค้างของรายเดียวกันแตกเป็นสองราย แล้วกระทบยอดไม่ได้ */
+  if (taxId) {
+    const dup = DB.partners.find((x) => x.taxId === taxId && (x.branch || '00000') === (branch || '00000')
+      && x.kind === kind && (!existing || x.code !== existing.code));
+    if (dup) {
+      throw new DomainError('PARTNER_DUPLICATE_TAX_ID',
+        label + 'เลขผู้เสียภาษี ' + taxId + ' สาขา ' + (branch || '—') + ' มีอยู่แล้วคือ '
+          + dup.code + ' ' + dup.name,
+        'ถ้าเป็นรายเดียวกันให้แก้ไขรายเดิมแทนการสร้างใหม่');
+    }
+  }
+  const rec = {
+    code: existing ? existing.code : nextRegCode(kind === 'vendor' ? 'VEN' : 'CUS', DB.partners),
+    name: name, taxId: taxId || null, branch: branch,
+    entityType: entityType, kind: kind,
+    address: String(input.address || '').trim(),
+    phone: String(input.phone || '').trim(),
+    termDays: Math.max(0, Number(input.termDays || 0) || 0),
+    whtCode: kind === 'vendor' ? (input.whtCode || null) : null,
+    creditLimit: M(input.creditLimit || '0'),
+    active: input.active !== false,
+  };
+  if (existing) {
+    const before = { name: existing.name, taxId: existing.taxId, branch: existing.branch };
+    Object.keys(rec).forEach((k) => { existing[k] = rec[k]; });
+    audit('partner', rec.code, 'update', before, { name: rec.name, taxId: rec.taxId, branch: rec.branch });
+    return { partner: existing, created: false };
+  }
+  DB.partners.push(rec);
+  audit('partner', rec.code, 'create', null, { name: rec.name, taxId: rec.taxId, kind: kind });
+  return { partner: rec, created: true };
+}
+
+/** เพิ่มหรือแก้ไขสินค้า/บริการ — จำนวนคงเหลือแก้ตรงนี้ไม่ได้ ต้องมาจากเอกสาร */
+function saveItem(input) {
+  const name = String(input.name || '').trim();
+  if (!name) throw new DomainError('ITEM_NAME_REQUIRED', 'ต้องกรอกชื่อสินค้าหรือบริการ');
+  const type = input.type === 'service' ? 'service' : 'stock';
+  const existing = input.code ? DB.items.find((x) => x.code === input.code) : null;
+  if (input.code && !existing) throw new DomainError('ITEM_NOT_FOUND', 'ไม่พบสินค้ารหัส ' + input.code);
+
+  const code = existing ? existing.code : (String(input.newCode || '').trim() || nextRegCode('IT', DB.items));
+  if (!existing && DB.items.find((x) => x.code === code)) {
+    throw new DomainError('ITEM_CODE_DUPLICATE', 'รหัสสินค้า ' + code + ' มีอยู่แล้ว');
+  }
+  /* เปลี่ยนจากสินค้าเป็นบริการทั้งที่ยังมีของในสต๊อก จะทำให้มูลค่าสินค้าคงเหลือหายจากงบ */
+  if (existing && existing.type === 'stock' && type === 'service' && existing.qty !== 0) {
+    throw new DomainError('ITEM_STILL_IN_STOCK',
+      'สินค้านี้ยังมีคงเหลือ ' + existing.qty + ' ' + existing.uom + ' เปลี่ยนเป็นบริการไม่ได้',
+      'ตัดสต๊อกให้เป็นศูนย์ก่อน');
+  }
+  const rec = {
+    code: code, name: name, type: type,
+    category: String(input.category || '').trim() || 'ทั่วไป',
+    uom: String(input.uom || '').trim() || (type === 'service' ? 'งาน' : 'หน่วย'),
+    price: M(input.price || '0'),
+    reorder: Math.max(0, Number(input.reorder || 0) || 0),
+    qty: existing ? existing.qty : 0,
+    avgCost: existing ? existing.avgCost : 0,
+    value: existing ? existing.value : 0,
+  };
+  if (existing) {
+    Object.keys(rec).forEach((k) => { existing[k] = rec[k]; });
+    audit('item', code, 'update', null, { name: rec.name, price: fmt(rec.price) });
+    return { item: existing, created: false };
+  }
+  DB.items.push(rec);
+  audit('item', code, 'create', null, { name: rec.name, type: type });
+  return { item: rec, created: true };
+}
+
+/** เพิ่มหรือแก้ไขพนักงาน — ต้องมีก่อนทำเงินเดือนงวดแรก */
+function saveEmployee(input) {
+  const name = String(input.name || '').trim();
+  if (!name) throw new DomainError('EMPLOYEE_NAME_REQUIRED', 'ต้องกรอกชื่อพนักงาน');
+  const nationalId = String(input.nationalId || '').replace(/[^0-9]/g, '');
+  if (nationalId && !validTaxId(nationalId)) {
+    throw new DomainError('NATIONAL_ID_INVALID',
+      'เลขประจำตัวประชาชน ' + nationalId + ' ไม่ผ่านการตรวจหลักที่ 13',
+      'ใช้ตรวจตอนยื่น ภ.ง.ด.1 และขึ้นทะเบียนประกันสังคม');
+  }
+  const salary = M(input.salary || '0');
+  if (salary < 0) throw new DomainError('SALARY_NEGATIVE', 'เงินเดือนติดลบไม่ได้');
+  const pvdRate = Number(input.pvdRate || 0) || 0;
+  if (pvdRate < 0 || pvdRate > 15) {
+    throw new DomainError('PVD_RATE_RANGE',
+      'อัตราสะสมกองทุนสำรองเลี้ยงชีพต้องอยู่ระหว่าง 0 ถึง 15 เปอร์เซ็นต์');
+  }
+  const existing = input.code ? DB.employees.find((x) => x.code === input.code) : null;
+  if (input.code && !existing) throw new DomainError('EMPLOYEE_NOT_FOUND', 'ไม่พบพนักงานรหัส ' + input.code);
+
+  const rec = {
+    code: existing ? existing.code : nextRegCode('EMP', DB.employees),
+    name: name, dept: String(input.dept || '').trim() || 'ไม่ระบุ',
+    salary: salary, otHours: Math.max(0, Number(input.otHours || 0) || 0),
+    pvdRate: pvdRate, deductions: M(input.deductions || '0'),
+    nationalId: nationalId || null,
+    ssoNumber: String(input.ssoNumber || '').trim() || null,
+    hired: input.hired || null,
+    active: input.active !== false,
+  };
+  if (existing) {
+    Object.keys(rec).forEach((k) => { existing[k] = rec[k]; });
+    audit('employee', rec.code, 'update', null, { name: rec.name, salary: fmt(rec.salary) });
+    return { employee: existing, created: false };
+  }
+  DB.employees.push(rec);
+  audit('employee', rec.code, 'create', null, { name: rec.name, dept: rec.dept });
+  return { employee: rec, created: true };
+}
+
+/** เพิ่มหรือแก้ไขทรัพย์สินถาวร — ที่คิดค่าเสื่อมไปแล้วห้ามแก้ราคาทุนกับวันที่ */
+function saveAsset(input) {
+  const name = String(input.name || '').trim();
+  if (!name) throw new DomainError('ASSET_NAME_REQUIRED', 'ต้องกรอกชื่อทรัพย์สิน');
+  const cls = String(input.class || '').trim();
+  if (!TAX_DEPRECIATION[cls]) {
+    throw new DomainError('ASSET_CLASS_INVALID',
+      'ประเภททรัพย์สินไม่ถูกต้อง ต้องเลือกจากรายการที่กฎหมายกำหนด (พ.ร.ฎ.145)');
+  }
+  const inService = String(input.inService || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(inService)) {
+    throw new DomainError('ASSET_DATE_REQUIRED', 'ต้องระบุวันที่เริ่มใช้งานทรัพย์สิน');
+  }
+  const cost = M(input.cost || '0');
+  if (cost <= 0) throw new DomainError('ASSET_COST_REQUIRED', 'ราคาทุนต้องมากกว่าศูนย์');
+  const bookYears = Number(input.bookYears || 0) || 0;
+  if (cls !== 'LAND' && (bookYears < 1 || bookYears > 50)) {
+    throw new DomainError('ASSET_LIFE_RANGE', 'อายุการใช้งานทางบัญชีต้องอยู่ระหว่าง 1 ถึง 50 ปี');
+  }
+  const existing = input.code ? DB.assets.find((x) => x.code === input.code) : null;
+  if (input.code && !existing) throw new DomainError('ASSET_NOT_FOUND', 'ไม่พบทรัพย์สินรหัส ' + input.code);
+
+  const depreciated = existing && DB.docs.depreciation
+    .some((d) => (d.rows || []).some((r) => r.code === existing.code));
+  if (depreciated && (cost !== existing.cost || inService !== existing.inService || cls !== existing.class)) {
+    throw new DomainError('ASSET_ALREADY_DEPRECIATED',
+      'ทรัพย์สินนี้คิดค่าเสื่อมไปแล้ว แก้ราคาทุน วันที่เริ่มใช้ หรือประเภทไม่ได้',
+      'ถ้าคีย์ผิดตั้งแต่แรก ให้กลับรายการค่าเสื่อมของงวดที่เกี่ยวข้องก่อน');
+  }
+  const accumBook = M(input.accumBook || '0');
+  const accumTax = M(input.accumTax || '0');
+  if (accumBook > cost) {
+    throw new DomainError('ACCUM_EXCEEDS_COST',
+      'ค่าเสื่อมสะสมทางบัญชี ' + fmt(accumBook) + ' เกินราคาทุน ' + fmt(cost));
+  }
+  const rec = {
+    code: existing ? existing.code : nextRegCode('FA', DB.assets),
+    name: name, class: cls, inService: inService, cost: cost,
+    bookYears: cls === 'LAND' ? 0 : bookYears,
+    accumBook: accumBook, accumTax: accumTax,
+    status: input.status === 'disposed' ? 'disposed' : 'in_use',
+  };
+  if (existing) {
+    Object.keys(rec).forEach((k) => { existing[k] = rec[k]; });
+    audit('asset', rec.code, 'update', null, { name: rec.name, cost: fmt(rec.cost) });
+    return { asset: existing, created: false };
+  }
+  DB.assets.push(rec);
+  audit('asset', rec.code, 'create', null, { name: rec.name, class: cls, cost: fmt(cost) });
+  return { asset: rec, created: true };
+}
+
 /* ---------- ขาย: ออกใบกำกับภาษี ---------- */
 function issueInvoice(input) {
   const p = partnerByCode(input.partnerCode);

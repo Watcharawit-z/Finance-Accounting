@@ -9,6 +9,7 @@ const ctx = new Function(src + '\nreturn {DB,buildSeed,trialBalance,balanceSheet
   'detectColumns,readTrialBalance,parseCsv,parseAmount,detectFileKind,' +
   'inferSubType,proposeAccount,previewOpening,importOpeningBalances,subTypeType,' +
   'importPeriodMovement,listImports,reverseImport,endOfMonth,' +
+  'savePartner,saveItem,saveEmployee,saveAsset,nextRegCode,TAX_DEPRECIATION,' +
   'DBD_SUBTYPE,BS_LINES,PL_LINES,balBySub,' +
   'TRADE_DOCS,invOutstanding,outstandingAsOf,unM};')();
 
@@ -375,6 +376,80 @@ ok('★ งบทดลองสมดุลพอดีหลังอ่าน
 ok('บรรทัดผลรวมที่เขียนคำว่ารวมไว้ในช่องชื่อ ถูกข้าม ไม่ถูกนับเป็นบัญชี',
    faTb.rows.length === 7 && faTb.skipped.some((x) => x.why.indexOf('ผลรวม') >= 0),
    faTb.rows.length + ' บัญชี');
+
+console.log('\n=== 7.10 เพิ่มและแก้ไขทะเบียนด้วยมือ ===');
+/* ผู้ทำบัญชีเจอผู้ขายรายใหม่ระหว่างทำงาน ต้องเพิ่มเองได้ทันที
+   ไม่ใช่รอให้มาจากการนำเข้าอย่างเดียว */
+const vendBefore = D.partners.filter((p) => p.kind === 'vendor').length;
+const newVend = ctx.savePartner({ kind:'vendor', name:'บริษัท ฟันสะอาด จำกัด',
+  taxId:'0105536000003', branch:'00000', address:'1 ถนนทดสอบ กรุงเทพมหานคร 10110', termDays:30,
+  whtCode:'WHT_SERVICE' });
+ok('★ เพิ่มผู้ขายรายใหม่ได้เอง ระบบตั้งรหัสให้อัตโนมัติ',
+   newVend.created && /^VEN-\d{4}$/.test(newVend.partner.code)
+   && D.partners.filter((p) => p.kind === 'vendor').length === vendBefore + 1,
+   newVend.partner.code + ' ' + newVend.partner.name);
+ok('ผู้ขายที่เพิ่มเองใช้ตั้งหนี้ได้ทันที', (function () {
+  const b = ctx.recordBill({ date:'2026-07-20', partnerCode:newVend.partner.code,
+    vendorNo:'TP-TEST-001',
+    lines:[{ desc:'ยาสีฟันสำหรับพนักงาน', qty:10, price:'120', expenseSub:'admin_expense' }] });
+  return b.total === ctx.M('1284');
+})(), 'รวมภาษี 1,284.00');
+throws('เลขผู้เสียภาษีผิดหลักที่ 13 ตอนเพิ่มคู่ค้า',
+  () => ctx.savePartner({ kind:'vendor', name:'ผิด', taxId:'1234567890123' }), 'TAX_ID_INVALID');
+throws('★ เพิ่มคู่ค้าซ้ำด้วยเลขผู้เสียภาษีเดิม',
+  () => ctx.savePartner({ kind:'vendor', name:'บริษัท ฟันสะอาด จำกัด (ซ้ำ)', taxId:'0105536000003' }),
+  'PARTNER_DUPLICATE_TAX_ID');
+throws('ไม่กรอกชื่อคู่ค้า',
+  () => ctx.savePartner({ kind:'customer', name:'  ' }), 'PARTNER_NAME_REQUIRED');
+throws('รหัสสาขาไม่ใช่ตัวเลข 5 หลัก',
+  () => ctx.savePartner({ kind:'customer', name:'ทดสอบ', branch:'1' }), 'BRANCH_INVALID');
+ok('คู่ค้าที่ไม่มีเลขผู้เสียภาษียังเพิ่มได้ ไว้มาเติมทีหลัง',
+   ctx.savePartner({ kind:'customer', name:'ร้านค้าปลีกไม่มีเลขภาษี' }).created);
+const edited = ctx.savePartner({ code:newVend.partner.code, kind:'vendor',
+  name:'บริษัท ฟันสะอาด จำกัด (มหาชน)', taxId:'0105536000003', termDays:45 });
+ok('แก้ไขคู่ค้าเดิมได้โดยไม่สร้างซ้ำ',
+   !edited.created && edited.partner.termDays === 45
+   && D.partners.filter((p) => p.taxId === '0105536000003').length === 1);
+
+const newItem = ctx.saveItem({ name:'ยาสีฟันสมุนไพร 160 กรัม', type:'stock', uom:'หลอด', price:'89' });
+ok('เพิ่มสินค้าได้ และเริ่มต้นด้วยคงเหลือศูนย์',
+   newItem.created && newItem.item.qty === 0 && newItem.item.price === ctx.M('89'), newItem.item.code);
+ok('เพิ่มบริการได้ ไม่แตะสต๊อก',
+   ctx.saveItem({ name:'ค่าบริการติดตั้ง', type:'service' }).item.type === 'service');
+const stocked = D.items.find((i) => i.type === 'stock' && i.qty > 0);
+throws('★ เปลี่ยนสินค้าที่ยังมีของในสต๊อกให้เป็นบริการ',
+  () => ctx.saveItem({ code:stocked.code, name:stocked.name, type:'service' }), 'ITEM_STILL_IN_STOCK');
+
+const emp = ctx.saveEmployee({ name:'นางสาวทดสอบ ระบบ', dept:'บัญชี', salary:'28000',
+  nationalId:'0105536000003', pvdRate:5, hired:'2026-07-01' });
+ok('เพิ่มพนักงานได้ พร้อมทำเงินเดือนงวดถัดไป',
+   emp.created && /^EMP-\d{4}$/.test(emp.employee.code), emp.employee.code);
+throws('เลขประจำตัวประชาชนผิดหลักที่ 13',
+  () => ctx.saveEmployee({ name:'ผิด', nationalId:'1111111111111' }), 'NATIONAL_ID_INVALID');
+throws('อัตรากองทุนสำรองเลี้ยงชีพเกิน 15%',
+  () => ctx.saveEmployee({ name:'ทดสอบ', pvdRate:20 }), 'PVD_RATE_RANGE');
+
+const asset = ctx.saveAsset({ name:'ชั้นวางสินค้า', class:'FURNITURE', inService:'2026-07-01',
+  cost:'80000', bookYears:5 });
+ok('เพิ่มทรัพย์สินได้ พร้อมคิดค่าเสื่อมงวดถัดไป',
+   asset.created && asset.asset.accumBook === 0, asset.asset.code);
+throws('ประเภททรัพย์สินนอกพระราชกฤษฎีกา 145',
+  () => ctx.saveAsset({ name:'x', class:'SPACESHIP', inService:'2026-07-01', cost:'1', bookYears:5 }),
+  'ASSET_CLASS_INVALID');
+throws('ค่าเสื่อมสะสมยกมาเกินราคาทุน',
+  () => ctx.saveAsset({ name:'x', class:'OFFICE', inService:'2026-07-01', cost:'1000',
+    bookYears:5, accumBook:'2000' }), 'ACCUM_EXCEEDS_COST');
+const oldAsset = D.assets.find((a) => D.docs.depreciation.some((d) => d.rows.some((r) => r.code === a.code)));
+throws('★ แก้ราคาทุนของทรัพย์สินที่คิดค่าเสื่อมไปแล้ว',
+  () => ctx.saveAsset({ code:oldAsset.code, name:oldAsset.name, class:oldAsset.class,
+    inService:oldAsset.inService, cost:'1', bookYears:oldAsset.bookYears }),
+  'ASSET_ALREADY_DEPRECIATED');
+ok('แต่แก้ชื่อทรัพย์สินเดิมได้ ไม่กระทบค่าเสื่อมที่ลงไปแล้ว',
+   !ctx.saveAsset({ code:oldAsset.code, name:oldAsset.name + ' (แก้ชื่อ)', class:oldAsset.class,
+     inService:oldAsset.inService, cost:ctx.unM(oldAsset.cost), bookYears:oldAsset.bookYears,
+     accumBook:ctx.unM(oldAsset.accumBook), accumTax:ctx.unM(oldAsset.accumTax) }).created);
+ok('งบทดลองยังสมดุลหลังเพิ่มทะเบียนทั้งหมด',
+   ctx.trialBalance('2026-01-01', '2026-12-31').balanced);
 
 console.log('\n=== 8. ปิดงวด ===');
 const chk = ctx.closeChecklist('2026-06');

@@ -355,6 +355,8 @@ function partnerScreen(kind) {
   return card({
     title: kind === 'customer' ? 'ทะเบียนลูกค้า' : 'ทะเบียนผู้ขาย',
     sub: list.length + ' ราย · ข้อมูลนี้จะถูกคัดลอกลงเอกสารทุกใบ ณ วันที่ออก',
+    actions: btn('partner:new:' + kind,
+      kind === 'customer' ? '+ เพิ่มลูกค้า' : '+ เพิ่มผู้ขาย', 'primary'),
     filters: searchBox('ค้นหาชื่อ รหัส หรือเลขประจำตัวผู้เสียภาษี'),
     body: tbl({
       cols:[{t:'รหัส'},{t:'ชื่อ'},{t:'เลขประจำตัวผู้เสียภาษี'},{t:'สาขา'},{t:'ประเภท'},{t:'เครดิต (วัน)',a:'r'}]
@@ -367,9 +369,14 @@ function partnerScreen(kind) {
         .concat(kind === 'vendor' ? [p.whtCode ? resolveRate(p.whtCode, TODAY, {channel:'manual'}).label
           + ' ' + resolveRate(p.whtCode, TODAY, {channel:'manual'}).rate + '%' : '—'] : [])
         .concat([{n: bal[p.code] || 0}])),
-      empty:'ไม่พบรายชื่อที่ค้นหา',
+      rowAttr: (r) => 'class="row-link" data-act="partner:edit:' + r[0].mono + '"',
+      empty: DB.partners.some((x) => x.kind === kind)
+        ? 'ไม่พบรายชื่อที่ค้นหา' : 'ยังไม่มีรายชื่อในทะเบียนนี้',
+      emptyAction: btn('partner:new:' + kind,
+        kind === 'customer' ? 'เพิ่มลูกค้ารายแรก' : 'เพิ่มผู้ขายรายแรก', 'primary'),
     }),
-    foot: 'เลขประจำตัวผู้เสียภาษีทุกเลขผ่านการตรวจหลักที่ 13 แล้ว ระบบจะไม่ยอมออกใบกำกับให้เลขที่ผิด',
+    foot: 'กดที่แถวเพื่อแก้ไข · เลขประจำตัวผู้เสียภาษีทุกเลขผ่านการตรวจหลักที่ 13 แล้ว '
+      + 'ระบบจะไม่ยอมออกใบกำกับให้เลขที่ผิด และกันการสร้างคู่ค้าซ้ำด้วยเลขเดียวกัน',
   });
 }
 
@@ -804,6 +811,7 @@ function scItems() {
   const low = DB.items.filter((i) => i.type === 'stock' && i.qty <= i.reorder);
   return card({
     title:'ทะเบียนสินค้า', sub: DB.items.length + ' รายการ · ตีราคาด้วยวิธีถัวเฉลี่ยถ่วงน้ำหนัก',
+    actions: btn('item:new', '+ เพิ่มสินค้าหรือบริการ', 'primary'),
     filters: searchBox('ค้นหารหัส ชื่อ หรือหมวดสินค้า'),
     body: (low.length ? '<div class="note warn">ต่ำกว่าจุดสั่งซื้อ ' + low.length + ' รายการ: '
         + esc(low.map((i) => i.code).join(', ')) + '</div>' : '')
@@ -814,13 +822,17 @@ function scItems() {
           i.type === 'stock' ? {n:M(String(i.qty)), cls: i.qty <= i.reorder ? 'bad' : ''} : {dim:'—'},
           i.type === 'stock' ? {n:M(String(i.reorder))} : {dim:'—'},
           {n:i.avgCost}, {n:i.price}, {n:i.value}]),
+        rowAttr: (r) => 'class="row-link" data-act="item:edit:' + r[0].mono + '"',
         foot: ['','','','','','','','','รวมมูลค่าสินค้าคงเหลือ', {n:value}],
+        empty:'ยังไม่มีสินค้าในทะเบียน',
+        emptyAction: btn('item:new', 'เพิ่มสินค้ารายการแรก', 'primary'),
       })
       + '<div class="reco"><div><span>มูลค่าตามทะเบียนสินค้า</span><b>' + fmt(value) + '</b></div>'
       + '<div><span>ยอดบัญชีสินค้าคงเหลือในงบทดลอง</span><b>' + fmt(glInv) + '</b></div>'
       + '<div class="gt"><span>ผลต่าง</span><b>' + fmt(value - glInv) + '</b></div></div>',
-    foot: value === glInv ? 'ทะเบียนสินค้าตรงกับบัญชีคุมพอดี'
-      : 'ผลต่างเกิดจากยอดยกมาต้นงวดที่ยังไม่ได้แยกรายตัวสินค้า — ตรวจสอบก่อนปิดปี',
+    foot: (value === glInv ? 'ทะเบียนสินค้าตรงกับบัญชีคุมพอดี'
+      : 'ผลต่างเกิดจากยอดยกมาต้นงวดที่ยังไม่ได้แยกรายตัวสินค้า — ตรวจสอบก่อนปิดปี')
+      + ' · กดที่แถวเพื่อแก้ไข จำนวนคงเหลือแก้ตรงนี้ไม่ได้ ต้องมาจากเอกสารซื้อขายเท่านั้น',
   });
 }
 
@@ -854,6 +866,7 @@ function scAssets() {
   const accum = DB.assets.reduce((s, a) => s + a.accumBook, 0);
   return card({
     title:'ทะเบียนทรัพย์สิน', sub: DB.assets.length + ' รายการ · แยกค่าเสื่อมทางบัญชีและทางภาษีคนละชุด',
+    actions: btn('asset:new', '+ เพิ่มทรัพย์สิน', 'primary'),
     filters: searchBox('ค้นหารหัสหรือชื่อทรัพย์สิน'),
     body: tbl({
       cols:[{t:'รหัส'},{t:'ชื่อทรัพย์สิน'},{t:'ประเภทตามพระราชกฤษฎีกา 145'},{t:'วันเริ่มใช้'},{t:'ราคาทุน',a:'r'},
@@ -866,9 +879,12 @@ function scAssets() {
           thDateNum(a.inService), {n:a.cost}, {c:String(a.bookYears)},
           {n:a.accumBook}, {n:a.cost - a.accumBook}, {n:a.accumTax}];
       }),
+      rowAttr: (r) => 'class="row-link" data-act="asset:edit:' + r[0].mono + '"',
       foot: ['','','','รวม', {n:cost}, '', {n:accum}, {n:cost - accum}, {n:DB.assets.reduce((s,a)=>s+a.accumTax,0)}],
+      empty:'ยังไม่มีทรัพย์สินในทะเบียน — ระบบเชื่อมต่อของ FlowAccount ไม่เปิดให้ดึงส่วนนี้ ต้องกรอกเอง',
+      emptyAction: btn('asset:new', 'เพิ่มทรัพย์สินรายการแรก', 'primary'),
     }),
-    foot:'รถยนต์นั่งไม่เกิน 10 คน หักค่าเสื่อมทางภาษีได้จากต้นทุนไม่เกิน 1,000,000 บาท ส่วนที่เกินหักทางบัญชีได้แต่บวกกลับตอนคำนวณภาษี',
+    foot:'กดที่แถวเพื่อแก้ไข · รถยนต์นั่งไม่เกิน 10 คน หักค่าเสื่อมทางภาษีได้จากต้นทุนไม่เกิน 1,000,000 บาท ส่วนที่เกินหักทางบัญชีได้แต่บวกกลับตอนคำนวณภาษี',
   });
 }
 
@@ -933,6 +949,7 @@ function scEmployees() {
   const sso = ssoRate(pEnd());
   return card({
     title:'ทะเบียนพนักงาน', sub: DB.employees.filter((e) => e.active).length + ' คนที่ยังทำงานอยู่',
+    actions: btn('emp:new', '+ เพิ่มพนักงาน', 'primary'),
     filters: searchBox('ค้นหาชื่อ รหัส หรือแผนก'),
     body: tbl({
       cols:[{t:'รหัส'},{t:'ชื่อ-สกุล'},{t:'แผนก'},{t:'วันเริ่มงาน'},{t:'เงินเดือน',a:'r'},{t:'ชั่วโมงล่วงเวลา',a:'r'},
@@ -942,8 +959,11 @@ function scEmployees() {
         e.pvdRate ? {c:e.pvdRate + '%'} : {dim:'ไม่เข้าร่วม'},
         {n: Math.min(Math.max(e.salary, sso.floor), sso.ceiling)},
         e.active ? {st:['paid','ทำงานอยู่']} : {st:['late','พ้นสภาพ']}]),
+      rowAttr: (r) => 'class="row-link" data-act="emp:edit:' + r[0].mono + '"',
+      empty:'ยังไม่มีพนักงานในทะเบียน ต้องเพิ่มก่อนทำเงินเดือนงวดแรก',
+      emptyAction: btn('emp:new', 'เพิ่มพนักงานคนแรก', 'primary'),
     }),
-    foot:'ข้อมูลพนักงานเป็นข้อมูลส่วนบุคคลตาม พ.ร.บ.คุ้มครองข้อมูลส่วนบุคคล ระบบเต็มจำกัดสิทธิ์การเข้าถึงเป็นรายบทบาทและบันทึกทุกครั้งที่มีการเปิดดู',
+    foot:'กดที่แถวเพื่อแก้ไข · ข้อมูลพนักงานเป็นข้อมูลส่วนบุคคลตาม พ.ร.บ.คุ้มครองข้อมูลส่วนบุคคล ระบบเต็มจำกัดสิทธิ์การเข้าถึงเป็นรายบทบาทและบันทึกทุกครั้งที่มีการเปิดดู',
   });
 }
 
