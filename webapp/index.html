@@ -411,6 +411,10 @@ details.adv .flds{margin-bottom:10px}
 .bar i{display:block; height:5px; background:var(--accent)}
 .lines th{padding:7px 8px; background:transparent}
 .lines td{padding:4px 8px; border-bottom:none}
+input.qty-in{width:96px; height:32px; padding:0 8px; text-align:right; border:1px solid var(--rule); border-radius:var(--radius-sm);
+  background:var(--panel); color:var(--ink); font:inherit}
+input.qty-in:focus{outline:2px solid var(--accent-2); outline-offset:-1px}
+input.qty-in:disabled{background:var(--sunken); color:var(--faint)}
 .lines input,.lines select{
   font:inherit; font-size:13.5px; width:100%; min-width:70px; height:34px; padding:0 9px;
   border:1px solid var(--rule); border-radius:var(--radius-sm); background:var(--panel); color:var(--ink);
@@ -897,6 +901,16 @@ function loadState(obj) {
     DB.isDemo = !!(DB.company && DB.company.name === 'บริษัท ศรีวัฒนาการค้า จำกัด');
   }
   if (Array.isArray(DB.entries) && DB.entries.length) repairDuplicateEntryNos();
+  /* ผังบัญชีรุ่นก่อนให้ "เงินเดือนและค่าจ้าง" เป็นค่าใช้จ่ายบริหารทั่วไป ระบบจึงเลือกบัญชีนี้ทุกครั้งที่ต้องการ
+     ค่าใช้จ่ายบริหาร ค่าเช่าและวัสดุสำนักงานไปลงบัญชีเงินเดือน — แยกประเภทให้บัญชีเงินเดือนโดยเฉพาะ */
+  if (Array.isArray(DB.accounts) && !DB.accounts.some((a) => a.subType === 'salary_expense')) {
+    const sal = DB.accounts.find((a) => a.subType === 'admin_expense' && /เงินเดือน|ค่าจ้าง/.test(a.name || ''));
+    if (sal) {
+      sal.subType = 'salary_expense';
+      audit('account', sal.code, 'retype', { subType: 'admin_expense' }, { subType: 'salary_expense' },
+        'แยกบัญชีเงินเดือนออกจากค่าใช้จ่ายบริหารทั่วไป รายการใหม่จะไม่ลงบัญชีเงินเดือนผิดอีก');
+    }
+  }
   return !!DB.company;
 }
 
@@ -1371,7 +1385,7 @@ const PL_LINES = [
   { k:'s', label:'กำไรขั้นต้น', calc:'gross' },
   { k:'d', label:'รายได้อื่น', sub:['other_income','interest_income','fx_gain','gain_on_disposal','bad_debt_recovery'], sign:-1, group:'rev' },
   { k:'d', label:'ค่าใช้จ่ายในการขาย', sub:['selling_expense'], sign:1, group:'exp' },
-  { k:'d', label:'ค่าใช้จ่ายในการบริหาร', sub:['admin_expense','sso_expense','pvd_expense','depreciation','amortization','bad_debt','fx_loss','loss_on_disposal','non_deductible','non_claimable_vat_expense','rounding','inventory_writeoff'], sign:1, group:'exp' },
+  { k:'d', label:'ค่าใช้จ่ายในการบริหาร', sub:['salary_expense','admin_expense','sso_expense','pvd_expense','depreciation','amortization','bad_debt','fx_loss','loss_on_disposal','non_deductible','non_claimable_vat_expense','rounding','inventory_writeoff'], sign:1, group:'exp' },
   { k:'s', label:'กำไรก่อนต้นทุนทางการเงินและภาษีเงินได้', calc:'ebit' },
   { k:'d', label:'ต้นทุนทางการเงิน', sub:['finance_cost'], sign:1, group:'exp' },
   { k:'s', label:'กำไรก่อนภาษีเงินได้', calc:'ebt' },
@@ -2254,6 +2268,9 @@ function setTradeDocStatus(kind, no, status, reason) {
       TRADE_DOCS[kind].label + ' ' + no + ' ถูกแปลงเป็น ' + d.convertedTo + ' ไปแล้ว',
       'ถ้าต้องการยกเลิก ให้จัดการที่เอกสารปลายทางแทน');
   }
+  if (d.status === 'partially_received' && status !== 'cancelled') {
+    throw new DomainError('TRADE_DOC_STATUS_INVALID', 'ใบสั่งซื้อ ' + no + ' รับสินค้าไปบางส่วนแล้ว ยกเลิกส่วนที่เหลือได้อย่างเดียว');
+  }
   d.status = status;
   if (reason) d.statusReason = reason;
   audit(kind, no, status, null, reason ? { reason } : null);
@@ -2271,6 +2288,10 @@ function convertTradeDoc(kind, no, input) {
   if (d.status === 'cancelled' || d.status === 'rejected') {
     throw new DomainError('TRADE_DOC_NOT_ACTIVE',
       TRADE_DOCS[kind].label + ' ' + no + ' อยู่ในสถานะ ' + d.status + ' แปลงต่อไม่ได้');
+  }
+  if (d.status === 'partially_received') {
+    throw new DomainError('PO_PARTIALLY_RECEIVED', 'ใบสั่งซื้อ ' + no + ' รับสินค้าไปบางส่วนแล้ว ตั้งหนี้จากใบสั่งซื้อตรง ๆ ไม่ได้',
+      'ตั้งหนี้จากใบรับสินค้าแต่ละใบ เมื่อได้ใบกำกับภาษีจากผู้ขาย');
   }
   const opts = input || {};
   const date = opts.date || TODAY;
@@ -2294,7 +2315,13 @@ function convertTradeDoc(kind, no, input) {
     }
     made = recordBill({
       partnerCode: d.partnerCode, date, vendorNo: opts.vendorNo,
-      lines: carry.map((l) => ({ ...l, expenseSub: l.expenseSub || opts.expenseSub || 'admin_expense' })),
+      /* บัญชีที่เลือกตอนแปลงใช้กับรายการที่ไม่ใช่สินค้าคงคลัง — สินค้าคงคลังเข้าบัญชีสินค้าเสมอ */
+      lines: carry.map(function (l) {
+        const it = l.itemCode ? DB.items.find((x) => x.code === l.itemCode) : null;
+        const stock = it && it.type === 'stock';
+        return { ...l, acc: stock ? accBySub('inventory') : (opts.acc || l.acc || null),
+          expenseSub: l.expenseSub || opts.expenseSub || 'admin_expense' };
+      }),
       nonClaimableVat: !!opts.nonClaimableVat, whtCode: opts.whtCode || null,
     });
   }
@@ -2340,8 +2367,9 @@ function recordBill(input) {
   const claimable = !input.nonClaimableVat;
 
   const expLines = {};
-  lines.forEach(function (l) {
-    const a = grn ? accBySub('grni') : accBySub(l.expenseSub || 'admin_expense');
+  const lineAcc = lines.map((l, i) => grn ? accBySub('grni') : billLineAccount(l, i));
+  lines.forEach(function (l, i) {
+    const a = lineAcc[i];
     expLines[a] = (expLines[a] || 0) + round2(mulQty(M(l.price), l.qty));
   });
   if (grn && expLines[accBySub('grni')] !== grn.total) {
@@ -2387,8 +2415,8 @@ function recordBill(input) {
   const doc = {
     no, date: input.date, due: addDays(input.date, p.termDays || 0),
     vendorNo: input.vendorNo, partnerCode: p.code, partnerName: p.name,
-    lines: lines.map((l) => ({ desc: l.desc, qty: Number(l.qty), price: M(l.price),
-      amount: round2(mulQty(M(l.price), l.qty)), itemCode: l.itemCode || null })),
+    lines: lines.map((l, i) => ({ desc: l.desc, qty: Number(l.qty), price: M(l.price),
+      amount: round2(mulQty(M(l.price), l.qty)), itemCode: l.itemCode || null, acc: lineAcc[i] })),
     base: v.std + v.zero + v.exempt, vat: v.vat, total: v.total,
     claimable, paid: 0, status: 'issued', entryNo: je.no,
     whtCode: input.whtCode || null, grnNo: grn ? grn.no : null,
@@ -2582,7 +2610,7 @@ function runPayroll(period) {
     type: 'payroll', date: payDate, desc: 'เงินเดือนงวด ' + thPeriod(period),
     src: 'payroll', srcId: period,
     lines: [
-      { acc: accBySub('admin_expense'), dr: gross, memo: 'เงินเดือนและค่าล่วงเวลา' },
+      { acc: salaryAccount(), dr: gross, memo: 'เงินเดือนและค่าล่วงเวลา' },
       { acc: accBySub('sso_expense'), dr: ssoEr, memo: 'เงินสมทบประกันสังคมส่วนนายจ้าง' },
       { acc: accBySub('pvd_expense'), dr: pvdEr, memo: 'เงินสมทบกองทุนสำรองฯ ส่วนนายจ้าง' },
       { acc: accBySub('wht_payable_pnd1'), cr: pit },
@@ -2909,8 +2937,10 @@ function issueGoodsReceipt(input) {
       throw new DomainError('GRN_QTY_INVALID', 'บรรทัดที่ ' + (i + 1) + ' จำนวนที่รับต้องมากกว่าศูนย์');
     }
     if (M(l.price) < 0) throw new DomainError('GRN_PRICE_INVALID', 'บรรทัดที่ ' + (i + 1) + ' ราคาทุนติดลบไม่ได้');
-    return { itemCode: it.code, desc: String(l.desc || '').trim() || it.name, qty: Number(l.qty), uom: it.uom,
+    const row = { itemCode: it.code, desc: String(l.desc || '').trim() || it.name, qty: roundQty(l.qty), uom: it.uom,
       price: M(l.price), amount: round2(mulQty(M(l.price), l.qty)), taxCode: l.taxCode || 'VAT7' };
+    if (l.poLine !== undefined) row.poLine = l.poLine;
+    return row;
   });
   const total = rows.reduce((s, r) => s + r.amount, 0);
   assertPostingOpen(input.date);
@@ -2941,11 +2971,36 @@ function issueGoodsReceipt(input) {
   return doc;
 }
 
-/** รับสินค้าตามใบสั่งซื้อ — ใบสั่งซื้อปิดและชี้ไปที่ใบรับสินค้า */
+/** จำนวนที่รับแล้วของแต่ละบรรทัดในใบสั่งซื้อ — นับเฉพาะใบรับสินค้าที่ยังไม่ยกเลิก */
+function poReceived(po) {
+  const got = po.lines.map(() => 0);
+  DB.docs.goodsReceipt.forEach(function (g) {
+    if (g.poNo !== po.no || g.status === 'void') return;
+    g.lines.forEach(function (r, i) {
+      const k = r.poLine !== undefined && r.poLine !== null ? r.poLine : i;   // ใบรุ่นก่อนรับครบทุกบรรทัดตามลำดับ
+      if (k < got.length) got[k] = roundQty(got[k] + r.qty);
+    });
+  });
+  return got;
+}
+/** สถานะใบสั่งซื้อคิดจากของที่รับจริง: ยังไม่รับ / รับบางส่วน / รับครบ (ปิด) */
+function syncPoStatus(po) {
+  const got = poReceived(po);
+  const grns = DB.docs.goodsReceipt.filter((g) => g.poNo === po.no && g.status !== 'void').map((g) => g.no).reverse();
+  po.grnNos = grns;
+  if (po.status === 'cancelled') return po;                 // ยกเลิกส่วนที่เหลือไปแล้ว คงสถานะไว้
+  const all = po.lines.every((l, i) => got[i] >= roundQty(l.qty));
+  if (grns.length && all) { po.status = 'closed'; po.convertedTo = grns.join(', '); }
+  else if (grns.length) { po.status = 'partially_received'; po.convertedTo = null; }
+  else { po.status = po.statusBeforeReceive || 'approved'; po.convertedTo = null; }
+  return po;
+}
+/** รับสินค้าตามใบสั่งซื้อ — รับครบหรือรับบางส่วนก็ได้ ส่วนที่เหลือรับต่อในใบรับสินค้าใบถัดไป
+    input.lines = [{ line: ลำดับบรรทัดในใบสั่งซื้อ, qty }] · ไม่ระบุ = รับส่วนที่ค้างทั้งหมด */
 function receiveGoodsFromPo(poNo, input) {
   const po = tradeDocFind('purchaseOrder', poNo);
   if (po.status === 'closed') {
-    throw new DomainError('TRADE_DOC_ALREADY_CONVERTED', 'ใบสั่งซื้อ ' + poNo + ' ถูกแปลงเป็น ' + po.convertedTo + ' ไปแล้ว');
+    throw new DomainError('TRADE_DOC_ALREADY_CONVERTED', 'ใบสั่งซื้อ ' + poNo + ' รับสินค้าครบหรือแปลงเป็น ' + po.convertedTo + ' ไปแล้ว');
   }
   if (po.status === 'cancelled' || po.status === 'rejected') {
     throw new DomainError('TRADE_DOC_NOT_ACTIVE', 'ใบสั่งซื้อ ' + poNo + ' อยู่ในสถานะ ' + po.status + ' รับสินค้าไม่ได้');
@@ -2960,13 +3015,30 @@ function receiveGoodsFromPo(poNo, input) {
       'ตั้งหนี้ผู้ขายจากใบสั่งซื้อโดยตรงแทน');
   }
   const opts = input || {};
+  const got = poReceived(po);
+  const want = Array.isArray(opts.lines)
+    ? opts.lines.map((x) => ({ line: Number(x.line), qty: roundQty(x.qty || 0) }))
+    : po.lines.map((l, i) => ({ line: i, qty: roundQty(roundQty(l.qty) - got[i]) }));
+  const rows = [];
+  want.forEach(function (w) {
+    const l = po.lines[w.line];
+    if (!l) throw new DomainError('GRN_PO_LINE_INVALID', 'ไม่พบบรรทัดที่ ' + (w.line + 1) + ' ในใบสั่งซื้อ ' + poNo);
+    if (!(w.qty > 0)) return;
+    const left = roundQty(roundQty(l.qty) - got[w.line]);
+    if (w.qty > left) {
+      throw new DomainError('GRN_PO_OVER_RECEIVE', l.desc + ' รับ ' + w.qty + ' เกินที่สั่งและยังค้างรับ ' + left,
+        'ถ้าผู้ขายส่งเกิน ให้ขอใบสั่งซื้อเพิ่ม หรือรับเท่าที่สั่งแล้วคืนส่วนเกิน');
+    }
+    rows.push({ ...l, price: unM(l.price), qty: w.qty, poLine: w.line });
+  });
+  if (!rows.length) throw new DomainError('GRN_QTY_INVALID', 'ต้องรับสินค้าอย่างน้อย 1 รายการ');
+  if (po.status !== 'partially_received') po.statusBeforeReceive = po.status;
   const grn = issueGoodsReceipt({
     partnerCode: po.partnerCode, date: opts.date || TODAY, vendorDoNo: opts.vendorDoNo, poNo: po.no,
-    lines: po.lines.map((l) => ({ ...l, price: unM(l.price) })), note: po.note,
+    lines: rows, note: opts.note || po.note,
   });
-  po.status = 'closed';
-  po.convertedTo = grn.no;
-  audit('purchaseOrder', poNo, 'convert', null, { to: grn.no });
+  syncPoStatus(po);
+  audit('purchaseOrder', poNo, po.status === 'closed' ? 'convert' : 'partial_receive', null, { to: grn.no });
   return grn;
 }
 
@@ -3536,6 +3608,9 @@ function voidDocument(kind, no, reason) {
       t.void = true; t.voidReason = why;
     });
     const inv = d.invoiceNo ? DB.docs.invoice.find((x) => x.no === d.invoiceNo) : null;
+    /* ตั้งสถานะยกเลิกก่อนปรับทะเบียนที่เกี่ยวข้อง — ตัวที่นับใหม่จากเอกสาร (เช่นยอดรับของตามใบสั่งซื้อ) จะได้ไม่นับใบนี้ */
+    const before = d.status;
+    d.status = 'void';
     if (kind === 'invoice') { stockBack(no, 'out'); reopenTradeDoc('salesOrder', no); }
     if (kind === 'receipt') { inv.paid -= d.gross; syncInvStatus(inv); }
     if (kind === 'customerRefund') { inv.refunded = (inv.refunded || 0) - d.amount; syncInvStatus(inv); }
@@ -3557,8 +3632,6 @@ function voidDocument(kind, no, reason) {
     }
     if (kind === 'expense') voidCert(d.certNo);
     if (kind === 'goodsReceipt') { stockBack(no, 'in'); reopenGrnOnPo(d); }
-    const before = d.status;
-    d.status = 'void';
     d.voidReason = why;
     d.voidedAt = new Date().toISOString();
     audit(kind, no, 'void', { status: before }, { status: 'void' }, why);
@@ -3569,8 +3642,7 @@ function voidDocument(kind, no, reason) {
 function reopenGrnOnPo(g) {
   if (!g.poNo) return;
   const po = DB.docs.purchaseOrder.find((x) => x.no === g.poNo);
-  if (!po) return;
-  if (po.convertedTo === g.no) { po.status = 'approved'; po.convertedTo = null; }
+  if (po) syncPoStatus(po);
 }
 
 /** มูลค่าก่อนภาษีที่ยังลดหนี้ได้ = ใบกำกับ + ใบเพิ่มหนี้ − ใบลดหนี้ที่ยังไม่ยกเลิก
@@ -3830,9 +3902,52 @@ function openNextFiscalYear(reason) {
   return made;
 }
 
+
+/* ===================================================================
+   บัญชีค่าใช้จ่ายของรายการซื้อ — เลือกบัญชีเจาะจงได้ ไม่ต้องเดาจากประเภท
+   =================================================================== */
+/** บัญชีที่ตั้งหนี้ผู้ขายลงได้: ค่าใช้จ่าย สินค้า ทรัพย์สิน ค่าใช้จ่ายล่วงหน้า เงินมัดจำ */
+function billAccounts() {
+  const assetSubs = ['inventory', 'ppe', 'ppe_land', 'cip', 'intangible', 'other_asset'];
+  const out = DB.accounts.filter((a) => a.postable && assetSubs.indexOf(a.subType) >= 0);
+  expenseAccounts().forEach((a) => { if (out.indexOf(a) < 0) out.push(a); });
+  return out;
+}
+/** บัญชีปริยายของประเภท — ค่าใช้จ่ายบริหารทั่วไปลง "เบ็ดเตล็ด" ไม่ใช่บัญชีแรกที่บังเอิญเจอ */
+function defaultAccountFor(sub) {
+  const accs = DB.accounts.filter((a) => a.postable && a.subType === sub);
+  const pick = accs.find((a) => a.isDefault)
+    || (sub === 'admin_expense' ? accs.find((a) => /เบ็ดเตล็ด/.test(a.name || '')) || accs.find((a) => /อื่น/.test(a.name || '')) : null)
+    || accs[0];
+  return pick ? pick.code : accBySub(sub);
+}
+function billLineAccount(l, i) {
+  if (l.acc) {
+    const ok = billAccounts().some((a) => a.code === l.acc);
+    if (!ok) {
+      throw new DomainError('BILL_ACCOUNT_INVALID', 'บรรทัดที่ ' + (i + 1) + ' บัญชี ' + l.acc + ' ใช้บันทึกรายการซื้อไม่ได้',
+        'เลือกบัญชีค่าใช้จ่าย สินค้าคงเหลือ ทรัพย์สิน หรือค่าใช้จ่ายจ่ายล่วงหน้า');
+    }
+    if (l.itemCode && acc(l.acc).subType !== 'inventory') {
+      const it = DB.items.find((x) => x.code === l.itemCode);
+      if (it && it.type === 'stock') {
+        throw new DomainError('BILL_STOCK_ACCOUNT', 'บรรทัดที่ ' + (i + 1) + ' เป็นสินค้าคงคลัง ต้องลงบัญชีสินค้าคงเหลือ',
+          'ถ้าเป็นค่าใช้จ่าย ไม่ต้องเลือกสินค้า');
+      }
+    }
+    return l.acc;
+  }
+  return defaultAccountFor(l.expenseSub || 'admin_expense');
+}
+/** บัญชีเงินเดือน — ข้อมูลรุ่นก่อนที่ยังไม่แยกประเภท ใช้ค่าใช้จ่ายบริหารแทน */
+function salaryAccount() {
+  const a = DB.accounts.find((x) => x.postable && x.subType === 'salary_expense');
+  return a ? a.code : accBySub('admin_expense');
+}
+
 /* ===================================================================
    ห่อทุกคำสั่งที่เขียนข้อมูลให้เป็นชุดเดียว (ดู atomically ใน engine.js)
-   ต้องอยู่ท้ายไฟล์ และต้องห่อที่นี่ที่เดียว หน้าจอเรียกชื่อเดิมได้เลย
+   อยู่ท้ายไฟล์เสมอ · เพิ่มคำสั่งใหม่ที่เขียนข้อมูลต้องเพิ่มชื่อในรายการนี้ด้วย · หน้าจอเรียกชื่อเดิมได้เลย
    =================================================================== */
 savePartner = transactional(savePartner);
 saveItem = transactional(saveItem);
@@ -3959,7 +4074,7 @@ const COA = [
   ['5200','ค่าใช้จ่ายในการขาย','expense','selling_expense',1],
   ['5220','ค่าโฆษณาและส่งเสริมการขาย','expense','selling_expense',1],
   ['5230','ค่าขนส่งออก','expense','selling_expense',1],
-  ['5311','เงินเดือนและค่าจ้าง','expense','admin_expense',1],
+  ['5311','เงินเดือนและค่าจ้าง','expense','salary_expense',1],
   ['5315','เงินสมทบประกันสังคม–ส่วนนายจ้าง','expense','sso_expense',1],
   ['5316','เงินสมทบกองทุนสำรองฯ–ส่วนนายจ้าง','expense','pvd_expense',1],
   /* หมวดค่าใช้จ่ายสำนักงานตาม docs/10 — ให้หน้าบันทึกค่าใช้จ่ายเลือกลงบัญชีได้ตรงชนิด */
@@ -4319,22 +4434,22 @@ function generateTransactions() {
 
     // ---- ค่าใช้จ่ายประจำเดือน ----
     const recurring = [
-      { v:'VEN-0012', no:'TNP-69-', desc:'ค่าเช่าอาคารสำนักงานและโกดัง', amt:'120000', sub:'admin_expense', wht:'WHT_RENT', day:1 },
-      { v:'VEN-0009', no:'SBN-69-', desc:'ค่าขนส่งสินค้าประจำเดือน', amt:String(rint(60, 95) * 1000), sub:'selling_expense', wht:'WHT_TRANSPORT', day:25 },
-      { v:'VEN-0025', no:'OFM-69-', desc:'วัสดุสิ้นเปลืองสำนักงาน', amt:String(rint(12, 28) * 1000), sub:'admin_expense', wht:null, day:12 },
-      { v:'VEN-0030', no:'ENG-69-', desc:'ค่าน้ำมันรถยนต์นั่งผู้บริหาร', amt:String(rint(14, 22) * 1000), sub:'admin_expense', wht:null, day:20, nonClaim:true },
+      { v:'VEN-0012', no:'TNP-69-', desc:'ค่าเช่าอาคารสำนักงานและโกดัง', amt:'120000', acc:'5321', wht:'WHT_RENT', day:1 },
+      { v:'VEN-0009', no:'SBN-69-', desc:'ค่าขนส่งสินค้าประจำเดือน', amt:String(rint(60, 95) * 1000), acc:'5230', wht:'WHT_TRANSPORT', day:25 },
+      { v:'VEN-0025', no:'OFM-69-', desc:'วัสดุสิ้นเปลืองสำนักงาน', amt:String(rint(12, 28) * 1000), acc:'5324', wht:null, day:12 },
+      { v:'VEN-0030', no:'ENG-69-', desc:'ค่าน้ำมันรถยนต์นั่งผู้บริหาร', amt:String(rint(14, 22) * 1000), acc:'5327', wht:null, day:20, nonClaim:true },
     ];
     if (mi % 2 === 0) {
-      recurring.push({ v:'VEN-0015', no:'MDP-69-', desc:'ค่าโฆษณาออนไลน์', amt:'200000', sub:'selling_expense', wht:'WHT_ADVERT', day:18 });
+      recurring.push({ v:'VEN-0015', no:'MDP-69-', desc:'ค่าโฆษณาออนไลน์', amt:'200000', acc:'5220', wht:'WHT_ADVERT', day:18 });
     }
     if (mi % 3 === 1) {
-      recurring.push({ v:'VEN-0021', no:'MAL-69-', desc:'ค่าที่ปรึกษาระบบบัญชี', amt:'50000', sub:'admin_expense', wht:'WHT_PROF', day:15 });
+      recurring.push({ v:'VEN-0021', no:'MAL-69-', desc:'ค่าที่ปรึกษาระบบบัญชี', amt:'50000', acc:'5334', wht:'WHT_PROF', day:15 });
     }
     recurring.forEach(function (r, ri) {
       recordBill({
         date: mo + '-' + String(r.day).padStart(2, '0'),
         partnerCode: r.v, vendorNo: r.no + (mi * 10 + ri + 100),
-        lines: [{ desc: r.desc, qty: 1, price: r.amt, expenseSub: r.sub }],
+        lines: [{ desc: r.desc, qty: 1, price: r.amt, acc: r.acc }],
         whtCode: r.wht, nonClaimableVat: !!r.nonClaim,
       });
     });
@@ -4377,14 +4492,14 @@ function generateTransactions() {
       date: mo + '-' + String(rint(3, 8)).padStart(2, '0'),
       partnerCode: poVendor.code,
       lines: [{ desc:'สั่งซื้อวัสดุและอุปกรณ์ตามแผนเดือน ' + thPeriod(mo),
-                qty:1, price:String(rint(20, 60) * 1000), expenseSub:'admin_expense' }],
+                qty:1, price:String(rint(20, 60) * 1000), acc:'5324' }],
       note:'ส่งของภายใน 15 วัน',
     });
     if (mi % 2 === 0) {
       convertTradeDoc('purchaseOrder', po.no, {
         date: mo + '-' + String(rint(14, Math.min(24, last))).padStart(2, '0'),
         vendorNo: 'PO-' + poVendor.code.slice(-4) + '-' + mo.replace('-', '') + '-1',
-        expenseSub: 'admin_expense',
+        acc: '5324',
       });
     }
 
@@ -4788,6 +4903,7 @@ function statusPill(s) {
     approved:['paid','อนุมัติแล้ว'], rejected:['late','ถูกปฏิเสธ'], expired:['late','หมดอายุ'],
     cancelled:['late','ยกเลิก'], received:['open','รับเข้าคลังแล้ว'],
     pending_approval:['wait','รออนุมัติ'], credit_balance:['wait','ลูกค้ามีเครดิต รอคืนเงิน'],
+    partially_received:['wait','รับสินค้าบางส่วน'],
   };
   const m = map[s] || ['draft', s];
   return { st: m };
@@ -5757,6 +5873,7 @@ const DBD_BY_LEAD = { '1':'other_current_asset', '2':'other_payable', '3':'retai
 /* subType ที่โครงงบการเงินรองรับแล้ว แต่ผังบัญชีตั้งต้นของเรายังไม่มีบัญชีใช้
    ต้องบอกประเภทไว้ตรงนี้ ไม่งั้นบัญชีที่นำเข้ามาจะไม่มีประเภทแล้วสร้างไม่ได้ */
 const EXTRA_SUBTYPE_TYPE = {
+  salary_expense: 'expense',
   short_term_investment: 'asset',
   other_current_asset: 'asset',
 };
@@ -6954,8 +7071,9 @@ function billDetail(no) {
       + (d.grnNo ? btn('open:goodsreceipts:' + d.grnNo, 'ดูใบรับสินค้า') : '')
       + btn('entry:' + d.entryNo, 'ดูใบสำคัญ') + voidBtn('bill', d) + btn('sel:', 'ปิด'),
     body: voidBanner(d) + tbl({
-      cols:[{t:'รายการ'},{t:'จำนวน',a:'r'},{t:'ราคาต่อหน่วย',a:'r'},{t:'จำนวนเงิน',a:'r'}],
-      rows: d.lines.map((l) => [l.desc, {n:M(String(l.qty))}, {n:l.price}, {n:l.amount}]),
+      cols:[{t:'รายการ'},{t:'บันทึกเข้าบัญชี'},{t:'จำนวน',a:'r'},{t:'ราคาต่อหน่วย',a:'r'},{t:'จำนวนเงิน',a:'r'}],
+      rows: d.lines.map((l) => [l.desc, l.acc ? l.acc + ' ' + acc(l.acc).name : (d.grnNo ? 'พักรับสินค้า' : {dim:'—'}),
+        {n:M(String(l.qty))}, {n:l.price}, {n:l.amount}]),
     })
     + '<div class="totals">'
     + '<div><span>มูลค่าก่อนภาษี</span><b>' + fmt(d.base) + '</b></div>'
@@ -7819,6 +7937,8 @@ function tradeDocDetail(kind, no) {
   if (!d) return '';
   const st = tradeDocStatus(kind, d);
   const live = st === 'issued' || st === 'approved';
+  const partial = st === 'partially_received';
+  const got = kind === 'purchaseOrder' ? poReceived(d) : null;
   const nextLabel = cfg.next === 'salesOrder' ? 'แปลงเป็นใบสั่งขาย'
     : cfg.next === 'invoice' ? 'แปลงเป็นใบกำกับภาษี' : 'ตั้งหนี้ผู้ขาย';
   return card({
@@ -7826,11 +7946,12 @@ function tradeDocDetail(kind, no) {
     sub: 'ออกวันที่ ' + thDate(d.date)
       + (d.validUntil ? ' · ยืนราคาถึง ' + thDate(d.validUntil) : '')
       + (d.fromDoc ? ' · มาจาก ' + d.fromDoc : ''),
-    actions: (live && kind === 'purchaseOrder' ? btn('grn:po:' + d.no, 'รับสินค้าเข้าคลัง', 'primary') : '')
+    actions: ((live || partial) && kind === 'purchaseOrder' ? btn('grn:po:' + d.no, partial ? 'รับสินค้าส่วนที่เหลือ' : 'รับสินค้าเข้าคลัง', 'primary') : '')
       + (live ? btn('trade:' + kind + ':convert:' + d.no, nextLabel, kind === 'purchaseOrder' ? '' : 'primary') : '')
       + (st === 'issued' ? btn('trade:' + kind + ':approved:' + d.no,
           kind === 'purchaseOrder' ? 'ผู้ขายยืนยันแล้ว' : 'ลูกค้าตอบรับ') : '')
       + (live ? btn('trade:' + kind + ':cancelled:' + d.no, 'ยกเลิก') : '')
+      + (partial ? btn('trade:' + kind + ':cancelled:' + d.no, 'ยกเลิกส่วนที่ยังไม่ได้รับ') : '')
       + printBtn(kind, d.no) + btn('sel:', 'ปิด'),
     body:
       '<div class="docgrid">'
@@ -7839,12 +7960,15 @@ function tradeDocDetail(kind, no) {
       + '<div>' + esc(d.snap ? d.snap.address : '') + '</div></div>'
       + '<div><div class="dim">สถานะ</div><b>' + esc(tradePill(st).st[1]) + '</b>'
       + (d.convertedTo ? '<div>เอกสารปลายทาง ' + esc(d.convertedTo) + '</div>' : '')
+      + (got && (d.grnNos || []).length && !d.convertedTo ? '<div>ใบรับสินค้า ' + esc(d.grnNos.join(', ')) + '</div>' : '')
       + (d.statusReason ? '<div>' + esc(d.statusReason) + '</div>' : '') + '</div>'
       + '</div>'
       + tbl({
-          cols:[{t:'รายการ'},{t:'จำนวน',a:'r'},{t:'ราคาต่อหน่วย',a:'r'},{t:'ภาษี'},{t:'จำนวนเงิน',a:'r'}],
-          rows: d.lines.map((l) => [l.desc, {n:M(String(l.qty))}, {n:l.price},
-            l.taxCode === 'VAT7' ? 'VAT 7%' : l.taxCode === 'VAT0' ? 'อัตรา 0%' : 'ยกเว้น', {n:l.amount}]),
+          cols:[{t:'รายการ'},{t:'จำนวน',a:'r'}].concat(got ? [{t:'รับแล้ว',a:'r'},{t:'ค้างรับ',a:'r'}] : [])
+            .concat([{t:'ราคาต่อหน่วย',a:'r'},{t:'ภาษี'},{t:'จำนวนเงิน',a:'r'}]),
+          rows: d.lines.map((l, i) => [l.desc, {n:M(String(l.qty))}]
+            .concat(got ? [{n:M(String(got[i]))}, {n:M(String(roundQty(l.qty - got[i])))}] : [])
+            .concat([{n:l.price}, l.taxCode === 'VAT7' ? 'VAT 7%' : l.taxCode === 'VAT0' ? 'อัตรา 0%' : 'ยกเว้น', {n:l.amount}])),
         })
       + '<div class="totals">'
       + '<div><span>มูลค่าก่อนภาษี</span><b>' + fmt(d.base) + '</b></div>'
@@ -9793,13 +9917,7 @@ function modalConvertTradeDoc(kind, no) {
   const toBill = cfg.next === 'bill';
   const nextLabel = cfg.next === 'salesOrder' ? 'ใบสั่งขาย'
     : cfg.next === 'invoice' ? 'ใบกำกับภาษี' : 'รายการตั้งหนี้';
-  const expOpts = [
-    ['inventory','ซื้อสินค้าเข้าคลัง'],
-    ['admin_expense','ค่าใช้จ่ายในการบริหาร'],
-    ['selling_expense','ค่าใช้จ่ายในการขาย'],
-    ['ppe','ซื้อทรัพย์สินถาวร'],
-    ['finance_cost','ค่าธรรมเนียมและดอกเบี้ย'],
-  ];
+  const stockOnly = d.lines.every((l) => { const it = l.itemCode && DB.items.find((x) => x.code === l.itemCode); return it && it.type === 'stock'; });
   modal({
     title:'แปลง' + cfg.label + ' ' + no + ' เป็น' + nextLabel,
     sub: d.partnerName + ' · รวม ' + fmt(d.total) + ' บาท · ' + d.lines.length + ' รายการ',
@@ -9807,7 +9925,9 @@ function modalConvertTradeDoc(kind, no) {
       + field({ name:'date', label:'วันที่ของ' + nextLabel, type:'date', value: defaultDate(),
           hint: cfg.next === 'salesOrder' ? '' : 'ต้องอยู่ในงวดที่ยังเปิดอยู่ ระบบจะเลือกอัตราภาษีตามวันที่นี้' })
       + (toBill ? field({ name:'vendorNo', label:'เลขที่ใบกำกับภาษีของผู้ขาย', placeholder:'ดูจากใบกำกับที่ผู้ขายส่งมา' }) : '')
-      + (toBill ? field({ name:'expenseSub', label:'บันทึกเข้าบัญชี', type:'select', value:'admin_expense', options: expOpts }) : '')
+      + (toBill && !stockOnly ? field({ name:'acc', label:'บันทึกเข้าบัญชี', type:'select', wide:true,
+          value: d.lines[0].acc || defaultAccountFor(d.lines[0].expenseSub || 'admin_expense'), options: optBillAccounts(),
+          hint:'ใช้กับรายการที่ไม่ใช่สินค้าคงคลัง · สินค้าคงคลังเข้าบัญชีสินค้าคงเหลือเสมอ' }) : '')
       + (toBill ? field({ name:'wht', label:'ภาษีหัก ณ ที่จ่ายตอนจ่ายเงิน', type:'select', options: optWht() }) : '')
       + '</div>',
     submitLabel:'แปลงเป็น' + nextLabel,
@@ -9817,7 +9937,7 @@ function modalConvertTradeDoc(kind, no) {
       submitAction(function () {
         const made = convertTradeDoc(kind, no, {
           date: val('date'), vendorNo: toBill ? val('vendorNo') : null,
-          expenseSub: toBill ? val('expenseSub') : null,
+          acc: toBill && !stockOnly ? val('acc') : null,
           whtCode: toBill ? (val('wht') || null) : null,
         });
         STATE.sel = null;
@@ -9829,14 +9949,12 @@ function modalConvertTradeDoc(kind, no) {
 }
 
 /* ---------- ตั้งหนี้ผู้ขาย ---------- */
+/** บัญชีที่รายการซื้อลงได้ แบ่งกลุ่มให้อ่านง่าย */
+function optBillAccounts() {
+  const grp = (a) => a.subType === 'inventory' ? 'สินค้า' : a.type === 'asset' ? 'สินทรัพย์' : 'ค่าใช้จ่าย';
+  return billAccounts().map((a) => [a.code, grp(a) + ' · ' + a.code + ' ' + a.name]);
+}
 function modalBill() {
-  const expOpts = [
-    ['inventory','ซื้อสินค้าเข้าคลัง'],
-    ['admin_expense','ค่าใช้จ่ายในการบริหาร'],
-    ['selling_expense','ค่าใช้จ่ายในการขาย'],
-    ['ppe','ซื้อทรัพย์สินถาวร'],
-    ['finance_cost','ค่าธรรมเนียมและดอกเบี้ย'],
-  ];
   modal({
     title:'บันทึกใบกำกับภาษีซื้อ',
     sub:'ระบบกันการบันทึกเลขที่ใบกำกับซ้ำของผู้ขายรายเดียวกัน',
@@ -9844,7 +9962,8 @@ function modalBill() {
       + field({ name:'partner', label:'ผู้ขาย', type:'select', options: optVendors() })
       + field({ name:'vendorNo', label:'เลขที่ใบกำกับภาษีของผู้ขาย', placeholder:'เช่น IV6907-0245' })
       + field({ name:'date', label:'วันที่ตามใบกำกับ', type:'date', value: defaultDate() })
-      + field({ name:'expenseSub', label:'บันทึกเข้าบัญชี', type:'select', value:'admin_expense', options: expOpts })
+      + field({ name:'acc', label:'บันทึกเข้าบัญชี', type:'select', wide:true, value: defaultAccountFor('admin_expense'),
+          options: optBillAccounts(), hint:'ซื้อสินค้าเข้าคลังให้เลือกบัญชีสินค้าคงเหลือแล้วเลือกสินค้าด้านล่าง' })
       + field({ name:'item', label:'สินค้า (เฉพาะกรณีซื้อเข้าคลัง)', type:'select', options: optItems() })
       + field({ name:'desc', label:'คำอธิบายรายการ', wide:true, placeholder:'เช่น ค่าเช่าสำนักงานเดือนกรกฎาคม' })
       + field({ name:'qty', label:'จำนวน', value:'1' })
@@ -9857,8 +9976,8 @@ function modalBill() {
     submitLabel:'ตั้งหนี้และลงบัญชี',
     onSubmit: function () {
       submitAction(function () {
-        const sub = val('expenseSub');
-        const itemCode = sub === 'inventory' ? (val('item') || null) : null;
+        const accCode = val('acc');
+        const itemCode = acc(accCode).subType === 'inventory' ? (val('item') || null) : null;
         const it = DB.items.find((x) => x.code === itemCode);
         const b = recordBill({
           partnerCode: val('partner'), vendorNo: val('vendorNo').trim(), date: val('date'),
@@ -9866,7 +9985,7 @@ function modalBill() {
           lines: [{
             desc: val('desc').trim() || (it ? it.name : ''),
             qty: Number(val('qty') || 1) || 1, price: val('price'),
-            taxCode: val('tax'), expenseSub: sub, itemCode: itemCode,
+            taxCode: val('tax'), acc: accCode, itemCode: itemCode,
           }],
         });
         STATE.screen = 'bills'; STATE.sel = b.no;
@@ -10045,22 +10164,31 @@ function modalGoodsReceipt() {
 function modalReceiveFromPo(poNo) {
   const po = DB.docs.purchaseOrder.find((x) => x.no === poNo);
   if (!po) return;
+  const got = poReceived(po);
+  const left = po.lines.map((l, i) => roundQty(roundQty(l.qty) - got[i]));
   modal({
     title:'รับสินค้าตามใบสั่งซื้อ ' + poNo,
-    sub: po.partnerName + ' · ' + po.lines.length + ' รายการ · มูลค่าก่อนภาษี ' + fmt(po.base) + ' บาท',
+    sub: po.partnerName + ' · ' + po.lines.length + ' รายการ · มูลค่าก่อนภาษี ' + fmt(po.base) + ' บาท'
+      + (got.some((q) => q > 0) ? ' · รับไปแล้วบางส่วน' : ''),
     body:'<div class="flds">'
       + field({ name:'date', label:'วันที่รับสินค้า', type:'date', value: defaultDate() })
       + field({ name:'vendorDoNo', label:'เลขที่ใบส่งของของผู้ขาย', placeholder:'ดูจากใบส่งของที่มากับสินค้า' })
       + '</div>'
-      + tbl({ cols:[{t:'รายการ'},{t:'จำนวน',a:'r'},{t:'ราคาต่อหน่วย',a:'r'},{t:'มูลค่า',a:'r'}],
-          rows: po.lines.map((l) => [l.desc, {n:M(String(l.qty))}, {n:l.price}, {n:l.amount}]) }),
+      + '<div class="scroll"><table><thead><tr><th class="l">รายการ</th><th class="r">สั่ง</th><th class="r">รับแล้ว</th>'
+      + '<th class="r">ค้างรับ</th><th class="r">รับครั้งนี้</th><th class="r">ราคาต่อหน่วย</th></tr></thead><tbody>'
+      + po.lines.map((l, i) => '<tr><td>' + esc(l.desc) + '</td><td class="num">' + l.qty + '</td><td class="num">' + got[i]
+        + '</td><td class="num">' + left[i] + '</td><td class="num"><input class="qty-in" type="number" min="0" step="any" name="rq' + i
+        + '" value="' + left[i] + '"' + (left[i] > 0 ? '' : ' disabled') + '></td><td class="num">' + fmt(l.price) + '</td></tr>').join('')
+      + '</tbody></table></div>',
     submitLabel:'รับเข้าคลังและลงบัญชี',
-    note:'ใบสั่งซื้อจะปิดและชี้ไปที่ใบรับสินค้าใบนี้',
+    note:'รับไม่ครบก็ได้ ส่วนที่เหลือรับต่อในใบรับสินค้าใบถัดไป · รับครบทุกรายการแล้วใบสั่งซื้อจะปิดเอง',
     onSubmit: function () {
       submitAction(function () {
-        const g = receiveGoodsFromPo(poNo, { date: val('date'), vendorDoNo: val('vendorDoNo') });
+        const lines = po.lines.map((l, i) => ({ line: i, qty: Number(val('rq' + i) || 0) })).filter((x) => x.qty > 0);
+        const g = receiveGoodsFromPo(poNo, { date: val('date'), vendorDoNo: val('vendorDoNo'), lines });
         STATE.screen = 'goodsreceipts'; STATE.sel = g.no; STATE.period = periodOf(g.date);
-        toast('รับสินค้าเข้าคลังแล้ว ' + g.no, 'ok', 'ใบสั่งซื้อ ' + poNo + ' ปิดรายการแล้ว');
+        toast('รับสินค้าเข้าคลังแล้ว ' + g.no, 'ok', po.status === 'closed' ? 'ใบสั่งซื้อ ' + poNo + ' รับครบ ปิดรายการแล้ว'
+          : 'ใบสั่งซื้อ ' + poNo + ' ยังค้างรับบางรายการ');
         return g;
       });
     },

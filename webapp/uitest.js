@@ -1483,6 +1483,31 @@ const overflowInfo = (page) => page.evaluate(() => {
       row: document.getElementById('main').textContent.indexOf('คืนเงินลูกค้า') >= 0 }; }, rfNo);
   ok('★ คืนเงินแล้วยอดค้างเป็นศูนย์ สถานะชำระครบ และลูกหนี้ยังตรงบัญชีคุม', rfDone.out === 0 && rfDone.st === 'paid' && rfDone.ok && rfDone.row, JSON.stringify(rfDone));
 
+  console.log('\n[23] ทยอยรับสินค้าตามใบสั่งซื้อ และเลือกบัญชีค่าใช้จ่ายตอนตั้งหนี้');
+  const poNo = await page.evaluate(() => {
+    const it = DB.items.find((i) => i.code === 'SW-220');
+    const po = issueTradeDoc('purchaseOrder', { partnerCode:'VEN-0004', date:'2026-07-20', lines:[{ desc: it.name, qty: 50, price:'100', itemCode: it.code }] });
+    save(); STATE.screen = 'purchaseorders'; STATE.sel = po.no; render();
+    return po.no;
+  });
+  await page.click('#main [data-act="grn:po:' + poNo + '"]');
+  await page.waitForSelector('#modal.show [name="rq0"]');
+  await page.fill('#modal [name="rq0"]', '20');
+  await page.click('#modal [data-act="modal:submit"]');
+  const part = await page.evaluate((no) => { const po = DB.docs.purchaseOrder.find((x) => x.no === no);
+    STATE.screen = 'purchaseorders'; STATE.sel = no; render();
+    return { st: po.status, got: poReceived(po)[0], btn: !!document.querySelector('#main [data-act="grn:po:' + no + '"]'),
+      txt: document.getElementById('main').textContent.indexOf('ค้างรับ') >= 0 }; }, poNo);
+  ok('★ รับ 20 จาก 50 ผ่านฟอร์ม ใบสั่งซื้อขึ้นว่ารับบางส่วน มีคอลัมน์ค้างรับ และกดรับส่วนที่เหลือต่อได้',
+    part.st === 'partially_received' && part.got === 20 && part.btn && part.txt, JSON.stringify(part));
+  await page.evaluate(() => { STATE.screen = 'bills'; STATE.sel = null; render(); });
+  await page.click('#main [data-act="new:bill"]');
+  await page.waitForSelector('#modal.show [name="acc"]');
+  const accOpt = await page.evaluate(() => ({ def: document.querySelector('#modal [name="acc"]').value,
+    has5311: [...document.querySelectorAll('#modal [name="acc"] option')].some((o) => o.value === '5321') }));
+  ok('★ ฟอร์มตั้งหนี้ให้เลือกบัญชีค่าใช้จ่ายเจาะจง ค่าเริ่มต้นเป็นค่าใช้จ่ายเบ็ดเตล็ด ไม่ใช่บัญชีเงินเดือน', accOpt.def === '5358' && accOpt.has5311, accOpt.def);
+  await page.keyboard.press('Escape');
+
   ok('ไม่มีข้อผิดพลาดในคอนโซลเลย', errors.length === 0, errors.slice(0, 3).join(' | '));
 
   await page.setViewportSize({ width: 1440, height: 950 });

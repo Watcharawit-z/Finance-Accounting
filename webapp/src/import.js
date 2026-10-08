@@ -453,6 +453,7 @@ const DBD_BY_LEAD = { '1':'other_current_asset', '2':'other_payable', '3':'retai
 /* subType ที่โครงงบการเงินรองรับแล้ว แต่ผังบัญชีตั้งต้นของเรายังไม่มีบัญชีใช้
    ต้องบอกประเภทไว้ตรงนี้ ไม่งั้นบัญชีที่นำเข้ามาจะไม่มีประเภทแล้วสร้างไม่ได้ */
 const EXTRA_SUBTYPE_TYPE = {
+  salary_expense: 'expense',
   short_term_investment: 'asset',
   other_current_asset: 'asset',
 };

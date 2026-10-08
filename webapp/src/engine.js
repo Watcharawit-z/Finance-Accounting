@@ -207,6 +207,16 @@ function loadState(obj) {
     DB.isDemo = !!(DB.company && DB.company.name === 'บริษัท ศรีวัฒนาการค้า จำกัด');
   }
   if (Array.isArray(DB.entries) && DB.entries.length) repairDuplicateEntryNos();
+  /* ผังบัญชีรุ่นก่อนให้ "เงินเดือนและค่าจ้าง" เป็นค่าใช้จ่ายบริหารทั่วไป ระบบจึงเลือกบัญชีนี้ทุกครั้งที่ต้องการ
+     ค่าใช้จ่ายบริหาร ค่าเช่าและวัสดุสำนักงานไปลงบัญชีเงินเดือน — แยกประเภทให้บัญชีเงินเดือนโดยเฉพาะ */
+  if (Array.isArray(DB.accounts) && !DB.accounts.some((a) => a.subType === 'salary_expense')) {
+    const sal = DB.accounts.find((a) => a.subType === 'admin_expense' && /เงินเดือน|ค่าจ้าง/.test(a.name || ''));
+    if (sal) {
+      sal.subType = 'salary_expense';
+      audit('account', sal.code, 'retype', { subType: 'admin_expense' }, { subType: 'salary_expense' },
+        'แยกบัญชีเงินเดือนออกจากค่าใช้จ่ายบริหารทั่วไป รายการใหม่จะไม่ลงบัญชีเงินเดือนผิดอีก');
+    }
+  }
   return !!DB.company;
 }
 
@@ -681,7 +691,7 @@ const PL_LINES = [
   { k:'s', label:'กำไรขั้นต้น', calc:'gross' },
   { k:'d', label:'รายได้อื่น', sub:['other_income','interest_income','fx_gain','gain_on_disposal','bad_debt_recovery'], sign:-1, group:'rev' },
   { k:'d', label:'ค่าใช้จ่ายในการขาย', sub:['selling_expense'], sign:1, group:'exp' },
-  { k:'d', label:'ค่าใช้จ่ายในการบริหาร', sub:['admin_expense','sso_expense','pvd_expense','depreciation','amortization','bad_debt','fx_loss','loss_on_disposal','non_deductible','non_claimable_vat_expense','rounding','inventory_writeoff'], sign:1, group:'exp' },
+  { k:'d', label:'ค่าใช้จ่ายในการบริหาร', sub:['salary_expense','admin_expense','sso_expense','pvd_expense','depreciation','amortization','bad_debt','fx_loss','loss_on_disposal','non_deductible','non_claimable_vat_expense','rounding','inventory_writeoff'], sign:1, group:'exp' },
   { k:'s', label:'กำไรก่อนต้นทุนทางการเงินและภาษีเงินได้', calc:'ebit' },
   { k:'d', label:'ต้นทุนทางการเงิน', sub:['finance_cost'], sign:1, group:'exp' },
   { k:'s', label:'กำไรก่อนภาษีเงินได้', calc:'ebt' },

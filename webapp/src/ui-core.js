@@ -104,6 +104,7 @@ function statusPill(s) {
     approved:['paid','อนุมัติแล้ว'], rejected:['late','ถูกปฏิเสธ'], expired:['late','หมดอายุ'],
     cancelled:['late','ยกเลิก'], received:['open','รับเข้าคลังแล้ว'],
     pending_approval:['wait','รออนุมัติ'], credit_balance:['wait','ลูกค้ามีเครดิต รอคืนเงิน'],
+    partially_received:['wait','รับสินค้าบางส่วน'],
   };
   const m = map[s] || ['draft', s];
   return { st: m };

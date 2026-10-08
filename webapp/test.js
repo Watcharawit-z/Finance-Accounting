@@ -1001,6 +1001,72 @@ console.log('\n=== 7.14 ตัวเลขต้องไม่พลาด — 
   ok('เลขที่ใบสำคัญไม่ซ้ำ', new Set(nosA).size === nosA.length);
 }
 
+console.log('\n=== 7.15 บัญชีค่าใช้จ่ายต้องลงถูกบัญชี — ไม่ปนกับเงินเดือน ===');
+{
+  const B = new Function(src + '\nreturn {DB,buildSeed,recordBill,runPayroll,convertTradeDoc,issueTradeDoc,loadState,balBySub,M,fmt,defaultAccountFor};')();
+  B.buildSeed();
+  const Y = B.DB;
+  const ven = Y.partners.find((p) => p.kind === 'vendor' && p.taxId);
+  const sal = (to, from) => B.balBySub(['salary_expense'], to || '2026-12-31', from);
+  const salEntries = Y.entries.filter((e) => e.status === 'posted' && e.lines.some((l) => l.acc === '5311'));
+  ok('★ บัญชี 5311 เงินเดือนและค่าจ้าง มีแต่รายการจากงวดเงินเดือน (และยอดยกมา) ไม่มีค่าเช่าหรือวัสดุปนเข้ามา',
+    salEntries.every((e) => e.src === 'payroll' || e.src === 'opening' || e.type === 'opening' || e.src === 'import'),
+    salEntries.filter((e) => e.src !== 'payroll' && e.type !== 'opening').map((e) => e.no + ' ' + e.desc).slice(0, 3).join(' · '));
+  const rent = Y.entries.filter((e) => /ค่าเช่าอาคาร/.test(e.desc) || e.lines.some((l) => l.acc === '5321'));
+  ok('ค่าเช่าสำนักงานลงบัญชี 5321 ค่าเช่าสำนักงาน', rent.length > 0 && Y.docs.bill.filter((b) => /TNP-69-/.test(b.vendorNo)).every((b) => b.lines[0].acc === '5321'));
+  const b0 = sal('2026-08-31', '2026-08-01');
+  const plain = B.recordBill({ partnerCode: ven.code, date:'2026-08-03', vendorNo:'ACC-T-1', lines:[{ desc:'ค่าใช้จ่ายทั่วไป', qty:1, price:'1000', expenseSub:'admin_expense' }] });
+  ok('★ ตั้งหนี้แบบไม่ระบุบัญชี ค่าใช้จ่ายบริหารลงบัญชีเบ็ดเตล็ด 5358 ไม่ใช่บัญชีเงินเดือน', plain.lines[0].acc === '5358' && sal('2026-08-31', '2026-08-01') === b0);
+  const chosen = B.recordBill({ partnerCode: ven.code, date:'2026-08-03', vendorNo:'ACC-T-2', lines:[{ desc:'ค่าไฟฟ้า', qty:1, price:'2000', acc:'5322' }] });
+  ok('เลือกบัญชีค่าใช้จ่ายเจาะจงได้', chosen.lines[0].acc === '5322');
+  throws('เลือกบัญชีลูกหนี้เป็นค่าใช้จ่ายไม่ได้', () => B.recordBill({ partnerCode: ven.code, date:'2026-08-03', vendorNo:'ACC-T-3', lines:[{ desc:'ผิดบัญชี', qty:1, price:'100', acc:'1131' }] }), 'BILL_ACCOUNT_INVALID');
+  const stock = Y.items.find((i) => i.type === 'stock');
+  throws('สินค้าคงคลังลงบัญชีค่าใช้จ่ายไม่ได้', () => B.recordBill({ partnerCode: ven.code, date:'2026-08-03', vendorNo:'ACC-T-4', lines:[{ desc: stock.name, qty:1, price:'100', acc:'5324', itemCode: stock.code }] }), 'BILL_STOCK_ACCOUNT');
+  const run = B.runPayroll('2026-08');
+  ok('★ เงินเดือนลงบัญชี 5311 เงินเดือนและค่าจ้าง', Y.entries.find((e) => e.no === run.entryNo).lines.some((l) => l.acc === '5311' && l.dr === run.gross));
+  const po = B.issueTradeDoc('purchaseOrder', { partnerCode: ven.code, date:'2026-08-04', lines:[{ desc:'ค่าซ่อมแอร์', qty:1, price:'3000' }] });
+  const pb = B.convertTradeDoc('purchaseOrder', po.no, { date:'2026-08-05', vendorNo:'ACC-T-5', acc:'5325' });
+  ok('แปลงใบสั่งซื้อเป็นตั้งหนี้ เลือกบัญชีได้', pb.lines[0].acc === '5325');
+
+  /* ข้อมูลรุ่นก่อน: 5311 ยังเป็นค่าใช้จ่ายบริหารทั่วไป */
+  const old = JSON.parse(JSON.stringify(Y));
+  old.accounts.find((a) => a.code === '5311').subType = 'admin_expense';
+  B.loadState(old);
+  ok('★ เปิดข้อมูลรุ่นก่อน ระบบแยกบัญชีเงินเดือนออกจากค่าใช้จ่ายบริหารให้เอง', B.DB.accounts.find((a) => a.code === '5311').subType === 'salary_expense'
+    && B.DB.audit.some((a) => a.action === 'retype'));
+  ok('ค่าใช้จ่ายบริหารปริยายหลังแยกแล้วคือ 5358 ค่าใช้จ่ายเบ็ดเตล็ด', B.defaultAccountFor('admin_expense') === '5358');
+}
+
+console.log('\n=== 7.16 รับสินค้าตามใบสั่งซื้อแบบทยอยรับ ===');
+{
+  const C = new Function(src + '\nreturn {DB,buildSeed,issueTradeDoc,receiveGoodsFromPo,billGoodsReceipt,voidDocument,convertTradeDoc,' +
+    'setTradeDocStatus,poReceived,reconciliationChecks,balBySub,M,fmt};')();
+  C.buildSeed();
+  const Z = C.DB;
+  const ven = Z.partners.find((p) => p.code === 'VEN-0004');
+  const a = Z.items.find((i) => i.code === 'SW-220'), b = Z.items.find((i) => i.type === 'stock' && i.code !== 'SW-220');
+  const qa = a.qty, qb = b.qty;
+  const po = C.issueTradeDoc('purchaseOrder', { partnerCode: ven.code, date:'2026-07-20', lines:[
+    { desc: a.name, qty: 100, price:'50', itemCode: a.code }, { desc: b.name, qty: 10, price:'200', itemCode: b.code }] });
+  const g1 = C.receiveGoodsFromPo(po.no, { date:'2026-07-21', vendorDoNo:'DO-1', lines:[{ line:0, qty:60 }] });
+  ok('★ รับบางส่วน: รับ 60 จาก 100 สต๊อกเพิ่มเท่าที่รับจริง ใบสั่งซื้อขึ้นว่ารับบางส่วน', a.qty === qa + 60 && b.qty === qb
+    && po.status === 'partially_received' && g1.total === C.M('3000'), po.status);
+  throws('★ รับเกินที่สั่งไม่ได้', () => C.receiveGoodsFromPo(po.no, { date:'2026-07-22', lines:[{ line:0, qty:41 }] }), 'GRN_PO_OVER_RECEIVE');
+  throws('ตั้งหนี้จากใบสั่งซื้อที่รับไปบางส่วนแล้วตรง ๆ ไม่ได้', () => C.convertTradeDoc('purchaseOrder', po.no, { date:'2026-07-22', vendorNo:'X-1' }), 'PO_PARTIALLY_RECEIVED');
+  const g2 = C.receiveGoodsFromPo(po.no, { date:'2026-07-23', vendorDoNo:'DO-2' });
+  ok('★ รับส่วนที่เหลือครบ ใบสั่งซื้อปิดและชี้ไปที่ใบรับสินค้าทั้งสองใบ', po.status === 'closed' && po.convertedTo === g1.no + ', ' + g2.no
+    && a.qty === qa + 100 && b.qty === qb + 10, po.convertedTo);
+  ok('ยอดที่รับรวมทุกใบเท่ามูลค่าใบสั่งซื้อพอดี', g1.total + g2.total === po.base);
+  C.billGoodsReceipt(g1.no, { date:'2026-07-24', vendorNo:'TPS-PART-1' });
+  ok('★ ตั้งหนี้ทีละใบรับสินค้า บัญชีพักรับสินค้าเหลือเท่าใบที่ยังไม่ได้ตั้งหนี้', C.reconciliationChecks('2026-07-31').allPassed);
+  C.voidDocument('goodsReceipt', g2.no, 'ของชุดที่สองผิดรุ่น ส่งคืน');
+  ok('★ ยกเลิกใบรับสินค้าใบที่สอง ใบสั่งซื้อกลับมาค้างรับเฉพาะส่วนนั้น', po.status === 'partially_received'
+    && C.poReceived(po).join(',') === '60,0' && a.qty === qa + 60, po.status + ' ' + C.poReceived(po).join(','));
+  C.setTradeDocStatus('purchaseOrder', po.no, 'cancelled', 'ผู้ขายของหมด ยกเลิกส่วนที่เหลือ');
+  throws('ยกเลิกส่วนที่เหลือแล้วรับต่อไม่ได้', () => C.receiveGoodsFromPo(po.no, { date:'2026-07-25' }), 'TRADE_DOC_NOT_ACTIVE');
+  ok('กระทบยอดทุกตัวยังตรงหลังทยอยรับ ยกเลิก และตั้งหนี้', C.reconciliationChecks('2026-07-31').allPassed);
+}
+
 console.log('\n=== 8. ปิดงวด ===');
 const chk = ctx.closeChecklist('2026-06');
 ok('รายการตรวจสอบก่อนปิดงวดครบ', chk.items.length >= 9, chk.items.length + ' ข้อ');

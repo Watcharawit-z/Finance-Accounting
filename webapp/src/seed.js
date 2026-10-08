@@ -83,7 +83,7 @@ const COA = [
   ['5200','ค่าใช้จ่ายในการขาย','expense','selling_expense',1],
   ['5220','ค่าโฆษณาและส่งเสริมการขาย','expense','selling_expense',1],
   ['5230','ค่าขนส่งออก','expense','selling_expense',1],
-  ['5311','เงินเดือนและค่าจ้าง','expense','admin_expense',1],
+  ['5311','เงินเดือนและค่าจ้าง','expense','salary_expense',1],
   ['5315','เงินสมทบประกันสังคม–ส่วนนายจ้าง','expense','sso_expense',1],
   ['5316','เงินสมทบกองทุนสำรองฯ–ส่วนนายจ้าง','expense','pvd_expense',1],
   /* หมวดค่าใช้จ่ายสำนักงานตาม docs/10 — ให้หน้าบันทึกค่าใช้จ่ายเลือกลงบัญชีได้ตรงชนิด */
@@ -443,22 +443,22 @@ function generateTransactions() {
 
     // ---- ค่าใช้จ่ายประจำเดือน ----
     const recurring = [
-      { v:'VEN-0012', no:'TNP-69-', desc:'ค่าเช่าอาคารสำนักงานและโกดัง', amt:'120000', sub:'admin_expense', wht:'WHT_RENT', day:1 },
-      { v:'VEN-0009', no:'SBN-69-', desc:'ค่าขนส่งสินค้าประจำเดือน', amt:String(rint(60, 95) * 1000), sub:'selling_expense', wht:'WHT_TRANSPORT', day:25 },
-      { v:'VEN-0025', no:'OFM-69-', desc:'วัสดุสิ้นเปลืองสำนักงาน', amt:String(rint(12, 28) * 1000), sub:'admin_expense', wht:null, day:12 },
-      { v:'VEN-0030', no:'ENG-69-', desc:'ค่าน้ำมันรถยนต์นั่งผู้บริหาร', amt:String(rint(14, 22) * 1000), sub:'admin_expense', wht:null, day:20, nonClaim:true },
+      { v:'VEN-0012', no:'TNP-69-', desc:'ค่าเช่าอาคารสำนักงานและโกดัง', amt:'120000', acc:'5321', wht:'WHT_RENT', day:1 },
+      { v:'VEN-0009', no:'SBN-69-', desc:'ค่าขนส่งสินค้าประจำเดือน', amt:String(rint(60, 95) * 1000), acc:'5230', wht:'WHT_TRANSPORT', day:25 },
+      { v:'VEN-0025', no:'OFM-69-', desc:'วัสดุสิ้นเปลืองสำนักงาน', amt:String(rint(12, 28) * 1000), acc:'5324', wht:null, day:12 },
+      { v:'VEN-0030', no:'ENG-69-', desc:'ค่าน้ำมันรถยนต์นั่งผู้บริหาร', amt:String(rint(14, 22) * 1000), acc:'5327', wht:null, day:20, nonClaim:true },
     ];
     if (mi % 2 === 0) {
-      recurring.push({ v:'VEN-0015', no:'MDP-69-', desc:'ค่าโฆษณาออนไลน์', amt:'200000', sub:'selling_expense', wht:'WHT_ADVERT', day:18 });
+      recurring.push({ v:'VEN-0015', no:'MDP-69-', desc:'ค่าโฆษณาออนไลน์', amt:'200000', acc:'5220', wht:'WHT_ADVERT', day:18 });
     }
     if (mi % 3 === 1) {
-      recurring.push({ v:'VEN-0021', no:'MAL-69-', desc:'ค่าที่ปรึกษาระบบบัญชี', amt:'50000', sub:'admin_expense', wht:'WHT_PROF', day:15 });
+      recurring.push({ v:'VEN-0021', no:'MAL-69-', desc:'ค่าที่ปรึกษาระบบบัญชี', amt:'50000', acc:'5334', wht:'WHT_PROF', day:15 });
     }
     recurring.forEach(function (r, ri) {
       recordBill({
         date: mo + '-' + String(r.day).padStart(2, '0'),
         partnerCode: r.v, vendorNo: r.no + (mi * 10 + ri + 100),
-        lines: [{ desc: r.desc, qty: 1, price: r.amt, expenseSub: r.sub }],
+        lines: [{ desc: r.desc, qty: 1, price: r.amt, acc: r.acc }],
         whtCode: r.wht, nonClaimableVat: !!r.nonClaim,
       });
     });
@@ -501,14 +501,14 @@ function generateTransactions() {
       date: mo + '-' + String(rint(3, 8)).padStart(2, '0'),
       partnerCode: poVendor.code,
       lines: [{ desc:'สั่งซื้อวัสดุและอุปกรณ์ตามแผนเดือน ' + thPeriod(mo),
-                qty:1, price:String(rint(20, 60) * 1000), expenseSub:'admin_expense' }],
+                qty:1, price:String(rint(20, 60) * 1000), acc:'5324' }],
       note:'ส่งของภายใน 15 วัน',
     });
     if (mi % 2 === 0) {
       convertTradeDoc('purchaseOrder', po.no, {
         date: mo + '-' + String(rint(14, Math.min(24, last))).padStart(2, '0'),
         vendorNo: 'PO-' + poVendor.code.slice(-4) + '-' + mo.replace('-', '') + '-1',
-        expenseSub: 'admin_expense',
+        acc: '5324',
       });
     }
 

@@ -649,8 +649,9 @@ function billDetail(no) {
       + (d.grnNo ? btn('open:goodsreceipts:' + d.grnNo, 'ดูใบรับสินค้า') : '')
       + btn('entry:' + d.entryNo, 'ดูใบสำคัญ') + voidBtn('bill', d) + btn('sel:', 'ปิด'),
     body: voidBanner(d) + tbl({
-      cols:[{t:'รายการ'},{t:'จำนวน',a:'r'},{t:'ราคาต่อหน่วย',a:'r'},{t:'จำนวนเงิน',a:'r'}],
-      rows: d.lines.map((l) => [l.desc, {n:M(String(l.qty))}, {n:l.price}, {n:l.amount}]),
+      cols:[{t:'รายการ'},{t:'บันทึกเข้าบัญชี'},{t:'จำนวน',a:'r'},{t:'ราคาต่อหน่วย',a:'r'},{t:'จำนวนเงิน',a:'r'}],
+      rows: d.lines.map((l) => [l.desc, l.acc ? l.acc + ' ' + acc(l.acc).name : (d.grnNo ? 'พักรับสินค้า' : {dim:'—'}),
+        {n:M(String(l.qty))}, {n:l.price}, {n:l.amount}]),
     })
     + '<div class="totals">'
     + '<div><span>มูลค่าก่อนภาษี</span><b>' + fmt(d.base) + '</b></div>'
@@ -1514,6 +1515,8 @@ function tradeDocDetail(kind, no) {
   if (!d) return '';
   const st = tradeDocStatus(kind, d);
   const live = st === 'issued' || st === 'approved';
+  const partial = st === 'partially_received';
+  const got = kind === 'purchaseOrder' ? poReceived(d) : null;
   const nextLabel = cfg.next === 'salesOrder' ? 'แปลงเป็นใบสั่งขาย'
     : cfg.next === 'invoice' ? 'แปลงเป็นใบกำกับภาษี' : 'ตั้งหนี้ผู้ขาย';
   return card({
@@ -1521,11 +1524,12 @@ function tradeDocDetail(kind, no) {
     sub: 'ออกวันที่ ' + thDate(d.date)
       + (d.validUntil ? ' · ยืนราคาถึง ' + thDate(d.validUntil) : '')
       + (d.fromDoc ? ' · มาจาก ' + d.fromDoc : ''),
-    actions: (live && kind === 'purchaseOrder' ? btn('grn:po:' + d.no, 'รับสินค้าเข้าคลัง', 'primary') : '')
+    actions: ((live || partial) && kind === 'purchaseOrder' ? btn('grn:po:' + d.no, partial ? 'รับสินค้าส่วนที่เหลือ' : 'รับสินค้าเข้าคลัง', 'primary') : '')
       + (live ? btn('trade:' + kind + ':convert:' + d.no, nextLabel, kind === 'purchaseOrder' ? '' : 'primary') : '')
       + (st === 'issued' ? btn('trade:' + kind + ':approved:' + d.no,
           kind === 'purchaseOrder' ? 'ผู้ขายยืนยันแล้ว' : 'ลูกค้าตอบรับ') : '')
       + (live ? btn('trade:' + kind + ':cancelled:' + d.no, 'ยกเลิก') : '')
+      + (partial ? btn('trade:' + kind + ':cancelled:' + d.no, 'ยกเลิกส่วนที่ยังไม่ได้รับ') : '')
       + printBtn(kind, d.no) + btn('sel:', 'ปิด'),
     body:
       '<div class="docgrid">'
@@ -1534,12 +1538,15 @@ function tradeDocDetail(kind, no) {
       + '<div>' + esc(d.snap ? d.snap.address : '') + '</div></div>'
       + '<div><div class="dim">สถานะ</div><b>' + esc(tradePill(st).st[1]) + '</b>'
       + (d.convertedTo ? '<div>เอกสารปลายทาง ' + esc(d.convertedTo) + '</div>' : '')
+      + (got && (d.grnNos || []).length && !d.convertedTo ? '<div>ใบรับสินค้า ' + esc(d.grnNos.join(', ')) + '</div>' : '')
       + (d.statusReason ? '<div>' + esc(d.statusReason) + '</div>' : '') + '</div>'
       + '</div>'
       + tbl({
-          cols:[{t:'รายการ'},{t:'จำนวน',a:'r'},{t:'ราคาต่อหน่วย',a:'r'},{t:'ภาษี'},{t:'จำนวนเงิน',a:'r'}],
-          rows: d.lines.map((l) => [l.desc, {n:M(String(l.qty))}, {n:l.price},
-            l.taxCode === 'VAT7' ? 'VAT 7%' : l.taxCode === 'VAT0' ? 'อัตรา 0%' : 'ยกเว้น', {n:l.amount}]),
+          cols:[{t:'รายการ'},{t:'จำนวน',a:'r'}].concat(got ? [{t:'รับแล้ว',a:'r'},{t:'ค้างรับ',a:'r'}] : [])
+            .concat([{t:'ราคาต่อหน่วย',a:'r'},{t:'ภาษี'},{t:'จำนวนเงิน',a:'r'}]),
+          rows: d.lines.map((l, i) => [l.desc, {n:M(String(l.qty))}]
+            .concat(got ? [{n:M(String(got[i]))}, {n:M(String(roundQty(l.qty - got[i])))}] : [])
+            .concat([{n:l.price}, l.taxCode === 'VAT7' ? 'VAT 7%' : l.taxCode === 'VAT0' ? 'อัตรา 0%' : 'ยกเว้น', {n:l.amount}])),
         })
       + '<div class="totals">'
       + '<div><span>มูลค่าก่อนภาษี</span><b>' + fmt(d.base) + '</b></div>'

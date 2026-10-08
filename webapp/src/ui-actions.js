@@ -520,13 +520,7 @@ function modalConvertTradeDoc(kind, no) {
   const toBill = cfg.next === 'bill';
   const nextLabel = cfg.next === 'salesOrder' ? 'ใบสั่งขาย'
     : cfg.next === 'invoice' ? 'ใบกำกับภาษี' : 'รายการตั้งหนี้';
-  const expOpts = [
-    ['inventory','ซื้อสินค้าเข้าคลัง'],
-    ['admin_expense','ค่าใช้จ่ายในการบริหาร'],
-    ['selling_expense','ค่าใช้จ่ายในการขาย'],
-    ['ppe','ซื้อทรัพย์สินถาวร'],
-    ['finance_cost','ค่าธรรมเนียมและดอกเบี้ย'],
-  ];
+  const stockOnly = d.lines.every((l) => { const it = l.itemCode && DB.items.find((x) => x.code === l.itemCode); return it && it.type === 'stock'; });
   modal({
     title:'แปลง' + cfg.label + ' ' + no + ' เป็น' + nextLabel,
     sub: d.partnerName + ' · รวม ' + fmt(d.total) + ' บาท · ' + d.lines.length + ' รายการ',
@@ -534,7 +528,9 @@ function modalConvertTradeDoc(kind, no) {
       + field({ name:'date', label:'วันที่ของ' + nextLabel, type:'date', value: defaultDate(),
           hint: cfg.next === 'salesOrder' ? '' : 'ต้องอยู่ในงวดที่ยังเปิดอยู่ ระบบจะเลือกอัตราภาษีตามวันที่นี้' })
       + (toBill ? field({ name:'vendorNo', label:'เลขที่ใบกำกับภาษีของผู้ขาย', placeholder:'ดูจากใบกำกับที่ผู้ขายส่งมา' }) : '')
-      + (toBill ? field({ name:'expenseSub', label:'บันทึกเข้าบัญชี', type:'select', value:'admin_expense', options: expOpts }) : '')
+      + (toBill && !stockOnly ? field({ name:'acc', label:'บันทึกเข้าบัญชี', type:'select', wide:true,
+          value: d.lines[0].acc || defaultAccountFor(d.lines[0].expenseSub || 'admin_expense'), options: optBillAccounts(),
+          hint:'ใช้กับรายการที่ไม่ใช่สินค้าคงคลัง · สินค้าคงคลังเข้าบัญชีสินค้าคงเหลือเสมอ' }) : '')
       + (toBill ? field({ name:'wht', label:'ภาษีหัก ณ ที่จ่ายตอนจ่ายเงิน', type:'select', options: optWht() }) : '')
       + '</div>',
     submitLabel:'แปลงเป็น' + nextLabel,
@@ -544,7 +540,7 @@ function modalConvertTradeDoc(kind, no) {
       submitAction(function () {
         const made = convertTradeDoc(kind, no, {
           date: val('date'), vendorNo: toBill ? val('vendorNo') : null,
-          expenseSub: toBill ? val('expenseSub') : null,
+          acc: toBill && !stockOnly ? val('acc') : null,
           whtCode: toBill ? (val('wht') || null) : null,
         });
         STATE.sel = null;
@@ -556,14 +552,12 @@ function modalConvertTradeDoc(kind, no) {
 }
 
 /* ---------- ตั้งหนี้ผู้ขาย ---------- */
+/** บัญชีที่รายการซื้อลงได้ แบ่งกลุ่มให้อ่านง่าย */
+function optBillAccounts() {
+  const grp = (a) => a.subType === 'inventory' ? 'สินค้า' : a.type === 'asset' ? 'สินทรัพย์' : 'ค่าใช้จ่าย';
+  return billAccounts().map((a) => [a.code, grp(a) + ' · ' + a.code + ' ' + a.name]);
+}
 function modalBill() {
-  const expOpts = [
-    ['inventory','ซื้อสินค้าเข้าคลัง'],
-    ['admin_expense','ค่าใช้จ่ายในการบริหาร'],
-    ['selling_expense','ค่าใช้จ่ายในการขาย'],
-    ['ppe','ซื้อทรัพย์สินถาวร'],
-    ['finance_cost','ค่าธรรมเนียมและดอกเบี้ย'],
-  ];
   modal({
     title:'บันทึกใบกำกับภาษีซื้อ',
     sub:'ระบบกันการบันทึกเลขที่ใบกำกับซ้ำของผู้ขายรายเดียวกัน',
@@ -571,7 +565,8 @@ function modalBill() {
       + field({ name:'partner', label:'ผู้ขาย', type:'select', options: optVendors() })
       + field({ name:'vendorNo', label:'เลขที่ใบกำกับภาษีของผู้ขาย', placeholder:'เช่น IV6907-0245' })
       + field({ name:'date', label:'วันที่ตามใบกำกับ', type:'date', value: defaultDate() })
-      + field({ name:'expenseSub', label:'บันทึกเข้าบัญชี', type:'select', value:'admin_expense', options: expOpts })
+      + field({ name:'acc', label:'บันทึกเข้าบัญชี', type:'select', wide:true, value: defaultAccountFor('admin_expense'),
+          options: optBillAccounts(), hint:'ซื้อสินค้าเข้าคลังให้เลือกบัญชีสินค้าคงเหลือแล้วเลือกสินค้าด้านล่าง' })
       + field({ name:'item', label:'สินค้า (เฉพาะกรณีซื้อเข้าคลัง)', type:'select', options: optItems() })
       + field({ name:'desc', label:'คำอธิบายรายการ', wide:true, placeholder:'เช่น ค่าเช่าสำนักงานเดือนกรกฎาคม' })
       + field({ name:'qty', label:'จำนวน', value:'1' })
@@ -584,8 +579,8 @@ function modalBill() {
     submitLabel:'ตั้งหนี้และลงบัญชี',
     onSubmit: function () {
       submitAction(function () {
-        const sub = val('expenseSub');
-        const itemCode = sub === 'inventory' ? (val('item') || null) : null;
+        const accCode = val('acc');
+        const itemCode = acc(accCode).subType === 'inventory' ? (val('item') || null) : null;
         const it = DB.items.find((x) => x.code === itemCode);
         const b = recordBill({
           partnerCode: val('partner'), vendorNo: val('vendorNo').trim(), date: val('date'),
@@ -593,7 +588,7 @@ function modalBill() {
           lines: [{
             desc: val('desc').trim() || (it ? it.name : ''),
             qty: Number(val('qty') || 1) || 1, price: val('price'),
-            taxCode: val('tax'), expenseSub: sub, itemCode: itemCode,
+            taxCode: val('tax'), acc: accCode, itemCode: itemCode,
           }],
         });
         STATE.screen = 'bills'; STATE.sel = b.no;
@@ -772,22 +767,31 @@ function modalGoodsReceipt() {
 function modalReceiveFromPo(poNo) {
   const po = DB.docs.purchaseOrder.find((x) => x.no === poNo);
   if (!po) return;
+  const got = poReceived(po);
+  const left = po.lines.map((l, i) => roundQty(roundQty(l.qty) - got[i]));
   modal({
     title:'รับสินค้าตามใบสั่งซื้อ ' + poNo,
-    sub: po.partnerName + ' · ' + po.lines.length + ' รายการ · มูลค่าก่อนภาษี ' + fmt(po.base) + ' บาท',
+    sub: po.partnerName + ' · ' + po.lines.length + ' รายการ · มูลค่าก่อนภาษี ' + fmt(po.base) + ' บาท'
+      + (got.some((q) => q > 0) ? ' · รับไปแล้วบางส่วน' : ''),
     body:'<div class="flds">'
       + field({ name:'date', label:'วันที่รับสินค้า', type:'date', value: defaultDate() })
       + field({ name:'vendorDoNo', label:'เลขที่ใบส่งของของผู้ขาย', placeholder:'ดูจากใบส่งของที่มากับสินค้า' })
       + '</div>'
-      + tbl({ cols:[{t:'รายการ'},{t:'จำนวน',a:'r'},{t:'ราคาต่อหน่วย',a:'r'},{t:'มูลค่า',a:'r'}],
-          rows: po.lines.map((l) => [l.desc, {n:M(String(l.qty))}, {n:l.price}, {n:l.amount}]) }),
+      + '<div class="scroll"><table><thead><tr><th class="l">รายการ</th><th class="r">สั่ง</th><th class="r">รับแล้ว</th>'
+      + '<th class="r">ค้างรับ</th><th class="r">รับครั้งนี้</th><th class="r">ราคาต่อหน่วย</th></tr></thead><tbody>'
+      + po.lines.map((l, i) => '<tr><td>' + esc(l.desc) + '</td><td class="num">' + l.qty + '</td><td class="num">' + got[i]
+        + '</td><td class="num">' + left[i] + '</td><td class="num"><input class="qty-in" type="number" min="0" step="any" name="rq' + i
+        + '" value="' + left[i] + '"' + (left[i] > 0 ? '' : ' disabled') + '></td><td class="num">' + fmt(l.price) + '</td></tr>').join('')
+      + '</tbody></table></div>',
     submitLabel:'รับเข้าคลังและลงบัญชี',
-    note:'ใบสั่งซื้อจะปิดและชี้ไปที่ใบรับสินค้าใบนี้',
+    note:'รับไม่ครบก็ได้ ส่วนที่เหลือรับต่อในใบรับสินค้าใบถัดไป · รับครบทุกรายการแล้วใบสั่งซื้อจะปิดเอง',
     onSubmit: function () {
       submitAction(function () {
-        const g = receiveGoodsFromPo(poNo, { date: val('date'), vendorDoNo: val('vendorDoNo') });
+        const lines = po.lines.map((l, i) => ({ line: i, qty: Number(val('rq' + i) || 0) })).filter((x) => x.qty > 0);
+        const g = receiveGoodsFromPo(poNo, { date: val('date'), vendorDoNo: val('vendorDoNo'), lines });
         STATE.screen = 'goodsreceipts'; STATE.sel = g.no; STATE.period = periodOf(g.date);
-        toast('รับสินค้าเข้าคลังแล้ว ' + g.no, 'ok', 'ใบสั่งซื้อ ' + poNo + ' ปิดรายการแล้ว');
+        toast('รับสินค้าเข้าคลังแล้ว ' + g.no, 'ok', po.status === 'closed' ? 'ใบสั่งซื้อ ' + poNo + ' รับครบ ปิดรายการแล้ว'
+          : 'ใบสั่งซื้อ ' + poNo + ' ยังค้างรับบางรายการ');
         return g;
       });
     },
