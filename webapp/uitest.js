@@ -1314,6 +1314,9 @@ const overflowInfo = (page) => page.evaluate(() => {
 
   await page.evaluate(() => { STATE.screen = 'receipts'; STATE.sel = null; render(); });
   await page.click('#main tbody tr.row-link');
+  ok('คลิกใบเสร็จในรายการแล้วเปิดรายละเอียด มีปุ่มพิมพ์และปุ่มยกเลิกเอกสาร', await page.evaluate(() =>
+    !!document.querySelector('#main .card [data-act^="printdoc:receipt:"]') && !!document.querySelector('#main .card [data-act^="void:receipt:"]')));
+  await page.click('#main .card [data-act^="printdoc:receipt:"]');
   await page.waitForSelector('#printArea.show');
   const prBar = await page.$eval('#printArea .pr-bar b', (e) => e.textContent);
   await page.selectOption('#prCopies', '1');
@@ -1371,6 +1374,65 @@ const overflowInfo = (page) => page.evaluate(() => {
     document.getElementById('cmdBtn').getBoundingClientRect().width > 20
     && document.getElementById('newBtn').getBoundingClientRect().width > 20));
   await page.setViewportSize({ width: 1440, height: 950 });
+
+  console.log('\n[21] ยกเลิกเอกสาร — กดจากหน้าเอกสาร ระบบกลับให้ครบในครั้งเดียว');
+  const vinv = await page.evaluate(() => {
+    STATE.period = '2026-07';
+    const c = DB.partners.find((p) => p.kind === 'customer' && p.taxId && p.address);
+    const d = issueInvoice({ partnerCode: c.code, date:'2026-07-28', lines:[{ desc:'ค่าบริการทดสอบยกเลิกผ่านหน้าจอ', qty:1, price:'12345.67', taxCode:'VAT7' }] });
+    save(); STATE.screen = 'invoices'; STATE.sel = d.no; render();
+    return d.no;
+  });
+  await page.click('#main [data-act="void:invoice:' + vinv + '"]');
+  await page.waitForSelector('#modal.show .void-prev');
+  const prevTxt = await page.$eval('#modal .void-prev', (e) => e.textContent);
+  ok('★ ก่อนยืนยันบอกว่าจะกลับรายการใบสำคัญใด และทะเบียนภาษีจะเป็นอย่างไร', /กลับรายการใบสำคัญ/.test(prevTxt) && /ทะเบียนภาษีขาย/.test(prevTxt));
+  ok('ปุ่มยืนยันเป็นสีแดง แยกจากปุ่มบันทึกปกติ', await page.evaluate(() => !!document.querySelector('#modal .modal-f .btn.danger')));
+  await page.fill('#modal [name="reason"]', 'ผิด');
+  await page.click('#modal [data-act="modal:submit"]');
+  ok('เหตุผลสั้นเกินไปถูกปฏิเสธ หน้าต่างยังเปิดอยู่', await page.evaluate(() => document.getElementById('modal').classList.contains('show')
+    && /เหตุผล/.test(document.getElementById('toast').textContent)));
+  await page.fill('#modal [name="reason"]', 'ออกผิดลูกค้า ทดสอบผ่านหน้าจอ');
+  await page.click('#modal [data-act="modal:submit"]');
+  const vAfter = await page.evaluate((no) => {
+    const d = DB.docs.invoice.find((x) => x.no === no);
+    const row = [...document.querySelectorAll('#main tbody tr')].find((tr) => tr.textContent.indexOf(no) >= 0);
+    return { st: d.status, banner: !!document.querySelector('#main .void-banner'), rowVoid: row && row.classList.contains('is-void'),
+      voidBtn: !!document.querySelector('#main [data-act="void:invoice:' + no + '"]'),
+      foot: [...document.querySelectorAll('#main .card')].pop().querySelector('tfoot').textContent,
+      checks: reconciliationChecks('2026-07-31').allPassed };
+  }, vinv);
+  ok('★ ยกเลิกแล้วหน้าเอกสารขึ้นแถบยกเลิกพร้อมเหตุผล และไม่มีปุ่มยกเลิกซ้ำ', vAfter.st === 'void' && vAfter.banner && !vAfter.voidBtn);
+  ok('แถวในรายการจางลงและขีดฆ่าตัวเลข', vAfter.rowVoid);
+  ok('★ ยอดรวมท้ายตารางไม่นับใบที่ยกเลิก', vAfter.foot.indexOf('12,345.67') < 0 && vAfter.foot.indexOf('13,209.87') < 0);
+  ok('★ กระทบยอดทุกบัญชียังตรงหลังยกเลิกผ่านหน้าจอ', vAfter.checks);
+  const vatRow = await page.evaluate((no) => { STATE.screen = 'vatout'; STATE.sel = null; render();
+    const tr = [...document.querySelectorAll('#main tbody tr')].find((x) => x.textContent.indexOf(no) >= 0);
+    return tr ? tr.textContent : ''; }, vinv);
+  ok('★ รายงานภาษีขายยังมีเลขที่ใบที่ยกเลิก เขียนว่ายกเลิก ยอดเป็นศูนย์', /ยกเลิก/.test(vatRow) && vatRow.indexOf('12,345.67') < 0, vatRow.slice(0, 80));
+  const printV = await page.evaluate((no) => { printDoc('invoice', no); const w = !!document.querySelector('#printArea .wm'); closePrint(); return w; }, vinv);
+  ok('พิมพ์ใบที่ยกเลิกแล้วมีลายน้ำ "ยกเลิก"', printV);
+  const ent = await page.evaluate(() => {
+    const e = DB.entries.find((x) => x.src === 'receipt' && x.status === 'posted');
+    STATE.screen = 'journals'; STATE.sel = e.no; render();
+    return { rev: !!document.querySelector('#main [data-act="rev:' + e.no + '"]'), go: !!document.querySelector('#main [data-act^="open:receipts:"]') };
+  });
+  ok('★ ใบสำคัญที่เกิดจากเอกสารไม่มีปุ่มกลับรายการตรง ๆ มีปุ่มไปที่เอกสารแทน', !ent.rev && ent.go);
+  const blocked = await page.evaluate(() => {
+    const inv = DB.docs.invoice.find((d) => d.status !== 'void' && periodOf(d.date) === '2026-07' && DB.docs.receipt.some((r) => r.invoiceNo === d.no && r.status !== 'void'));
+    STATE.screen = 'invoices'; STATE.sel = inv.no; render();
+    document.querySelector('#main [data-act="void:invoice:' + inv.no + '"]').click();
+    return { modal: document.getElementById('modal').classList.contains('show'), toast: document.getElementById('toast').textContent };
+  });
+  ok('★ ใบกำกับที่มีใบเสร็จอ้างถึง กดยกเลิกแล้วบอกทันทีว่าต้องยกเลิกใบเสร็จก่อน ไม่เปิดหน้าต่างให้กรอก', !blocked.modal && /ใบเสร็จ/.test(blocked.toast), blocked.toast.slice(0, 60));
+  await page.evaluate(() => { STATE.screen = 'payroll'; STATE.period = '2026-07'; STATE.sel = null; render(); });
+  await page.click('#main [data-act="run:payroll"]');
+  await page.click('#main [data-act^="voidrun:payroll:"]');
+  await page.waitForSelector('#modal.show');
+  await page.fill('#modal [name="reason"]', 'ทดสอบยกเลิกงวดเงินเดือน');
+  await page.click('#modal [data-act="modal:submit"]');
+  ok('ยกเลิกงวดเงินเดือนแล้วกลับมาเป็นปุ่มทำเงินเดือนใหม่ และแสดงประวัติการยกเลิก', await page.evaluate(() =>
+    !!document.querySelector('#main [data-act="run:payroll"]') && /เคยทำแล้วยกเลิก/.test(document.getElementById('main').textContent)));
 
   ok('ไม่มีข้อผิดพลาดในคอนโซลเลย', errors.length === 0, errors.slice(0, 3).join(' | '));
 

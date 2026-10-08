@@ -15,7 +15,8 @@ const ctx = new Function(src + '\nreturn {DB,buildSeed,trialBalance,balanceSheet
   'issueBillingNote,cancelBillingNote,receiveBillingNote,billingNoteStatus,' +
   'issueGoodsReceipt,receiveGoodsFromPo,billGoodsReceipt,recordExpense,billOutstanding,' +
   'createPaymentBatch,approvePaymentBatch,payPaymentBatch,postJournalVoucher,journalOf,' +
-  'bahtText,equityStatement,saveCompany,companyGaps};')();
+  'bahtText,equityStatement,saveCompany,companyGaps,voidDocument,voidPreview,voidCheck,voidRun,runCheck,' +
+  'creditableBase,matchBankTxn,reopenPeriod,repairDuplicateEntryNos,loadState};')();
 
 let pass = 0, fail = 0;
 function ok(label, cond, extra) {
@@ -90,7 +91,12 @@ throws('ลูกหนี้ไม่ระบุคู่ค้า', () => ctx
   lines:[{acc:'1131',dr:ctx.M('100')},{acc:'4111',cr:ctx.M('100')}] }), 'PARTNER_REQUIRED');
 throws('วันที่นอกรอบบัญชี', () => ctx.post({ type:'general', date:'2030-01-01', desc:'ทดสอบ',
   lines:[{acc:'1113',dr:ctx.M('100')},{acc:'4111',cr:ctx.M('100')}] }), 'PERIOD_NOT_FOUND');
-throws('กลับรายการโดยไม่ระบุเหตุผล', () => ctx.reverse(D.entries[5].no, ''), 'REASON_REQUIRED');
+{
+  const manual = D.entries.find((e) => e.status === 'posted' && (!e.src || e.src === 'manual'));
+  const fromDoc = D.entries.find((e) => e.status === 'posted' && e.src === 'invoice');
+  throws('กลับรายการโดยไม่ระบุเหตุผล', () => ctx.reverse(manual.no, ''), 'REASON_REQUIRED');
+  throws('กลับรายการที่เกิดจากเอกสารตรงๆ ไม่ได้ ต้องยกเลิกที่เอกสาร', () => ctx.reverse(fromDoc.no, 'ทดสอบเหตุผลยาว'), 'ENTRY_FROM_DOCUMENT');
+}
 throws('ใบลดหนี้ไม่อ้างใบกำกับเดิม', () => ctx.issueCreditNote({ date:'2026-07-01',
   invoiceNo:'ไม่มีจริง', base:'100', reason:'RETURN_DEFECT' }), 'CREDIT_NOTE_NO_ORIGIN');
 throws('ใบกำกับภาษีซื้อซ้ำ', () => ctx.recordBill({ date:'2026-07-01', partnerCode:'VEN-0001',
@@ -679,6 +685,158 @@ console.log('\n=== 7.12 เอกสารพิมพ์ งบส่วนข�
   ok('ข้อมูลครบตามมาตรา 86/4 ไม่มีอะไรขาด', ctx.companyGaps().length === 0);
   ctx.saveCompany(Object.assign({}, keep, { branch: keep.branch || '00000' }));
   ok('คืนค่าเดิมได้', D.company.address === keep.address && D.company.branchName === 'สำนักงานใหญ่');
+}
+
+console.log('\n=== 7.13 ยกเลิกเอกสาร — กลับทุกอย่างที่เอกสารเคยแตะ ===');
+{
+  const allOk = () => { const r = ctx.reconciliationChecks('2026-07-31'); return r.allPassed ? '' : r.checks.filter((c) => !c.ok).map((c) => c.label + ' ต่าง ' + ctx.fmt(c.control - c.sub)).join(' · '); };
+  const tbOk = () => { const tb = ctx.trialBalance('2026-01-01', '2026-07-31'); return tb.totals ? tb.totals.dr === tb.totals.cr : true; };
+  const cust = D.partners.find((p) => p.kind === 'customer' && p.taxId && p.address);
+  const sw = D.items.find((i) => i.code === 'SW-220');
+  const qty0 = sw.qty, val0 = sw.value;
+  const entries0 = D.entries.length;
+
+  // 1) ใบกำกับมีสินค้าคงคลัง → ยกเลิก
+  const inv = ctx.issueInvoice({ partnerCode: cust.code, date:'2026-07-20',
+    lines:[{ desc: sw.name, qty: 3, price:'1500', itemCode: sw.code, taxCode:'VAT7' }] });
+  ok('ออกใบกำกับทดสอบแล้วสต๊อกลด', sw.qty === qty0 - 3, inv.no);
+  const pv = ctx.voidPreview('invoice', inv.no);
+  ok('ก่อนยกเลิกบอกให้รู้ว่าจะเกิดอะไรขึ้นบ้าง', pv.length >= 3, pv.join(' | '));
+  throws('ยกเลิกโดยไม่ระบุเหตุผล', () => ctx.voidDocument('invoice', inv.no, 'ผิด'), 'REASON_REQUIRED');
+  ctx.voidDocument('invoice', inv.no, 'ออกผิดลูกค้า ทดสอบระบบ');
+  const e1 = D.entries.find((e) => e.no === inv.entryNo), e2 = D.entries.find((e) => e.no === inv.cogsEntryNo);
+  ok('★ ใบสำคัญขายและต้นทุนขายถูกกลับรายการ ณ วันที่เดิม', e1.status === 'reversed' && e2.status === 'reversed'
+    && D.entries.find((e) => e.no === e1.reversedBy).date === inv.date);
+  ok('★ สต๊อกกลับมาเท่าเดิมทั้งจำนวนและมูลค่า', sw.qty === qty0 && sw.value === val0, sw.qty + ' / ' + ctx.fmt(sw.value));
+  const tx = D.taxTx.find((t) => t.kind === 'vat_output' && t.docNo === inv.no);
+  ok('★ ทะเบียนภาษีขายยังมีเลขที่นี้ แต่ยอดเป็นศูนย์และเขียนว่ายกเลิก', tx && tx.void && tx.base === 0 && tx.tax === 0 && tx.orig.tax > 0);
+  ok('ใบที่ยกเลิกไม่มียอดค้าง', ctx.invOutstanding(inv) === 0 && inv.status === 'void');
+  ok('★ หลังยกเลิก ลูกหนี้ ภาษี สต๊อก ยังกระทบยอดตรงทุกบัญชี', allOk() === '', allOk());
+  throws('ยกเลิกซ้ำ', () => ctx.voidDocument('invoice', inv.no, 'ยกเลิกซ้ำอีกรอบ'), 'ALREADY_VOID');
+  throws('รับชำระอ้างใบที่ยกเลิกแล้ว', () => ctx.receivePayment({ date:'2026-07-25', invoiceNo: inv.no }), 'INVOICE_VOID');
+  throws('ลดหนี้อ้างใบที่ยกเลิกแล้ว', () => ctx.issueCreditNote({ date:'2026-07-25', invoiceNo: inv.no, base:'100', reason:'CALC_ERROR' }), 'CREDIT_NOTE_ORIGIN_VOID');
+  throws('★ กลับรายการที่ใบสำคัญของเอกสารตรง ๆ ไม่ได้', () => ctx.reverse(D.entries.find((e) => e.src === 'receipt' && e.status === 'posted').no, 'ลองกลับตรง ๆ'), 'ENTRY_FROM_DOCUMENT');
+
+  // 2) ใบกำกับที่มีใบเสร็จอ้างถึง — ต้องยกเลิกใบเสร็จก่อน
+  const inv2 = ctx.issueInvoice({ partnerCode: cust.code, date:'2026-07-21',
+    lines:[{ desc:'ค่าบริการทดสอบยกเลิก', qty: 1, price:'10000', taxCode:'VAT7' }] });
+  const rc = ctx.receivePayment({ date:'2026-07-22', invoiceNo: inv2.no, amount:'5000' });
+  throws('★ ยกเลิกใบกำกับที่มีใบเสร็จอ้างถึงไม่ได้', () => ctx.voidDocument('invoice', inv2.no, 'ทดสอบยกเลิกมีใบเสร็จ'), 'VOID_HAS_DEPENDENTS');
+  const bt = { id: 9901, date:'2026-07-22', desc:'TEST DEPOSIT', ref:'T1', debit:0, credit: rc.net, matched:false };
+  D.bankTxns.push(bt);
+  ctx.matchBankTxn(9901, rc.entryNo);
+  ctx.voidDocument('receipt', rc.no, 'ลูกค้าเช็คเด้ง ทดสอบ');
+  ok('★ ยกเลิกใบเสร็จแล้วยอดค้างของใบกำกับกลับมาเต็ม', ctx.invOutstanding(inv2) === inv2.total && inv2.status === 'issued');
+  ok('★ บรรทัดสเตทเมนต์ที่จับคู่กับใบเสร็จกลับไปรอกระทบยอดใหม่', bt.matched === false && !bt.matchedTo);
+  D.bankTxns.splice(D.bankTxns.indexOf(bt), 1);
+
+  // 3) ใบลดหนี้และใบเพิ่มหนี้
+  const cn = ctx.issueCreditNote({ date:'2026-07-23', invoiceNo: inv2.no, base:'2000', reason:'PRICE_REDUCE' });
+  ok('มูลค่าที่ยังลดหนี้ได้คิดจากฐานก่อนภาษี', ctx.creditableBase(inv2) === ctx.M('8000'), ctx.fmt(ctx.creditableBase(inv2)));
+  throws('★ ลดหนี้เกินฐานก่อนภาษีที่เหลือ (ไม่ใช่เทียบกับยอดรวมภาษี)', () => ctx.issueCreditNote({ date:'2026-07-23', invoiceNo: inv2.no, base:'8000.01', reason:'PRICE_REDUCE' }), 'CREDIT_NOTE_EXCEEDS');
+  ctx.voidDocument('creditNote', cn.no, 'ลดผิดจำนวน ทดสอบ');
+  ok('ยกเลิกใบลดหนี้แล้วลดหนี้ได้เต็มอีกครั้ง', ctx.creditableBase(inv2) === ctx.M('10000') && inv2.credited === 0);
+  const dn = ctx.issueDebitNote({ date:'2026-07-23', invoiceNo: inv2.no, base:'1000', reason:'SERVICE_UNDERPRICED' });
+  ok('ใบเพิ่มหนี้เพิ่มฐานที่ลดหนี้ได้', ctx.creditableBase(inv2) === ctx.M('11000'));
+  ctx.voidDocument('debitNote', dn.no, 'เพิ่มหนี้ผิด ทดสอบ');
+  ok('ยกเลิกใบเพิ่มหนี้แล้วยอดค้างกลับเท่าใบกำกับ', ctx.invOutstanding(inv2) === inv2.total && !inv2.debited);
+  ctx.voidDocument('invoice', inv2.no, 'ไม่มีเอกสารอ้างถึงแล้ว ยกเลิกได้');
+  ok('★ ยกเลิกใบเสร็จ ใบลดหนี้ ใบเพิ่มหนี้ แล้วยกเลิกใบกำกับ — ทุกบัญชียังตรง', allOk() === '', allOk());
+
+  // 4) ซื้อสินค้า: ตั้งหนี้ตรง / ผ่านใบรับสินค้า
+  const ven = D.partners.find((p) => p.code === 'VEN-0004');
+  const sq = sw.qty, sv = sw.value;
+  const bill = ctx.recordBill({ partnerCode: ven.code, date:'2026-07-24', vendorNo:'VOID-T-001',
+    lines:[{ desc: sw.name, qty: 10, price:'100', itemCode: sw.code, expenseSub:'inventory' }] });
+  ctx.voidDocument('bill', bill.no, 'บันทึกซ้ำกับใบเดิม');
+  ok('★ ยกเลิกตั้งหนี้ที่รับของเข้าคลัง สต๊อกกลับเท่าเดิม', sw.qty === sq && sw.value === sv);
+  const again = ctx.recordBill({ partnerCode: ven.code, date:'2026-07-24', vendorNo:'VOID-T-001',
+    lines:[{ desc: sw.name, qty: 10, price:'100', itemCode: sw.code, expenseSub:'inventory' }] });
+  ok('ยกเลิกแล้วบันทึกเลขใบกำกับผู้ขายเดิมซ้ำได้', !!again.no);
+  ctx.voidDocument('bill', again.no, 'ทดสอบเสร็จแล้ว ยกเลิก');
+
+  const grn = ctx.issueGoodsReceipt({ partnerCode: ven.code, date:'2026-07-24', vendorDoNo:'DO-VOID',
+    lines:[{ itemCode: sw.code, desc: sw.name, qty: 5, price:'100' }] });
+  const gb = ctx.billGoodsReceipt(grn.no, { date:'2026-07-25', vendorNo:'VOID-T-002' });
+  throws('ยกเลิกใบรับสินค้าที่ตั้งหนี้แล้วไม่ได้', () => ctx.voidDocument('goodsReceipt', grn.no, 'ทดสอบยกเลิกใบรับ'), 'VOID_HAS_DEPENDENTS');
+  ctx.voidDocument('bill', gb.no, 'ใบกำกับผู้ขายผิด รอใบใหม่');
+  ok('★ ยกเลิกตั้งหนี้จากใบรับสินค้า ใบรับสินค้ากลับไปรอใบกำกับ และสต๊อกไม่ขยับ', grn.status === 'received' && !grn.billNo && sw.qty === sq + 5);
+  ok('บัญชีพักรับสินค้ากระทบยอดตรงหลังยกเลิกตั้งหนี้', allOk() === '', allOk());
+  ctx.voidDocument('goodsReceipt', grn.no, 'รับของผิดรุ่น คืนผู้ขาย');
+  ok('★ ยกเลิกใบรับสินค้า สต๊อกกลับเท่าเดิม', sw.qty === sq && sw.value === sv);
+
+  // 5) จ่ายชำระพร้อมหัก ณ ที่จ่าย → ยกเลิก 50 ทวิ และตัดออกจากแบบ
+  const sb = ctx.recordBill({ partnerCode: ven.code, date:'2026-07-24', vendorNo:'VOID-T-003',
+    lines:[{ desc:'ค่าบริการซ่อมบำรุง', qty: 1, price:'20000', expenseSub:'admin_expense' }], whtCode:'WHT_SERVICE' });
+  const pay = ctx.payBill({ date:'2026-07-26', billNo: sb.no, channel:'manual' });
+  ok('จ่ายพร้อมหัก ณ ที่จ่ายแล้วได้ 50 ทวิ', !!pay.certNo && pay.wht > 0, pay.certNo + ' ' + ctx.fmt(pay.wht));
+  throws('ยกเลิกตั้งหนี้ที่จ่ายแล้วไม่ได้', () => ctx.voidDocument('bill', sb.no, 'ทดสอบยกเลิกตั้งหนี้'), 'VOID_HAS_DEPENDENTS');
+  ctx.voidDocument('payment', pay.no, 'โอนผิดบัญชี ทดสอบ');
+  const cert = D.docs.whtCert.find((c) => c.no === pay.certNo);
+  const wtx = D.taxTx.find((t) => t.kind === 'wht' && t.docNo === pay.no);
+  ok('★ ยกเลิกใบสำคัญจ่าย 50 ทวิ ถูกยกเลิกด้วย และไม่เข้าแบบ ภ.ง.ด.', cert.status === 'void' && wtx.void && wtx.tax === 0);
+  ok('ยอดค้างของตั้งหนี้กลับมาเต็ม', ctx.billOutstanding(sb) === sb.total && sb.status === 'issued');
+  ok('★ หลังยกเลิกจ่าย เจ้าหนี้และภาษีหัก ณ ที่จ่ายยังตรง', allOk() === '', allOk());
+  ctx.voidDocument('bill', sb.no, 'ทดสอบเสร็จแล้ว ยกเลิก');
+
+  // 6) ค่าใช้จ่ายที่ออก 50 ทวิ อัตโนมัติ
+  const ex = ctx.recordExpense({ partnerCode: ven.code, date:'2026-07-26', method:'transfer', taxInvoiceNo:'TX-VOID-1',
+    lines:[{ desc:'ค่าขนส่ง', qty: 1, price:'5000', acc:'5321', taxCode:'VAT7' }], whtCode:'WHT_TRANSPORT' });
+  ctx.voidDocument('expense', ex.no, 'บันทึกซ้ำ ทดสอบ');
+  ok('★ ยกเลิกค่าใช้จ่าย 50 ทวิ ที่ออกอัตโนมัติถูกยกเลิกด้วย', !ex.certNo || D.docs.whtCert.find((c) => c.no === ex.certNo).status === 'void');
+  ok('ภาษีซื้อของค่าใช้จ่ายที่ยกเลิกเป็นศูนย์', D.taxTx.filter((t) => t.expenseNo === ex.no).every((t) => t.void && t.tax === 0));
+
+  // 7) งวดที่ปิดหรือยื่นภาษีแล้ว
+  const may = D.docs.invoice.find((d) => d.date.slice(0, 7) === '2026-05' && !d.broughtForward && d.status !== 'void'
+    && !D.docs.receipt.some((r) => r.invoiceNo === d.no) && !D.docs.creditNote.some((c) => c.invoiceNo === d.no));
+  if (may) {
+    throws('★ ยกเลิกเอกสารในงวดที่ปิดแล้วไม่ได้', () => ctx.voidDocument('invoice', may.no, 'ทดสอบงวดปิด'), 'PERIOD_CLOSED');
+    ctx.reopenPeriod('2026-05', 'ทดสอบยกเลิกเอกสารที่ยื่นภาษีแล้ว');
+    throws('★ ยกเลิกใบกำกับที่ยื่น ภ.พ.30 ไปแล้วไม่ได้ ต้องออกใบลดหนี้', () => ctx.voidDocument('invoice', may.no, 'ทดสอบยื่นแล้ว'), 'TAX_ALREADY_FILED');
+    D.periods.find((p) => p.code === '2026-05').status = 'closed';
+  }
+
+  // 8) ยกเลิกงวดเงินเดือนและค่าเสื่อมราคา
+  const assets0 = D.assets.map((a) => a.accumBook + '|' + a.accumTax).join(',');
+  const dep = ctx.runDepreciation('2026-07');
+  throws('★ กลับรายการใบสำคัญค่าเสื่อมตรง ๆ ไม่ได้', () => ctx.reverse(dep.entryNo, 'ลองกลับตรง ๆ'), 'ENTRY_FROM_DOCUMENT');
+  ctx.voidRun('depreciation', '2026-07', 'ใส่อายุทรัพย์สินผิด ทดสอบ');
+  ok('★ ยกเลิกงวดค่าเสื่อม ค่าเสื่อมสะสมของทรัพย์สินทุกตัวกลับเท่าเดิม', D.assets.map((a) => a.accumBook + '|' + a.accumTax).join(',') === assets0);
+  const dep2 = ctx.runDepreciation('2026-07');
+  ok('ยกเลิกแล้วตั้งค่าเสื่อมงวดเดิมใหม่ได้ ยอดเท่าเดิม', dep2.bookTotal === dep.bookTotal);
+  throws('ยกเลิกค่าเสื่อมงวดที่มีงวดหลังคิดต่ออยู่ไม่ได้', () => ctx.voidRun('depreciation', '2026-05', 'ทดสอบงวดเก่า'), 'RUN_HAS_LATER');
+  ctx.voidRun('depreciation', '2026-07', 'คืนสภาพก่อนทดสอบปิดงวด');
+  const pr = ctx.runPayroll('2026-07');
+  ctx.voidRun('payroll', '2026-07', 'เงินเดือนพนักงานผิด ทดสอบ');
+  const ptx = D.taxTx.find((t) => t.docType === 'payroll' && t.entryNo === pr.entryNo);
+  ok('★ ยกเลิกงวดเงินเดือน ภาษีหัก ณ ที่จ่ายถูกตัดออกจาก ภ.ง.ด.1', ptx.void && ptx.tax === 0);
+  ok('ยกเลิกแล้วทำเงินเดือนงวดเดิมใหม่ได้', ctx.runPayroll('2026-07').net === pr.net);
+  ctx.voidRun('payroll', '2026-07', 'คืนสภาพก่อนทดสอบปิดงวด');
+
+  ok('★ หลังยกเลิกทุกประเภท ลูกหนี้ เจ้าหนี้ ภาษี พักรับสินค้า ยังตรงทุกบัญชี', allOk() === '', allOk());
+  ok('งบทดลองสมดุลหลังยกเลิกทุกประเภท', tbOk());
+  const nos = D.entries.map((e) => e.no);
+  ok('★ เลขที่ใบสำคัญไม่ซ้ำกันเลยแม้แต่ใบเดียว (ใบปรับปรุงกับใบทั่วไปใช้ JV ร่วมกัน)', new Set(nos).size === nos.length,
+    nos.length - new Set(nos).size + ' ใบซ้ำ');
+  {
+    /* จำลองข้อมูลที่บันทึกไว้ก่อนแก้ตัวนับ: ใบปิดภาษี ภ.พ.30 ได้เลขเดียวกับใบสำคัญทั่วไป */
+    const c2 = new Function(src + '\nreturn {DB,buildSeed,loadState};')();
+    c2.buildSeed();
+    const F = c2.DB.entries.find((e) => e.src === 'filing' && String(e.srcId).indexOf('PP30|2026-03') === 0);
+    const G = c2.DB.entries.find((e) => e.no.indexOf('JV2603') === 0 && e.src !== 'filing');
+    const fil = c2.DB.docs.filing.find((f) => f.form === 'PP30' && f.period === '2026-03');
+    const gNo = G.no;
+    F.no = gNo; fil.entryNo = gNo;
+    c2.loadState(JSON.parse(JSON.stringify(c2.DB)));
+    const F2 = c2.DB.entries.find((e) => e.src === 'filing' && e.srcId === 'PP30|2026-03');
+    const nos2 = c2.DB.entries.map((e) => e.no);
+    ok('★ เปิดข้อมูลเก่าที่มีเลขใบสำคัญซ้ำ ระบบแก้ให้ใบหลังได้เลขใหม่ ใบแรกคงเลขเดิม',
+      new Set(nos2).size === nos2.length && c2.DB.entries.find((e) => e.no === gNo).src !== 'filing' && F2.renumberedFrom === gNo, gNo + ' → ' + F2.no);
+    ok('★ แบบ ภ.พ.30 ที่อ้างใบสำคัญนั้นถูกแก้ตามไปด้วย', c2.DB.docs.filing.find((f) => f.form === 'PP30' && f.period === '2026-03').entryNo === F2.no);
+    ok('การแก้เลขบันทึกไว้ในร่องรอยการตรวจสอบ', c2.DB.audit.some((a) => a.action === 'renumber'));
+  }
+  ok('ทุกการยกเลิกบันทึกเป็นใบกลับรายการ ไม่มีการลบใบสำคัญ', D.entries.length > entries0
+    && D.entries.every((e) => e.status === 'posted' || e.status === 'reversed'));
 }
 
 console.log('\n=== 8. ปิดงวด ===');

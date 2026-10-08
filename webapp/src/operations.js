@@ -244,7 +244,7 @@ function saveAsset(input) {
   if (input.code && !existing) throw new DomainError('ASSET_NOT_FOUND', 'ไม่พบทรัพย์สินรหัส ' + input.code);
 
   const depreciated = existing && DB.docs.depreciation
-    .some((d) => (d.rows || []).some((r) => r.code === existing.code));
+    .some((d) => d.status !== 'void' && (d.rows || []).some((r) => r.code === existing.code));
   if (depreciated && (cost !== existing.cost || inService !== existing.inService || cls !== existing.class)) {
     throw new DomainError('ASSET_ALREADY_DEPRECIATED',
       'ทรัพย์สินนี้คิดค่าเสื่อมไปแล้ว แก้ราคาทุน วันที่เริ่มใช้ หรือประเภทไม่ได้',
@@ -350,6 +350,14 @@ function issueInvoice(input) {
 function receivePayment(input) {
   const inv = DB.docs.invoice.find((d) => d.no === input.invoiceNo);
   if (!inv) throw new DomainError('INVOICE_NOT_FOUND', 'ไม่พบใบกำกับภาษี ' + input.invoiceNo);
+  if (inv.status === 'void') {
+    throw new DomainError('INVOICE_VOID', 'ใบกำกับ ' + inv.no + ' ถูกยกเลิกไปแล้ว รับชำระอ้างใบนี้ไม่ได้');
+  }
+  if (input.date && input.date < inv.date) {
+    throw new DomainError('RECEIPT_BEFORE_INVOICE',
+      'วันที่รับชำระ (' + thDate(input.date) + ') ก่อนวันที่ใบกำกับ (' + thDate(inv.date) + ')',
+      'ถ้าลูกค้าจ่ายมาก่อน ให้บันทึกเป็นเงินรับล่วงหน้า');
+  }
   const outstanding = invOutstanding(inv);
   if (outstanding <= 0) throw new DomainError('ALREADY_PAID', 'ใบกำกับภาษีนี้ชำระครบแล้ว');
 
@@ -410,18 +418,28 @@ function issueCreditNote(input) {
       'ใบลดหนี้ต้องอ้างอิงใบกำกับภาษีเดิมเสมอ (มาตรา 86/10)',
       'เลือกใบกำกับภาษีที่ต้องการลดหนี้');
   }
+  if (inv.status === 'void') {
+    throw new DomainError('CREDIT_NOTE_ORIGIN_VOID', 'ใบกำกับ ' + inv.no + ' ถูกยกเลิกไปแล้ว ออกใบลดหนี้อ้างใบที่ยกเลิกไม่ได้');
+  }
   if (!CN_REASONS[input.reason]) {
     throw new DomainError('CREDIT_NOTE_REASON_INVALID',
       'เหตุผลไม่อยู่ในเหตุที่กฎหมายกำหนดตามมาตรา 86/10');
   }
+  if (input.date < inv.date) {
+    throw new DomainError('CREDIT_NOTE_BEFORE_ORIGIN',
+      'วันที่ใบลดหนี้ (' + thDate(input.date) + ') ก่อนวันที่ใบกำกับเดิม (' + thDate(inv.date) + ')',
+      'ใบลดหนี้ต้องออกหลังใบกำกับเดิมเสมอ');
+  }
   const base = M(input.base);
-  const remaining = inv.base - inv.credited;
+  if (base <= 0) throw new DomainError('CREDIT_NOTE_ZERO', 'มูลค่าที่ลดต้องมากกว่าศูนย์');
+  const remaining = creditableBase(inv);
   if (base > remaining) {
     throw new DomainError('CREDIT_NOTE_EXCEEDS',
-      'มูลค่าใบลดหนี้ ' + fmt(base) + ' เกินมูลค่าคงเหลือของใบกำกับเดิม ' + fmt(remaining));
+      'มูลค่าใบลดหนี้ ' + fmt(base) + ' เกินมูลค่าคงเหลือของใบกำกับเดิม ' + fmt(remaining) + ' บาท (ก่อนภาษี)',
+      'มูลค่าคงเหลือ = มูลค่าใบกำกับ + ใบเพิ่มหนี้ − ใบลดหนี้ที่ออกไปแล้ว คิดก่อนภาษีมูลค่าเพิ่ม');
   }
-  const r = resolveRate('VAT7', input.date);
-  const vat = round2(pct(base, r.rate));
+  /* ภาษีในใบลดหนี้ใช้อัตราเดียวกับใบกำกับเดิม · ใบกำกับที่ไม่มีภาษี (0% / ยกเว้น) ใบลดหนี้ก็ไม่มีภาษี */
+  const vat = inv.vat ? round2(pct(base, resolveRate('VAT7', inv.date).rate)) : 0;
   const total = base + vat;
   const no = nextNo('creditNote', input.date);
 
@@ -745,7 +763,15 @@ function recordBill(input) {
 function payBill(input) {
   const bill = DB.docs.bill.find((b) => b.no === input.billNo);
   if (!bill) throw new DomainError('BILL_NOT_FOUND', 'ไม่พบรายการตั้งหนี้ ' + input.billNo);
-  const outstanding = bill.total - bill.paid;
+  if (bill.status === 'void') {
+    throw new DomainError('BILL_VOID', 'รายการตั้งหนี้ ' + bill.no + ' ถูกยกเลิกไปแล้ว จ่ายชำระไม่ได้');
+  }
+  if (input.date && input.date < bill.date) {
+    throw new DomainError('PAYMENT_BEFORE_BILL',
+      'วันที่จ่าย (' + thDate(input.date) + ') ก่อนวันที่ตั้งหนี้ (' + thDate(bill.date) + ')',
+      'ถ้าจ่ายมัดจำก่อนได้ใบกำกับ ให้บันทึกเป็นเงินจ่ายล่วงหน้า');
+  }
+  const outstanding = billOutstanding(bill);
   if (outstanding <= 0) throw new DomainError('ALREADY_PAID', 'รายการนี้จ่ายครบแล้ว');
 
   const p = partnerByCode(bill.partnerCode);
@@ -813,11 +839,11 @@ function payBill(input) {
 
 /* ---------- ค่าเสื่อมราคาประจำงวด ---------- */
 function runDepreciation(period) {
-  const already = DB.docs.depreciation.find((d) => d.period === period);
+  const already = DB.docs.depreciation.find((d) => d.period === period && d.status !== 'void');
   if (already) {
     throw new DomainError('DEPRECIATION_ALREADY_RUN',
       'ตั้งค่าเสื่อมราคางวด ' + thPeriod(period) + ' ไปแล้ว (' + already.entryNo + ')',
-      'กลับรายการเดิมก่อนถ้าต้องการคำนวณใหม่');
+      'ยกเลิกงวดเดิมที่หน้าค่าเสื่อมราคาก่อน ถ้าต้องการคำนวณใหม่');
   }
   const endDate = endOfMonth(period + '-01');
   let bookTotal = 0, taxTotal = 0;
@@ -875,7 +901,7 @@ function computePit(annualIncome, deductions) {
 }
 
 function runPayroll(period) {
-  const already = DB.docs.payRun.find((r) => r.period === period);
+  const already = DB.docs.payRun.find((r) => r.period === period && r.status !== 'void');
   if (already) {
     throw new DomainError('PAYROLL_ALREADY_RUN',
       'ทำเงินเดือนงวด ' + thPeriod(period) + ' ไปแล้ว (' + already.entryNo + ')');
@@ -944,8 +970,9 @@ function fileVat(period) {
     throw new DomainError('ALREADY_FILED',
       'ยื่น ภ.พ.30 งวด ' + thPeriod(period) + ' ไปแล้วเมื่อ ' + thDate(existing.filedDate));
   }
-  const out = DB.taxTx.filter((t) => t.kind === 'vat_output' && t.period === period);
-  const inn = DB.taxTx.filter((t) => t.kind === 'vat_input' && t.period === period);
+  /* แถวของเอกสารที่ยกเลิกแล้วยอดเป็นศูนย์ ไม่นับเข้าแบบ แต่ยังโชว์ในรายงานภาษีว่า "ยกเลิก" */
+  const out = DB.taxTx.filter((t) => t.kind === 'vat_output' && t.period === period && !t.void);
+  const inn = DB.taxTx.filter((t) => t.kind === 'vat_input' && t.period === period && !t.void);
   const outTax = out.reduce((s, t) => s + t.tax, 0);
   const inTax = inn.reduce((s, t) => s + t.tax, 0);
   const payable = outTax - inTax;
@@ -988,7 +1015,7 @@ function fileWht(period, form) {
   }
   // ★ กันรายการที่ธนาคารนำส่งแทน (e-WHT) ออก ไม่งั้นนำส่งซ้ำ
   const rows = DB.taxTx.filter((t) => t.kind === 'wht' && t.period === period
-    && t.form === form && t.channel === 'manual');
+    && t.form === form && t.channel === 'manual' && !t.void);
   if (!rows.length) {
     throw new DomainError('NOTHING_TO_FILE',
       'ไม่มีรายการที่ต้องยื่นใน ' + form + ' งวด ' + thPeriod(period),
@@ -1006,7 +1033,7 @@ function fileWht(period, form) {
   });
   const filing = { form, period, filedDate: addDays(endDate, 7), dueDate: addDays(endDate, 7),
     count: rows.length, total, entryNo: je.no,
-    excluded: DB.taxTx.filter((t) => t.kind === 'wht' && t.period === period && t.channel === 'e_wht').length };
+    excluded: DB.taxTx.filter((t) => t.kind === 'wht' && t.period === period && t.channel === 'e_wht' && !t.void).length };
   DB.docs.filing.unshift(filing);
   rows.forEach((t) => { t.filingId = key; });
   audit('filing', key, 'file', null, { count: rows.length, total: fmt(total) });
@@ -1022,10 +1049,10 @@ function closeChecklist(period) {
     label: c.label, ok: c.ok,
     detail: c.ok ? 'ตรงกัน' : 'ต่างกัน ' + fmt(c.control - c.sub) + ' บาท', blocking: true,
   }));
-  const dep = DB.docs.depreciation.find((d) => d.period === period);
+  const dep = DB.docs.depreciation.find((d) => d.period === period && d.status !== 'void');
   items.push({ label: 'ตั้งค่าเสื่อมราคาประจำงวด', ok: !!dep,
     detail: dep ? fmt(dep.bookTotal) + ' บาท' : 'ยังไม่ได้ทำ', blocking: true, action: 'depreciation' });
-  const pay = DB.docs.payRun.find((r) => r.period === period);
+  const pay = DB.docs.payRun.find((r) => r.period === period && r.status !== 'void');
   items.push({ label: 'ทำเงินเดือนประจำงวด', ok: !!pay,
     detail: pay ? pay.count + ' คน ' + fmt(pay.net) + ' บาท' : 'ยังไม่ได้ทำ', blocking: false, action: 'payroll' });
   const vat = DB.docs.filing.find((f) => f.form === 'PP30' && f.period === period);
@@ -1495,6 +1522,7 @@ function createPaymentBatch(input) {
   const items = nos.map(function (no) {
     const b = DB.docs.bill.find((x) => x.no === no);
     if (!b) throw new DomainError('BILL_NOT_FOUND', 'ไม่พบรายการตั้งหนี้ ' + no);
+    if (b.status === 'void') throw new DomainError('BILL_VOID', 'รายการตั้งหนี้ ' + no + ' ถูกยกเลิกไปแล้ว');
     const out = billOutstanding(b);
     if (out <= 0) throw new DomainError('ALREADY_PAID', 'รายการตั้งหนี้ ' + no + ' จ่ายครบแล้ว');
     const taken = DB.docs.paymentBatch.find((x) => paymentBatchActive(x) && x.items.some((i) => i.billNo === no));
@@ -1694,4 +1722,279 @@ function companyGaps() {
   if (!c.taxId) out.push('เลขประจำตัวผู้เสียภาษี');
   if (!c.address) out.push('ที่อยู่สถานประกอบการ');
   return out;
+}
+
+/* ===================================================================
+   ยกเลิกเอกสาร — กลับทุกอย่างที่เอกสารเคยแตะในชุดเดียว
+   ใบสำคัญ (กลับรายการ ณ วันที่เดิม) · ลูกหนี้/เจ้าหนี้รายตัว · สต๊อก · ทะเบียนภาษี · 50 ทวิ
+   เลขที่เอกสารยังอยู่และขึ้นว่า "ยกเลิก" ทะเบียนจึงไม่มีเลขขาดช่วง
+   =================================================================== */
+const VOIDABLE = {
+  invoice:      { label:'ใบกำกับภาษี', src:'invoice' },
+  receipt:      { label:'ใบเสร็จรับเงิน', src:'receipt' },
+  creditNote:   { label:'ใบลดหนี้', src:'creditNote' },
+  debitNote:    { label:'ใบเพิ่มหนี้', src:'debitNote' },
+  bill:         { label:'รายการตั้งหนี้', src:'bill' },
+  payment:      { label:'ใบสำคัญจ่าย', src:'payment' },
+  expense:      { label:'ค่าใช้จ่าย', src:'expense' },
+  goodsReceipt: { label:'ใบรับสินค้า', src:'goodsReceipt' },
+};
+const liveDoc = (d) => !!d && d.status !== 'void';
+
+/** แถวในทะเบียนภาษีที่เกิดจากเอกสารใบนี้ */
+function taxRowsOf(kind, d) {
+  return DB.taxTx.filter(function (t) {
+    if (t.void) return false;
+    if (kind === 'invoice') return t.kind === 'vat_output' && t.docType === 'tax_invoice' && t.docNo === d.no;
+    if (kind === 'creditNote') return t.kind === 'vat_output' && t.docType === 'credit_note' && t.docNo === d.no;
+    if (kind === 'debitNote') return t.kind === 'vat_output' && t.docType === 'debit_note' && t.docNo === d.no;
+    if (kind === 'bill') return t.kind === 'vat_input' && t.entryNo === d.entryNo;
+    if (kind === 'expense') return (t.kind === 'vat_input' && t.expenseNo === d.no) || (t.kind === 'wht' && t.docNo === d.no);
+    if (kind === 'payment') return t.kind === 'wht' && t.docNo === d.no;
+    return false;
+  });
+}
+
+/** สิ่งที่ยังอ้างถึงเอกสารใบนี้อยู่ — ต้องยกเลิกก่อน ไม่งั้นจะมีเอกสารกำพร้า */
+function voidBlockers(kind, d) {
+  const out = [];
+  const refs = (coll, key) => (DB.docs[coll] || []).filter((x) => x[key] === d.no && liveDoc(x)).map((x) => x.no);
+  if (kind === 'invoice') {
+    const r = refs('receipt', 'invoiceNo'), c = refs('creditNote', 'invoiceNo'), n = refs('debitNote', 'invoiceNo');
+    if (r.length) out.push('มีใบเสร็จรับเงินอ้างถึง ' + r.join(', '));
+    if (c.length) out.push('มีใบลดหนี้อ้างถึง ' + c.join(', '));
+    if (n.length) out.push('มีใบเพิ่มหนี้อ้างถึง ' + n.join(', '));
+    const bn = DB.docs.billingNote.find((b) => b.invoices.some((i) => i.no === d.no)
+      && ['issued', 'partially_paid'].indexOf(billingNoteStatus(b)) >= 0);
+    if (bn) out.push('อยู่ในใบวางบิล ' + bn.no + ' ที่ยังเปิดอยู่');
+  }
+  if (kind === 'bill') {
+    const p = refs('payment', 'billNo');
+    if (p.length) out.push('มีใบสำคัญจ่ายอ้างถึง ' + p.join(', '));
+    const pb = DB.docs.paymentBatch.find((b) => paymentBatchActive(b) && b.items.some((i) => i.billNo === d.no));
+    if (pb) out.push('อยู่ในใบเตรียมจ่าย ' + pb.no + ' ที่ยังไม่ได้จ่าย');
+  }
+  if (kind === 'goodsReceipt' && d.status === 'closed') out.push('ตั้งหนี้ไปแล้ว (' + d.billNo + ') ต้องยกเลิกรายการตั้งหนี้ก่อน');
+  /* ของที่รับเข้ามาถูกขายออกไปแล้ว ดึงกลับออกจากคลังไม่ได้ — ต้องขอใบลดหนี้จากผู้ขายแทน */
+  if ((kind === 'bill' && !d.grnNo) || kind === 'goodsReceipt') {
+    DB.docs.stockMove.filter((m) => m.src === d.no && m.dir === 'in').forEach(function (m) {
+      const it = DB.items.find((x) => x.code === m.item);
+      if (it && it.qty < m.qty) out.push(it.code + ' เหลือในคลัง ' + it.qty + ' ' + it.uom + ' น้อยกว่าที่รับเข้ามา ' + m.qty);
+    });
+  }
+  return out;
+}
+
+/** ตรวจทุกเงื่อนไขก่อนยกเลิก — คืนเอกสาร ถ้าไม่ผ่านโยนข้อผิดพลาดที่บอกวิธีแก้ */
+function voidCheck(kind, no) {
+  const cfg = VOIDABLE[kind];
+  if (!cfg) throw new DomainError('VOID_KIND_UNKNOWN', 'เอกสารประเภทนี้ยกเลิกไม่ได้');
+  const d = (DB.docs[kind] || []).find((x) => x.no === no);
+  if (!d) throw new DomainError('DOC_NOT_FOUND', 'ไม่พบ' + cfg.label + ' ' + no);
+  if (d.status === 'void') throw new DomainError('ALREADY_VOID', cfg.label + ' ' + no + ' ยกเลิกไปแล้ว');
+  const e = DB.entries.find((x) => x.no === d.entryNo);
+  if (d.broughtForward || !e || e.src !== cfg.src || String(e.srcId) !== String(d.no)) {
+    throw new DomainError('VOID_NOT_OWN_ENTRY', cfg.label + ' ' + no + ' เป็นยอดยกมาหรือนำเข้าจากระบบเดิม ยกเลิกในระบบนี้ไม่ได้',
+      'บันทึกรายการปรับปรุงในสมุดรายวันทั่วไปแทน');
+  }
+  const blockers = voidBlockers(kind, d);
+  if (blockers.length) {
+    throw new DomainError('VOID_HAS_DEPENDENTS', 'ยกเลิก' + cfg.label + ' ' + no + ' ไม่ได้ เพราะ' + blockers[0],
+      blockers.length > 1 ? 'และ ' + blockers.slice(1).join(' · ') : 'ยกเลิกเอกสารที่อ้างถึงก่อน แล้วค่อยยกเลิกใบนี้');
+  }
+  const p = periodFor(d.date);
+  if (p.status !== 'open') {
+    throw new DomainError('PERIOD_CLOSED', 'งวด ' + thPeriod(p.code) + ' ปิดแล้ว ยกเลิก' + cfg.label + 'ในงวดนั้นไม่ได้',
+      kind === 'invoice' ? 'ออกใบลดหนี้ในงวดปัจจุบันแทน (มาตรา 86/10)' : 'บันทึกรายการปรับปรุงในงวดปัจจุบันแทน');
+  }
+  const filed = taxRowsOf(kind, d).find((t) => t.filingId);
+  if (filed) {
+    const form = filed.kind === 'wht' ? 'ภ.ง.ด.' + String(filed.form || '').replace('PND', '') : 'ภ.พ.30';
+    throw new DomainError('TAX_ALREADY_FILED', 'ยื่นแบบ ' + form + ' งวด ' + thPeriod(filed.period) + ' ที่มีเอกสารนี้ไปแล้ว ยกเลิกไม่ได้',
+      kind === 'invoice' ? 'ออกใบลดหนี้ในงวดปัจจุบันแทน (มาตรา 86/10)'
+        : filed.kind === 'wht' ? 'ยื่นแบบเพิ่มเติมกับกรมสรรพากร แล้วบันทึกปรับปรุงในงวดปัจจุบัน'
+        : 'ขอใบลดหนี้จากผู้ขาย แล้วบันทึกในงวดปัจจุบัน');
+  }
+  if (e.status !== 'posted') throw new DomainError('ALREADY_REVERSED', 'ใบสำคัญของเอกสารนี้ถูกกลับรายการไปแล้ว');
+  return d;
+}
+
+/** สิ่งที่จะเกิดขึ้นเมื่อยกเลิก — แสดงให้ผู้ใช้เห็นก่อนกดยืนยัน */
+function voidPreview(kind, no) {
+  const d = voidCheck(kind, no);
+  const out = ['กลับรายการใบสำคัญ ' + [d.entryNo, d.cogsEntryNo].filter(Boolean).join(' และ ') + ' ณ วันที่ ' + thDate(d.date)];
+  const tax = taxRowsOf(kind, d);
+  if (tax.some((t) => t.kind !== 'wht')) out.push('ทะเบียนภาษี' + (kind === 'bill' || kind === 'expense' ? 'ซื้อ' : 'ขาย') + 'แสดงว่า "ยกเลิก" ยอดเป็นศูนย์');
+  if (tax.some((t) => t.kind === 'wht')) out.push('ตัดรายการออกจากแบบ ภ.ง.ด. ของงวด');
+  if (d.certNo) out.push('ยกเลิกหนังสือรับรอง 50 ทวิ เลขที่ ' + d.certNo);
+  if (kind === 'invoice' && d.cogsEntryNo) out.push('คืนสินค้าเข้าคลังตามที่ตัดออกไป');
+  if ((kind === 'bill' && !d.grnNo) || kind === 'goodsReceipt') {
+    if (DB.docs.stockMove.some((m) => m.src === d.no && m.dir === 'in')) out.push('นำสินค้าที่รับเข้าออกจากคลัง');
+  }
+  if (kind === 'receipt' || kind === 'creditNote' || kind === 'debitNote') out.push('ยอดคงค้างของใบกำกับ ' + d.invoiceNo + ' กลับไปเหมือนก่อนออกใบนี้');
+  if (kind === 'payment') out.push('ยอดคงค้างของ ' + d.billNo + ' กลับไปเหมือนก่อนจ่าย');
+  if (kind === 'bill' && d.grnNo) out.push('ใบรับสินค้า ' + d.grnNo + ' กลับไปรอตั้งหนี้');
+  return out;
+}
+
+function stockBack(no, dir) {
+  DB.docs.stockMove.filter((m) => m.src === no && m.dir === dir).forEach(function (m) {
+    const it = DB.items.find((x) => x.code === m.item);
+    if (!it) return;
+    const sign = dir === 'out' ? 1 : -1;     // ยกเลิกการขาย = ของกลับเข้า · ยกเลิกการรับ = ของออก
+    it.qty += sign * m.qty;
+    it.value += sign * m.cost;
+    it.avgCost = it.qty > 0 ? divRound(it.value, it.qty) : it.avgCost;
+    DB.docs.stockMove.push({ date: m.date, item: it.code, dir: dir === 'out' ? 'in' : 'out', qty: m.qty, cost: m.cost,
+      src: no + ' (ยกเลิก)', balance: it.qty });
+  });
+}
+function reopenTradeDoc(kind, convertedTo) {
+  (DB.docs[kind] || []).forEach(function (x) {
+    if (x.convertedTo === convertedTo && x.status === 'closed') { x.status = 'approved'; x.convertedTo = null; }
+  });
+}
+function voidCert(certNo) {
+  const c = certNo && DB.docs.whtCert.find((x) => x.no === certNo);
+  if (c) c.status = 'void';
+}
+
+function voidDocument(kind, no, reason) {
+  if (!reason || String(reason).trim().length < 5) {
+    throw new DomainError('REASON_REQUIRED', 'การยกเลิกเอกสารต้องระบุเหตุผล อย่างน้อย 5 ตัวอักษร',
+      'ผู้สอบบัญชีจะเห็นเหตุผลนี้ในร่องรอยการตรวจสอบ');
+  }
+  const why = String(reason).trim();
+  voidCheck(kind, no);
+  return atomically(function () {
+    const d = DB.docs[kind].find((x) => x.no === no);
+    const label = VOIDABLE[kind].label;
+    [d.entryNo, d.cogsEntryNo].filter(Boolean).forEach(function (en) {
+      const e = DB.entries.find((x) => x.no === en);
+      if (e && e.status === 'posted') reverse(en, 'ยกเลิก' + label + ' ' + no + ' — ' + why, d.date, { fromSource: true });
+    });
+    taxRowsOf(kind, d).forEach(function (t) {
+      t.orig = { base: t.base, zero: t.zero || 0, exempt: t.exempt || 0, tax: t.tax, nonClaimable: t.nonClaimable || 0 };
+      t.base = 0; t.zero = 0; t.exempt = 0; t.tax = 0; t.nonClaimable = 0;
+      t.void = true; t.voidReason = why;
+    });
+    const inv = d.invoiceNo ? DB.docs.invoice.find((x) => x.no === d.invoiceNo) : null;
+    if (kind === 'invoice') { stockBack(no, 'out'); reopenTradeDoc('salesOrder', no); }
+    if (kind === 'receipt') { inv.paid -= d.gross; syncInvStatus(inv); }
+    if (kind === 'creditNote') { inv.credited -= d.total; syncInvStatus(inv); }
+    if (kind === 'debitNote') { inv.debited = (inv.debited || 0) - d.total; syncInvStatus(inv); }
+    if (kind === 'bill') {
+      if (d.grnNo) {
+        const g = DB.docs.goodsReceipt.find((x) => x.no === d.grnNo);
+        if (g) { g.status = 'received'; g.billNo = null; g.billDate = null; }
+      } else stockBack(no, 'in');
+      reopenTradeDoc('purchaseOrder', no);
+    }
+    if (kind === 'payment') {
+      const b = DB.docs.bill.find((x) => x.no === d.billNo);
+      b.paid -= d.gross;
+      b.status = b.paid >= b.total ? 'paid' : b.paid > 0 ? 'partially_paid' : 'issued';
+      voidCert(d.certNo);
+      DB.docs.paymentBatch.forEach((pb) => pb.items.forEach((i) => { if (i.paymentNo === no) i.voided = true; }));
+    }
+    if (kind === 'expense') voidCert(d.certNo);
+    if (kind === 'goodsReceipt') { stockBack(no, 'in'); reopenGrnOnPo(d); }
+    const before = d.status;
+    d.status = 'void';
+    d.voidReason = why;
+    d.voidedAt = new Date().toISOString();
+    audit(kind, no, 'void', { status: before }, { status: 'void' }, why);
+    return d;
+  });
+}
+/* ใบรับสินค้าที่ยกเลิก — ใบสั่งซื้อต้องกลับมารอรับของอีกครั้ง */
+function reopenGrnOnPo(g) {
+  if (!g.poNo) return;
+  const po = DB.docs.purchaseOrder.find((x) => x.no === g.poNo);
+  if (!po) return;
+  if (po.convertedTo === g.no) { po.status = 'approved'; po.convertedTo = null; }
+}
+
+/** มูลค่าก่อนภาษีที่ยังลดหนี้ได้ = ใบกำกับ + ใบเพิ่มหนี้ − ใบลดหนี้ที่ยังไม่ยกเลิก
+    ต้องคิดจากฐานก่อนภาษีของแต่ละใบ — inv.credited เก็บยอดรวมภาษี เอามาลบกับฐานตรง ๆ ไม่ได้ */
+function creditableBase(inv) {
+  let v = inv.base;
+  DB.docs.debitNote.forEach((d) => { if (d.invoiceNo === inv.no && liveDoc(d)) v += d.base; });
+  DB.docs.creditNote.forEach((c) => { if (c.invoiceNo === inv.no && liveDoc(c)) v -= c.base; });
+  return Math.max(0, v);
+}
+
+/* ===================================================================
+   ยกเลิกงวดค่าเสื่อมราคา / งวดเงินเดือน
+   ใบสำคัญของสองอย่างนี้กลับรายการตรง ๆ ไม่ได้ เพราะค่าเสื่อมสะสมของทรัพย์สินแต่ละตัว
+   และ ภ.ง.ด.1 จะไม่ตรงกับบัญชีแยกประเภท ต้องยกเลิกทั้งงวดจากต้นทางเท่านั้น
+   =================================================================== */
+const RUN_KINDS = {
+  depreciation: { label:'ค่าเสื่อมราคางวด', coll:'depreciation' },
+  payroll:      { label:'เงินเดือนงวด', coll:'payRun' },
+};
+function runCheck(kind, period) {
+  const cfg = RUN_KINDS[kind];
+  if (!cfg) throw new DomainError('RUN_KIND_UNKNOWN', 'ยกเลิกงวดประเภทนี้ไม่ได้');
+  const run = DB.docs[cfg.coll].find((r) => r.period === period && r.status !== 'void');
+  if (!run) throw new DomainError('RUN_NOT_FOUND', 'ไม่พบ' + cfg.label + ' ' + thPeriod(period) + ' ที่ยังใช้งานอยู่');
+  const p = periodFor(run.date);
+  if (p.status !== 'open') {
+    throw new DomainError('PERIOD_CLOSED', 'งวด ' + thPeriod(p.code) + ' ปิดแล้ว ยกเลิก' + cfg.label + 'ไม่ได้',
+      'บันทึกรายการปรับปรุงในงวดปัจจุบันแทน');
+  }
+  if (kind === 'depreciation') {
+    /* ค่าเสื่อมงวดหลังคิดต่อจากยอดสะสมของงวดนี้ ต้องยกเลิกจากงวดล่าสุดย้อนกลับมา */
+    const later = DB.docs.depreciation.find((r) => r.period > period && r.status !== 'void');
+    if (later) {
+      throw new DomainError('RUN_HAS_LATER', 'มีค่าเสื่อมราคางวด ' + thPeriod(later.period) + ' คิดต่อจากงวดนี้อยู่',
+        'ยกเลิกงวดล่าสุดก่อน แล้วย้อนกลับมาทีละงวด');
+    }
+    const gone = run.rows.map((r) => DB.assets.find((a) => a.code === r.code))
+      .find((a) => !a || a.status !== 'in_use');
+    if (gone) {
+      throw new DomainError('RUN_ASSET_DISPOSED', 'ทรัพย์สินบางรายการในงวดนี้จำหน่ายออกไปแล้ว ยกเลิกค่าเสื่อมย้อนหลังไม่ได้',
+        'บันทึกรายการปรับปรุงในสมุดรายวันทั่วไปแทน');
+    }
+  }
+  if (kind === 'payroll') {
+    const filed = DB.taxTx.find((t) => t.kind === 'wht' && t.docType === 'payroll' && t.entryNo === run.entryNo && !t.void && t.filingId);
+    if (filed) {
+      throw new DomainError('TAX_ALREADY_FILED', 'ยื่น ภ.ง.ด.1 งวด ' + thPeriod(filed.period) + ' ไปแล้ว ยกเลิกงวดเงินเดือนไม่ได้',
+        'ยื่นแบบเพิ่มเติมกับกรมสรรพากร แล้วบันทึกปรับปรุงในงวดปัจจุบัน');
+    }
+  }
+  const e = DB.entries.find((x) => x.no === run.entryNo);
+  if (!e || e.status !== 'posted') throw new DomainError('ALREADY_REVERSED', 'ใบสำคัญของงวดนี้ถูกกลับรายการไปแล้ว');
+  return run;
+}
+function voidRun(kind, period, reason) {
+  if (!reason || String(reason).trim().length < 5) {
+    throw new DomainError('REASON_REQUIRED', 'การยกเลิกงวดต้องระบุเหตุผล อย่างน้อย 5 ตัวอักษร');
+  }
+  const why = String(reason).trim();
+  runCheck(kind, period);
+  return atomically(function () {
+    const run = DB.docs[RUN_KINDS[kind].coll].find((r) => r.period === period && r.status !== 'void');
+    reverse(run.entryNo, 'ยกเลิก' + RUN_KINDS[kind].label + ' ' + thPeriod(period) + ' — ' + why, run.date, { fromSource: true });
+    if (kind === 'depreciation') {
+      run.rows.forEach(function (r) {
+        const a = DB.assets.find((x) => x.code === r.code);
+        a.accumBook -= r.book;
+        a.accumTax -= r.tax;
+      });
+    }
+    if (kind === 'payroll') {
+      DB.taxTx.forEach(function (t) {
+        if (t.kind !== 'wht' || t.docType !== 'payroll' || t.entryNo !== run.entryNo || t.void) return;
+        t.orig = { base: t.base, tax: t.tax };
+        t.base = 0; t.tax = 0; t.void = true; t.voidReason = why;
+      });
+    }
+    run.status = 'void';
+    run.voidReason = why;
+    run.voidedAt = new Date().toISOString();
+    audit(kind, period, 'void', { status: 'posted' }, { status: 'void' }, why);
+    return run;
+  });
 }

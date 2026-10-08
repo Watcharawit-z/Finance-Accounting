@@ -144,12 +144,12 @@ function flowCount(sc) {
     case 'expenses': return per('expense');
     case 'whtcert': return per('whtCert');
     case 'bank': return done(!DB.bankTxns.some((t) => !t.matched && periodOf(t.date) <= STATE.period));
-    case 'deprec': return done(DB.docs.depreciation.some((d) => d.period === STATE.period));
-    case 'payroll': return done(DB.docs.payRun.some((r) => r.period === STATE.period));
+    case 'deprec': return done(DB.docs.depreciation.some((d) => d.period === STATE.period && d.status !== 'void'));
+    case 'payroll': return done(DB.docs.payRun.some((r) => r.period === STATE.period && r.status !== 'void'));
     case 'pp30': return done(DB.docs.filing.some((f) => f.form === 'PP30' && f.period === STATE.period));
     case 'pnd': {
       const need = ['PND1', 'PND3', 'PND53'].filter((f) => DB.taxTx.some((t) => t.kind === 'wht'
-        && t.period === STATE.period && t.form === f && t.channel === 'manual'));
+        && t.period === STATE.period && t.form === f && t.channel === 'manual' && !t.void));
       return done(need.every((f) => DB.docs.filing.some((x) => x.form === f && x.period === STATE.period)));
     }
     case 'close': { const p = DB.periods.find((x) => x.code === STATE.period); return done(p && p.status === 'closed'); }
@@ -423,9 +423,9 @@ function invoiceDetail(no) {
     actions: (out > 0 ? btn('pay:' + d.no, 'รับชำระเงิน', 'primary') : '')
       + (out > 0 ? btn('cn:' + d.no, 'ออกใบลดหนี้') : '')
       + (d.status !== 'void' ? btn('dn:' + d.no, 'ออกใบเพิ่มหนี้') : '')
-      + printBtn('invoice', d.no) + btn('entry:' + d.entryNo, 'ดูใบสำคัญ') + btn('sel:', 'ปิด'),
-    body:
-      '<div class="docgrid">'
+      + printBtn('invoice', d.no) + btn('entry:' + d.entryNo, 'ดูใบสำคัญ') + voidBtn('invoice', d) + btn('sel:', 'ปิด'),
+    body: voidBanner(d)
+      + '<div class="docgrid">'
       + '<div><div class="dim">ผู้ขาย (ตามที่พิมพ์บนใบกำกับ)</div><b>' + esc(DB.company.name) + '</b>'
       + '<div>' + esc(DB.company.address) + '</div>'
       + '<div>เลขประจำตัวผู้เสียภาษี ' + esc(DB.company.taxId) + ' · ' + esc(DB.company.branchName) + '</div></div>'
@@ -448,56 +448,89 @@ function invoiceDetail(no) {
       + '<div class="gt"><span>คงเหลือ</span><b>' + fmt(out) + '</b></div>'
       + '</div>'
       + (rcs.length ? '<div class="sub-h">ใบเสร็จรับเงินที่อ้างถึงใบนี้</div>' + tbl({
-          cols:[{t:'เลขที่'},{t:'วันที่'},{t:'รับก่อนหัก',a:'r'},{t:'ถูกหัก ณ ที่จ่าย',a:'r'},{t:'รับสุทธิ',a:'r'}],
-          rows: rcs.map((r) => [{mono:r.no}, thDateNum(r.date), {n:r.gross}, {n:r.wht}, {n:r.net}]),
-          rowAttr: (r) => 'class="row-link" data-act="printdoc:receipt:' + r[0].mono + '"' }) : '')
+          cols:[{t:'เลขที่'},{t:'วันที่'},{t:'รับก่อนหัก',a:'r'},{t:'ถูกหัก ณ ที่จ่าย',a:'r'},{t:'รับสุทธิ',a:'r'},{t:'สถานะ'}],
+          rows: rcs.map((r) => [{mono:r.no}, thDateNum(r.date), {n:r.gross}, {n:r.wht}, {n:r.net}, statusPill(r.status || 'posted')]),
+          rowAttr: (r, i) => rowCls(rcs[i]) + ' data-act="open:receipts:' + r[0].mono + '"' }) : '')
       + (cns.length ? '<div class="sub-h">ใบลดหนี้ที่อ้างถึงใบนี้</div>' + tbl({
-          cols:[{t:'เลขที่'},{t:'วันที่'},{t:'เหตุผลตามมาตรา 86/10'},{t:'รวม',a:'r'}],
-          rows: cns.map((c) => [{mono:c.no}, thDateNum(c.date), c.reasonText, {n:c.total}]) }) : '')
+          cols:[{t:'เลขที่'},{t:'วันที่'},{t:'เหตุผลตามมาตรา 86/10'},{t:'รวม',a:'r'},{t:'สถานะ'}],
+          rows: cns.map((c) => [{mono:c.no}, thDateNum(c.date), c.reasonText, {n:c.total}, statusPill(c.status || 'posted')]),
+          rowAttr: (r, i) => rowCls(cns[i]) + ' data-act="open:creditnotes:' + r[0].mono + '"' }) : '')
       + (dns.length ? '<div class="sub-h">ใบเพิ่มหนี้ที่อ้างถึงใบนี้</div>' + tbl({
-          cols:[{t:'เลขที่'},{t:'วันที่'},{t:'เหตุผลตามมาตรา 86/9'},{t:'รวม',a:'r'}],
-          rows: dns.map((c) => [{mono:c.no}, thDateNum(c.date), c.reasonText, {n:c.total}]) }) : ''),
-    foot: 'ครบองค์ประกอบตามมาตรา 86/4 · ส่งกรมสรรพากรแบบ e-Tax Invoice แล้ว (จำลอง)',
+          cols:[{t:'เลขที่'},{t:'วันที่'},{t:'เหตุผลตามมาตรา 86/9'},{t:'รวม',a:'r'},{t:'สถานะ'}],
+          rows: dns.map((c) => [{mono:c.no}, thDateNum(c.date), c.reasonText, {n:c.total}, statusPill(c.status || 'posted')]),
+          rowAttr: (r, i) => rowCls(dns[i]) + ' data-act="open:debitnotes:' + r[0].mono + '"' }) : ''),
+    foot: isVoid(d)
+      ? 'ใบกำกับที่ยกเลิกยังอยู่ในรายงานภาษีขายด้วยยอดศูนย์ เลขที่จึงเรียงต่อเนื่องไม่ขาดช่วง · ถ้าต้องเก็บเงินจริงให้ออกใบกำกับใบใหม่'
+      : 'ครบองค์ประกอบตามมาตรา 86/4 · ส่งกรมสรรพากรแบบ e-Tax Invoice แล้ว (จำลอง)'
+        + ' · ยกเลิกได้เฉพาะใบที่ยังไม่มีเอกสารอ้างถึงและยังไม่ยื่น ภ.พ.30 ถ้ายื่นแล้วให้ออกใบลดหนี้',
   });
 }
 
 function scInvoices() {
   const rows = DB.docs.invoice.filter((d) =>
     periodOf(d.date) === STATE.period && (hit(d.no) || hit(d.partnerName)));
-  const totals = rows.reduce((s, d) => ({ base:s.base + d.base, vat:s.vat + d.vat, total:s.total + d.total }), {base:0,vat:0,total:0});
+  const totals = liveOnly(rows).reduce((s, d) => ({ base:s.base + d.base, vat:s.vat + d.vat, total:s.total + d.total }), {base:0,vat:0,total:0});
   return (STATE.sel ? invoiceDetail(STATE.sel) : '')
     + card({
-      title:'ใบกำกับภาษี', sub: thPeriod(STATE.period) + ' · ' + rows.length + ' ฉบับ',
+      title:'ใบกำกับภาษี', sub: thPeriod(STATE.period) + ' · ' + countNote(rows, 'ฉบับ'),
       actions: btn('new:invoice', '+ ออกใบกำกับภาษี', periodIsOpen() ? 'primary' : 'disabled'),
       filters: searchBox('ค้นหาเลขที่หรือชื่อลูกค้า'),
       body: tbl({
         cols:[{t:'เลขที่'},{t:'วันที่'},{t:'ลูกค้า'},{t:'ครบกำหนด'},{t:'ก่อนภาษี',a:'r'},{t:'ภาษี',a:'r'},{t:'รวม',a:'r'},{t:'คงเหลือ',a:'r'},{t:'สถานะ'}],
         rows: rows.map((d) => [{mono:d.no}, thDateNum(d.date), d.partnerName, thDateNum(d.due),
           {n:d.base}, {n:d.vat}, {n:d.total}, {n:invOutstanding(d)}, statusPill(d.status)]),
-        rowAttr: (r) => 'class="row-link" data-act="sel:' + r[0].mono + '"',
-        foot: ['รวม', '', '', '', {n:totals.base}, {n:totals.vat}, {n:totals.total}, '', ''],
+        rowAttr: (r, i) => rowCls(rows[i]) + ' data-act="sel:' + r[0].mono + '"',
+        foot: ['รวม', '', '', '', {n:totals.base}, {n:totals.vat}, {n:totals.total}, {n:liveOnly(rows).reduce((s, d) => s + invOutstanding(d), 0)}, ''],
         empty: 'ยังไม่มีใบกำกับภาษีในงวดนี้',
         emptyAction: btn('new:invoice', 'ออกใบกำกับภาษีใบแรก', 'primary'),
       }),
-      foot: 'ระบบจองเลขที่เอกสารตอนลงบัญชีเท่านั้น เลขจึงเรียงต่อเนื่องไม่มีช่องว่าง',
+      foot: 'ระบบจองเลขที่เอกสารตอนลงบัญชีเท่านั้น เลขจึงเรียงต่อเนื่องไม่มีช่องว่าง · ใบที่ยกเลิกยังแสดงอยู่แต่ไม่นับในยอดรวม',
     });
+}
+
+/** รายละเอียดเอกสารที่ไม่มีบรรทัดสินค้า — ใบเสร็จ ใบลดหนี้ ใบเพิ่มหนี้ ใบสำคัญจ่าย */
+function simpleDocCard(o) {
+  const d = o.doc;
+  return card({
+    title: o.title + ' เลขที่ ' + d.no, sub: o.sub,
+    actions: (o.actions || '') + printBtn(o.kind, d.no) + btn('entry:' + d.entryNo, 'ดูใบสำคัญ')
+      + voidBtn(o.kind, d) + btn('sel:', 'ปิด'),
+    body: voidBanner(d)
+      + '<div class="kv">' + o.kv.filter(Boolean).map((r) => '<div><span>' + esc(r[0]) + '</span><b>'
+        + (r[2] ? r[1] : esc(r[1])) + '</b></div>').join('') + '</div>',
+    foot: o.foot,
+  });
+}
+function receiptDetail(no) {
+  const d = DB.docs.receipt.find((x) => x.no === no);
+  if (!d) return '';
+  return simpleDocCard({ kind:'receipt', doc:d, title:'ใบเสร็จรับเงิน',
+    sub:'รับวันที่ ' + thDate(d.date) + ' · ' + d.partnerName,
+    actions: btn('open:invoices:' + d.invoiceNo, 'ดูใบกำกับ ' + d.invoiceNo),
+    kv:[['อ้างใบกำกับภาษี', d.invoiceNo], d.billingNoteNo ? ['ตามใบวางบิล', d.billingNoteNo] : null,
+      ['วิธีรับเงิน', PAY_METHOD[d.method] || d.method], ['รับก่อนหัก', fmt(d.gross)],
+      ['ลูกค้าหัก ณ ที่จ่าย' + (d.whtRate ? ' ' + d.whtRate + '%' : ''), fmt(d.wht)], ['รับสุทธิ', fmt(d.net)],
+      ['สถานะ', isVoid(d) ? 'ยกเลิก' : 'ลงบัญชีแล้ว']],
+    foot: isVoid(d) ? 'ยอดคงค้างของใบกำกับ ' + d.invoiceNo + ' กลับไปเหมือนก่อนรับชำระแล้ว'
+      : 'ยกเลิกใบเสร็จแล้ว ระบบกลับรายการ ณ วันที่เดิม และยอดคงค้างของใบกำกับกลับไปเหมือนเดิม',
+  });
 }
 
 function scReceipts() {
   const rows = DB.docs.receipt.filter((d) => periodOf(d.date) === STATE.period && (hit(d.no) || hit(d.partnerName)));
-  const t = rows.reduce((s, d) => ({g:s.g + d.gross, w:s.w + d.wht, n:s.n + d.net}), {g:0,w:0,n:0});
-  return card({
-    title:'ใบเสร็จรับเงิน', sub: thPeriod(STATE.period) + ' · ' + rows.length + ' ฉบับ',
+  const t = liveOnly(rows).reduce((s, d) => ({g:s.g + d.gross, w:s.w + d.wht, n:s.n + d.net}), {g:0,w:0,n:0});
+  return (STATE.sel ? receiptDetail(STATE.sel) : '') + card({
+    title:'ใบเสร็จรับเงิน', sub: thPeriod(STATE.period) + ' · ' + countNote(rows, 'ฉบับ'),
     actions: btn('new:receipt', '+ ออกใบเสร็จรับเงิน', periodIsOpen() ? 'primary' : 'disabled'),
     filters: searchBox('ค้นหาเลขที่หรือชื่อลูกค้า'),
     body: tbl({
-      cols:[{t:'เลขที่'},{t:'วันที่'},{t:'ลูกค้า'},{t:'อ้างใบกำกับ'},{t:'วิธีรับ'},{t:'รับก่อนหัก',a:'r'},{t:'ลูกค้าหักไว้',a:'r'},{t:'รับสุทธิ',a:'r'}],
+      cols:[{t:'เลขที่'},{t:'วันที่'},{t:'ลูกค้า'},{t:'อ้างใบกำกับ'},{t:'วิธีรับ'},{t:'รับก่อนหัก',a:'r'},{t:'ลูกค้าหักไว้',a:'r'},{t:'รับสุทธิ',a:'r'},{t:'สถานะ'}],
       rows: rows.map((d) => [{mono:d.no}, thDateNum(d.date), d.partnerName,
         {mono:d.invoiceNo + (d.billingNoteNo ? ' · ' + d.billingNoteNo : '')},
         d.method === 'cash' ? 'เงินสด' : d.method === 'cheque' ? 'เช็ค' : 'โอนเงิน',
-        {n:d.gross}, {n:d.wht}, {n:d.net}]),
-      rowAttr: (r) => 'class="row-link" data-act="printdoc:receipt:' + r[0].mono + '" title="คลิกเพื่อดูและพิมพ์ใบเสร็จ"',
-      foot: ['รวม','','','','', {n:t.g}, {n:t.w}, {n:t.n}],
+        {n:d.gross}, {n:d.wht}, {n:d.net}, statusPill(d.status || 'posted')]),
+      rowAttr: (r, i) => rowCls(rows[i]) + ' data-act="sel:' + r[0].mono + '" title="คลิกเพื่อดูรายละเอียด พิมพ์ หรือยกเลิก"',
+      foot: ['รวม','','','','', {n:t.g}, {n:t.w}, {n:t.n}, ''],
       empty:'ยังไม่มีการรับชำระในงวดนี้',
       emptyAction: periodIsOpen() ? btn('new:receipt', 'ออกใบเสร็จรับเงิน', 'primary') : '',
     }),
@@ -505,16 +538,33 @@ function scReceipts() {
   });
 }
 
+function noteDetail(kind, no) {
+  const d = DB.docs[kind].find((x) => x.no === no);
+  if (!d) return '';
+  const cn = kind === 'creditNote';
+  return simpleDocCard({ kind, doc:d, title: cn ? 'ใบลดหนี้' : 'ใบเพิ่มหนี้',
+    sub:'ออกวันที่ ' + thDate(d.date) + ' · ' + d.partnerName,
+    actions: btn('open:invoices:' + d.invoiceNo, 'ดูใบกำกับเดิม ' + d.invoiceNo),
+    kv:[['อ้างใบกำกับภาษีเดิม', d.invoiceNo], ['เหตุตามมาตรา ' + (cn ? '86/10' : '86/9'), d.reasonText],
+      ['มูลค่า' + (cn ? 'ที่ลด' : 'ที่เพิ่ม'), fmt(d.base)], ['ภาษีมูลค่าเพิ่ม', fmt(d.vat)], ['รวม', fmt(d.total)],
+      ['สถานะ', isVoid(d) ? 'ยกเลิก' : 'ลงบัญชีแล้ว']],
+    foot: isVoid(d) ? 'ยกเลิกแล้ว — รายงานภาษีขายแสดงใบนี้ว่า "ยกเลิก" ยอดเป็นศูนย์'
+      : 'ภาษีขายที่' + (cn ? 'ลด' : 'เพิ่ม') + 'เข้ารายงานภาษีขายเดือนที่ออกใบนี้ · ยกเลิกได้ถ้ายังไม่ยื่น ภ.พ.30 ของเดือนนั้น',
+  });
+}
+
 function scCreditNotes() {
   const rows = DB.docs.creditNote.filter((d) => periodOf(d.date) === STATE.period);
-  return card({
-    title:'ใบลดหนี้', sub:'ออกได้เฉพาะเหตุตามมาตรา 86/10 และต้องอ้างใบกำกับเดิมเสมอ',
+  const t = liveOnly(rows).reduce((a, d) => ({ base:a.base + d.base, vat:a.vat + d.vat, total:a.total + d.total }), {base:0,vat:0,total:0});
+  return (STATE.sel ? noteDetail('creditNote', STATE.sel) : '') + card({
+    title:'ใบลดหนี้', sub: thPeriod(STATE.period) + ' · ' + countNote(rows, 'ฉบับ') + ' · ออกได้เฉพาะเหตุตามมาตรา 86/10 และต้องอ้างใบกำกับเดิมเสมอ',
     actions: btn('new:creditnote', '+ ออกใบลดหนี้', periodIsOpen() ? 'primary' : 'disabled'),
     body: tbl({
-      cols:[{t:'เลขที่'},{t:'วันที่'},{t:'ลูกค้า'},{t:'อ้างใบกำกับเดิม'},{t:'เหตุตามกฎหมาย'},{t:'มูลค่า',a:'r'},{t:'ภาษี',a:'r'},{t:'รวม',a:'r'}],
+      cols:[{t:'เลขที่'},{t:'วันที่'},{t:'ลูกค้า'},{t:'อ้างใบกำกับเดิม'},{t:'เหตุตามกฎหมาย'},{t:'มูลค่า',a:'r'},{t:'ภาษี',a:'r'},{t:'รวม',a:'r'},{t:'สถานะ'}],
       rows: rows.map((d) => [{mono:d.no}, thDateNum(d.date), d.partnerName, {mono:d.invoiceNo},
-        d.reasonText, {n:d.base}, {n:d.vat}, {n:d.total}]),
-      rowAttr: (r) => 'class="row-link" data-act="printdoc:creditNote:' + r[0].mono + '" title="คลิกเพื่อดูและพิมพ์"',
+        d.reasonText, {n:d.base}, {n:d.vat}, {n:d.total}, statusPill(d.status || 'posted')]),
+      rowAttr: (r, i) => rowCls(rows[i]) + ' data-act="sel:' + r[0].mono + '" title="คลิกเพื่อดูรายละเอียด พิมพ์ หรือยกเลิก"',
+      foot: rows.length ? ['รวม','','','','', {n:t.base}, {n:t.vat}, {n:t.total}, ''] : null,
       empty:'ไม่มีใบลดหนี้ในงวดนี้',
     }),
     foot: 'ภาษีขายที่ลดลงจะเข้ารายงานภาษีขายเดือนที่ออกใบลดหนี้ ไม่ใช่เดือนของใบกำกับเดิม',
@@ -578,14 +628,15 @@ function partnerScreen(kind) {
 function billDetail(no) {
   const d = DB.docs.bill.find((x) => x.no === no);
   if (!d) return '';
-  const out = d.total - d.paid;
+  const out = billOutstanding(d);
   const pays = DB.docs.payment.filter((p) => p.billNo === no);
   return card({
     title:'ตั้งหนี้ผู้ขาย เลขที่ ' + d.no,
-    sub:'ใบกำกับภาษีซื้อเลขที่ ' + d.vendorNo + ' · ' + d.partnerName,
+    sub:'ใบกำกับภาษีซื้อเลขที่ ' + d.vendorNo + ' · ' + d.partnerName + (d.grnNo ? ' · จากใบรับสินค้า ' + d.grnNo : ''),
     actions: (out > 0 ? btn('paybill:' + d.no, 'จ่ายชำระ', 'primary') : '')
-      + btn('entry:' + d.entryNo, 'ดูใบสำคัญ') + btn('sel:', 'ปิด'),
-    body: tbl({
+      + (d.grnNo ? btn('open:goodsreceipts:' + d.grnNo, 'ดูใบรับสินค้า') : '')
+      + btn('entry:' + d.entryNo, 'ดูใบสำคัญ') + voidBtn('bill', d) + btn('sel:', 'ปิด'),
+    body: voidBanner(d) + tbl({
       cols:[{t:'รายการ'},{t:'จำนวน',a:'r'},{t:'ราคาต่อหน่วย',a:'r'},{t:'จำนวนเงิน',a:'r'}],
       rows: d.lines.map((l) => [l.desc, {n:M(String(l.qty))}, {n:l.price}, {n:l.amount}]),
     })
@@ -595,12 +646,12 @@ function billDetail(no) {
     + '<div class="gt"><span>รวมทั้งสิ้น</span><b>' + fmt(d.total) + '</b></div>'
     + '<div class="gt"><span>คงเหลือต้องจ่าย</span><b>' + fmt(out) + '</b></div></div>'
     + (pays.length ? '<div class="sub-h">ใบสำคัญจ่ายที่อ้างถึงรายการนี้</div>' + tbl({
-        cols:[{t:'เลขที่'},{t:'วันที่'},{t:'ช่องทาง'},{t:'ยอดก่อนหัก',a:'r'},{t:'หัก ณ ที่จ่าย',a:'r'},{t:'จ่ายสุทธิ',a:'r'},{t:'50 ทวิ'}],
+        cols:[{t:'เลขที่'},{t:'วันที่'},{t:'ช่องทาง'},{t:'ยอดก่อนหัก',a:'r'},{t:'หัก ณ ที่จ่าย',a:'r'},{t:'จ่ายสุทธิ',a:'r'},{t:'50 ทวิ'},{t:'สถานะ'}],
         rows: pays.map((p) => [{mono:p.no}, thDateNum(p.date),
           p.channel === 'e_wht' ? 'e-Withholding Tax' : 'โอน/เช็คเอง',
           {n:p.gross}, {n:p.wht}, {n:p.net},
-          p.certNo ? {mono:p.certNo} : {dim:'ธนาคารออกให้'}]),
-        rowAttr: (r) => 'class="row-link" data-act="printdoc:payment:' + r[0].mono + '"' }) : ''),
+          p.certNo ? {mono:p.certNo} : (p.wht ? {dim:'ธนาคารออกให้'} : {dim:'—'}), statusPill(p.status || 'posted')]),
+        rowAttr: (r, i) => rowCls(pays[i]) + ' data-act="open:payments:' + r[0].mono + '"' }) : ''),
     foot: d.claimable
       ? 'ภาษีซื้อใบนี้เข้ารายงานภาษีซื้องวด ' + thPeriod(periodOf(d.date))
       : 'ภาษีซื้อต้องห้ามตามมาตรา 82/5 — ไม่นำไปหักในแบบ ภ.พ.30 และบันทึกเป็นค่าใช้จ่ายทันที',
@@ -609,18 +660,18 @@ function billDetail(no) {
 
 function scBills() {
   const rows = DB.docs.bill.filter((d) => periodOf(d.date) === STATE.period && (hit(d.no) || hit(d.partnerName) || hit(d.vendorNo)));
-  const t = rows.reduce((s, d) => ({b:s.b + d.base, v:s.v + d.vat, t:s.t + d.total}), {b:0,v:0,t:0});
+  const t = liveOnly(rows).reduce((s, d) => ({b:s.b + d.base, v:s.v + d.vat, t:s.t + d.total}), {b:0,v:0,t:0});
   return (STATE.sel ? billDetail(STATE.sel) : '')
     + card({
-      title:'ตั้งหนี้ผู้ขาย', sub: thPeriod(STATE.period) + ' · ' + rows.length + ' รายการ',
+      title:'ตั้งหนี้ผู้ขาย', sub: thPeriod(STATE.period) + ' · ' + countNote(rows, 'รายการ'),
       actions: btn('new:bill', '+ บันทึกใบกำกับภาษีซื้อ', periodIsOpen() ? 'primary' : 'disabled'),
       filters: searchBox('ค้นหาผู้ขายหรือเลขที่ใบกำกับ'),
       body: tbl({
         cols:[{t:'เลขที่ระบบ'},{t:'วันที่'},{t:'ผู้ขาย'},{t:'ใบกำกับผู้ขาย'},{t:'ครบกำหนด'},{t:'ก่อนภาษี',a:'r'},{t:'ภาษีซื้อ',a:'r'},{t:'รวม',a:'r'},{t:'คงเหลือ',a:'r'},{t:'สถานะ'}],
         rows: rows.map((d) => [{mono:d.no}, thDateNum(d.date), d.partnerName, {mono:d.vendorNo}, thDateNum(d.due),
-          {n:d.base}, {n:d.vat}, {n:d.total}, {n:d.total - d.paid}, statusPill(d.status)]),
-        rowAttr: (r) => 'class="row-link" data-act="sel:' + r[0].mono + '"',
-        foot: ['รวม','','','','', {n:t.b}, {n:t.v}, {n:t.t}, '', ''],
+          {n:d.base}, {n:d.vat}, {n:d.total}, {n:billOutstanding(d)}, statusPill(d.status)]),
+        rowAttr: (r, i) => rowCls(rows[i]) + ' data-act="sel:' + r[0].mono + '"',
+        foot: ['รวม','','','','', {n:t.b}, {n:t.v}, {n:t.t}, {n:liveOnly(rows).reduce((s, d) => s + billOutstanding(d), 0)}, ''],
         empty:'ยังไม่มีรายการซื้อในงวดนี้',
         emptyAction: btn('new:bill', 'บันทึกใบกำกับภาษีซื้อ', 'primary'),
       }),
@@ -628,23 +679,40 @@ function scBills() {
     });
 }
 
+function paymentDetail(no) {
+  const d = DB.docs.payment.find((x) => x.no === no);
+  if (!d) return '';
+  return simpleDocCard({ kind:'payment', doc:d, title:'ใบสำคัญจ่าย',
+    sub:'จ่ายวันที่ ' + thDate(d.date) + ' · ' + d.partnerName,
+    actions: btn('open:bills:' + d.billNo, 'ดูรายการตั้งหนี้ ' + d.billNo)
+      + (d.certNo ? btn('open:whtcert:' + d.certNo, 'ดู 50 ทวิ ' + d.certNo) : ''),
+    kv:[['อ้างรายการตั้งหนี้', d.billNo], d.batchNo ? ['ตามใบเตรียมจ่าย', d.batchNo] : null,
+      ['ช่องทางนำส่งภาษี', d.channel === 'e_wht' ? 'e-Withholding Tax (ธนาคารนำส่ง)' : 'หักและนำส่งเอง'],
+      ['ยอดก่อนหัก', fmt(d.gross)], ['หัก ณ ที่จ่าย' + (d.whtRate ? ' ' + d.whtRate + '%' : ''), fmt(d.wht)],
+      ['จ่ายสุทธิ', fmt(d.net)], ['หนังสือรับรอง 50 ทวิ', d.certNo || (d.wht ? 'ธนาคารออกให้' : '—')],
+      ['สถานะ', isVoid(d) ? 'ยกเลิก' : 'ลงบัญชีแล้ว']],
+    foot: isVoid(d) ? 'ยกเลิกแล้ว — ยอดค้างของ ' + d.billNo + ' กลับไปเหมือนก่อนจ่าย' + (d.certNo ? ' และ 50 ทวิ ' + d.certNo + ' ถูกยกเลิกด้วย' : '')
+      : 'ยกเลิกใบสำคัญจ่ายแล้ว ระบบยกเลิก 50 ทวิ และตัดออกจากแบบ ภ.ง.ด. ให้ในครั้งเดียว (ถ้ายังไม่ยื่นแบบของเดือนนั้น)',
+  });
+}
+
 function scPayments() {
   const rows = DB.docs.payment.filter((d) => periodOf(d.date) === STATE.period);
-  const t = rows.reduce((s, d) => ({g:s.g + d.gross, w:s.w + d.wht, n:s.n + d.net}), {g:0,w:0,n:0});
-  const ewht = rows.filter((d) => d.channel === 'e_wht').length;
-  return card({
-    title:'ใบสำคัญจ่าย', sub: thPeriod(STATE.period) + ' · ' + rows.length + ' รายการ'
+  const t = liveOnly(rows).reduce((s, d) => ({g:s.g + d.gross, w:s.w + d.wht, n:s.n + d.net}), {g:0,w:0,n:0});
+  const ewht = liveOnly(rows).filter((d) => d.channel === 'e_wht').length;
+  return (STATE.sel ? paymentDetail(STATE.sel) : '') + card({
+    title:'ใบสำคัญจ่าย', sub: thPeriod(STATE.period) + ' · ' + countNote(rows, 'รายการ')
       + (ewht ? ' (นำส่งผ่าน e-Withholding Tax ' + ewht + ' รายการ)' : ''),
     actions: btn('new:payment', '+ จ่ายชำระเจ้าหนี้', periodIsOpen() ? 'primary' : 'disabled'),
     body: tbl({
-      cols:[{t:'เลขที่'},{t:'วันที่'},{t:'ผู้ขาย'},{t:'อ้างตั้งหนี้'},{t:'ช่องทาง'},{t:'ก่อนหัก',a:'r'},{t:'หัก ณ ที่จ่าย',a:'r'},{t:'จ่ายสุทธิ',a:'r'},{t:'หนังสือรับรอง'}],
+      cols:[{t:'เลขที่'},{t:'วันที่'},{t:'ผู้ขาย'},{t:'อ้างตั้งหนี้'},{t:'ช่องทาง'},{t:'ก่อนหัก',a:'r'},{t:'หัก ณ ที่จ่าย',a:'r'},{t:'จ่ายสุทธิ',a:'r'},{t:'หนังสือรับรอง'},{t:'สถานะ'}],
       rows: rows.map((d) => [{mono:d.no}, thDateNum(d.date), d.partnerName,
         {mono:d.billNo + (d.batchNo ? ' · ' + d.batchNo : '')},
         d.channel === 'e_wht' ? {st:['open','e-Withholding']} : {st:['draft','หักเอง']},
         {n:d.gross}, {n:d.wht}, {n:d.net},
-        d.certNo ? {mono:d.certNo} : (d.wht ? {dim:'ธนาคารออกให้'} : {dim:'—'})]),
-      rowAttr: (r) => 'class="row-link" data-act="printdoc:payment:' + r[0].mono + '" title="คลิกเพื่อดูและพิมพ์ใบสำคัญจ่าย"',
-      foot: ['รวม','','','','', {n:t.g}, {n:t.w}, {n:t.n}, ''],
+        d.certNo ? {mono:d.certNo} : (d.wht ? {dim:'ธนาคารออกให้'} : {dim:'—'}), statusPill(d.status || 'posted')]),
+      rowAttr: (r, i) => rowCls(rows[i]) + ' data-act="sel:' + r[0].mono + '" title="คลิกเพื่อดูรายละเอียด พิมพ์ หรือยกเลิก"',
+      foot: ['รวม','','','','', {n:t.g}, {n:t.w}, {n:t.n}, '', ''],
       empty:'ยังไม่มีการจ่ายชำระในงวดนี้',
     }),
     foot: 'รายการที่นำส่งผ่าน e-Withholding Tax ธนาคารนำส่งและออกหลักฐานให้ ระบบจึงไม่ออก 50 ทวิ ซ้ำ และตัดออกจากแบบ ภ.ง.ด. โดยอัตโนมัติ',
@@ -710,12 +778,21 @@ function scCashFlow() {
    บัญชีแยกประเภท
    =================================================================== */
 /** การ์ดใบสำคัญ — ใช้ทั้งสมุดรายวันรวมและสมุดรายวันแต่ละเล่ม */
+const ENTRY_SOURCE_SCREEN = { invoice:'invoices', receipt:'receipts', creditNote:'creditnotes', debitNote:'debitnotes',
+  bill:'bills', payment:'payments', expense:'expenses', goodsReceipt:'goodsreceipts', payroll:'payroll',
+  depreciation:'deprec', import:'import' };
 function entryCard(no) {
   const e = DB.entries.find((x) => x.no === no);
   if (!e) return '';
+  /* ใบสำคัญที่เกิดจากเอกสาร กลับรายการที่ใบสำคัญตรง ๆ ไม่ได้ ต้องไปยกเลิกที่เอกสาร
+     ไม่งั้นบัญชีกลับแล้วแต่ลูกหนี้รายตัว สต๊อก และทะเบียนภาษียังค้างอยู่ */
+  const from = ENTRY_FROM[e.src];
+  const srcAct = ENTRY_SOURCE_SCREEN[e.src];
   return card({
     title:'ใบสำคัญ ' + e.no, sub: thDate(e.date) + ' · ' + JOURNAL_BOOKS[journalOf(e)].label + ' · ' + e.desc,
-    actions: printBtn('entry', e.no) + (e.status === 'posted' ? btn('rev:' + e.no, 'กลับรายการ') : '') + btn('sel:', 'ปิด'),
+    actions: printBtn('entry', e.no)
+      + (srcAct && e.srcId ? btn('open:' + srcAct + ':' + e.srcId, 'ไปที่' + from[0]) : '')
+      + (e.status === 'posted' && !from ? btn('rev:' + e.no, 'กลับรายการ') : '') + btn('sel:', 'ปิด'),
     body: tbl({
       cols:[{t:'#',a:'c'},{t:'รหัสบัญชี'},{t:'ชื่อบัญชี'},{t:'คู่ค้า'},{t:'คำอธิบาย'},{t:'เดบิต',a:'r'},{t:'เครดิต',a:'r'}],
       rows: e.lines.map((l) => [{c:String(l.n)}, {mono:l.acc}, acc(l.acc).name,
@@ -724,6 +801,8 @@ function entryCard(no) {
     }),
     foot: e.status === 'reversed'
       ? 'รายการนี้ถูกกลับด้วย ' + e.reversedBy + ' — เหตุผล: ' + (e.reason || '')
+      : from && e.status === 'posted'
+      ? 'ใบสำคัญนี้เกิดจาก' + from[0] + ' — ' + from[1]
       : 'ใบสำคัญที่ลงบัญชีแล้วแก้ไม่ได้ ถ้าผิดต้องกลับรายการเท่านั้น (พ.ร.บ.การบัญชี 2543 มาตรา 20)'
         + (e.src === 'manual' ? ' · ใบนี้บันทึกด้วยมือ' + (e.srcId ? ' อ้างอิง ' + e.srcId : '') : ''),
   });
@@ -889,13 +968,16 @@ function nextMonthDay(period, day) {
 
 function vatRegister(kind) {
   const isOut = kind === 'vat_output';
+  /* เอกสารที่ยกเลิกยังต้องอยู่ในรายงานภาษี ยอดเป็นศูนย์และเขียนว่า "ยกเลิก" เลขที่จะได้เรียงต่อกันไม่ขาดช่วง */
   const rows = DB.taxTx.filter((t) => t.kind === kind && t.period === STATE.period);
+  const voided = rows.filter((t) => t.void).length;
   const base = rows.reduce((s, t) => s + t.base, 0);
   const tax  = rows.reduce((s, t) => s + t.tax, 0);
   const nonClaim = rows.reduce((s, t) => s + (t.nonClaimable || 0), 0);
   return card({
     title: isOut ? 'รายงานภาษีขาย' : 'รายงานภาษีซื้อ',
-    sub: thPeriod(STATE.period) + ' · ' + rows.length + ' รายการ · '
+    sub: thPeriod(STATE.period) + ' · ' + (rows.length - voided) + ' รายการ'
+      + (voided ? ' · ยกเลิก ' + voided + ' ใบ' : '') + ' · '
       + (isOut ? 'ตามมาตรา 87 (1)' : 'ตามมาตรา 87 (2)'),
     actions: btn('print', 'พิมพ์'),
     body: tbl({
@@ -903,10 +985,13 @@ function vatRegister(kind) {
         {t:'เลขประจำตัวผู้เสียภาษี'},{t:'สาขา'},{t:'มูลค่า',a:'r'},{t:'ภาษี',a:'r'}]
         .concat(isOut ? [] : [{t:'หมายเหตุ'}]),
       rows: rows.map((t, i) => [{c:String(i + 1)}, thDateNum(t.date), {mono:t.docNo},
-        t.partnerName + (t.docType === 'credit_note' ? ' (ใบลดหนี้อ้าง ' + t.refDoc + ')' : ''),
+        t.void ? {html: esc(t.partnerName) + ' <span class="st void">ยกเลิก</span>'}
+          : t.partnerName + (t.docType === 'credit_note' ? ' (ใบลดหนี้อ้าง ' + t.refDoc + ')' : '')
+            + (t.docType === 'debit_note' ? ' (ใบเพิ่มหนี้อ้าง ' + t.refDoc + ')' : ''),
         {mono:t.taxId}, t.branch === '00000' ? 'สนญ.' : (t.branch || '—'),
         {n:t.base}, {n:t.tax}]
-        .concat(isOut ? [] : [t.nonClaimable ? {dim:'ภาษีต้องห้าม ' + fmt(t.nonClaimable)} : {dim:'ขอคืนได้'}])),
+        .concat(isOut ? [] : [t.void ? {dim:'ยกเลิก: ' + (t.voidReason || '')}
+          : t.nonClaimable ? {dim:'ภาษีต้องห้าม ' + fmt(t.nonClaimable)} : {dim:'ขอคืนได้'}])),
       foot: ['','','','รวม','','', {n:base}, {n:tax}].concat(isOut ? [] : ['']),
       empty:'ไม่มีรายการในงวดนี้',
     }),
@@ -919,8 +1004,8 @@ function vatRegister(kind) {
 
 function scPp30() {
   const f = DB.docs.filing.find((x) => x.form === 'PP30' && x.period === STATE.period);
-  const out = DB.taxTx.filter((t) => t.kind === 'vat_output' && t.period === STATE.period);
-  const inn = DB.taxTx.filter((t) => t.kind === 'vat_input' && t.period === STATE.period);
+  const out = DB.taxTx.filter((t) => t.kind === 'vat_output' && t.period === STATE.period && !t.void);
+  const inn = DB.taxTx.filter((t) => t.kind === 'vat_input' && t.period === STATE.period && !t.void);
   const outTax = f ? f.outTax : out.reduce((s, t) => s + t.tax, 0);
   const inTax  = f ? f.inTax  : inn.reduce((s, t) => s + t.tax, 0);
   const outBase = f ? f.outBase : out.reduce((s, t) => s + t.base, 0);
@@ -972,9 +1057,9 @@ function scPnd() {
   forms.forEach(function (F) {
     const filed = DB.docs.filing.find((x) => x.form === F[0] && x.period === STATE.period);
     const rows = DB.taxTx.filter((t) => t.kind === 'wht' && t.period === STATE.period
-      && t.form === F[0] && t.channel === 'manual');
+      && t.form === F[0] && t.channel === 'manual' && !t.void);
     const excl = DB.taxTx.filter((t) => t.kind === 'wht' && t.period === STATE.period
-      && t.form === F[0] && t.channel === 'e_wht');
+      && t.form === F[0] && t.channel === 'e_wht' && !t.void);
     const total = rows.reduce((s, t) => s + t.tax, 0);
     body += '<div class="sub-h">' + F[1] + ' — ' + F[2]
       + '<span class="grow"></span>'
@@ -1125,21 +1210,27 @@ function scAssets() {
   });
 }
 
+/** งวดที่ยกเลิกไปแล้วของเดือนนี้ — แสดงไว้ให้เห็นว่าเคยทำแล้วยกเลิก ไม่ใช่หายไปเฉย ๆ */
+function voidedRunsNote(coll) {
+  const v = DB.docs[coll].filter((r) => r.period === STATE.period && r.status === 'void');
+  return v.length ? '<div class="note">งวดนี้เคยทำแล้วยกเลิก ' + v.length + ' ครั้ง: '
+    + v.map((r) => esc(r.entryNo) + ' (' + esc(r.voidReason || '') + ')').join(' · ') + '</div>' : '';
+}
 function scDeprec() {
-  const run = DB.docs.depreciation.find((d) => d.period === STATE.period);
-  const history = DB.docs.depreciation.slice(0, 12);
+  const run = DB.docs.depreciation.find((d) => d.period === STATE.period && d.status !== 'void');
+  const history = DB.docs.depreciation.filter((d) => d.status !== 'void').slice(0, 12);
   return card({
     title:'ค่าเสื่อมราคาประจำงวด', sub: thPeriod(STATE.period),
-    actions: run ? btn('entry:' + run.entryNo, 'ดูใบสำคัญ')
+    actions: run ? btn('entry:' + run.entryNo, 'ดูใบสำคัญ') + btn('voidrun:depreciation:' + run.period, 'ยกเลิกงวดนี้', 'danger')
                  : btn('run:deprec', 'ตั้งค่าเสื่อมราคางวดนี้', periodIsOpen() ? 'primary' : 'disabled'),
-    body: run
+    body: voidedRunsNote('depreciation') + (run
       ? tbl({
           cols:[{t:'รหัส'},{t:'ทรัพย์สิน'},{t:'ราคาทุน',a:'r'},{t:'ค่าเสื่อมทางบัญชี',a:'r'},{t:'ค่าเสื่อมทางภาษี',a:'r'},{t:'ผลต่าง',a:'r'},{t:'ราคาตามบัญชีคงเหลือ',a:'r'}],
           rows: run.rows.map((r) => [{mono:r.code}, r.name, {n:r.cost}, {n:r.book}, {n:r.tax}, {n:r.diff}, {n:r.nbvBook}]),
           foot: ['','','รวม', {n:run.bookTotal}, {n:run.taxTotal}, {n:run.diff}, ''],
         })
       : '<div class="empty">ยังไม่ได้ตั้งค่าเสื่อมราคางวดนี้ — เป็นรายการที่บล็อกการปิดงวด'
-        + '<div style="margin-top:12px">' + btn('run:deprec', 'ตั้งค่าเสื่อมราคาเดี๋ยวนี้', 'primary') + '</div></div>',
+        + '<div style="margin-top:12px">' + btn('run:deprec', 'ตั้งค่าเสื่อมราคาเดี๋ยวนี้', 'primary') + '</div></div>'),
     foot: (run && run.diff !== 0
         ? 'ผลต่างระหว่างบัญชีกับภาษี ' + fmt(run.diff) + ' บาทในงวดนี้ ต้องนำไปปรับปรุงในแบบ ภ.ง.ด.50 ปลายปี'
         : 'ผลต่างบัญชี–ภาษีจะถูกสะสมไว้ให้ตลอดปีเพื่อใช้กรอกแบบ ภ.ง.ด.50')
@@ -1151,12 +1242,12 @@ function scDeprec() {
    เงินเดือน
    =================================================================== */
 function scPayroll() {
-  const run = DB.docs.payRun.find((r) => r.period === STATE.period);
+  const run = DB.docs.payRun.find((r) => r.period === STATE.period && r.status !== 'void');
   return card({
     title:'งวดจ่ายเงินเดือน', sub: thPeriod(STATE.period),
-    actions: run ? btn('entry:' + run.entryNo, 'ดูใบสำคัญ')
+    actions: run ? btn('entry:' + run.entryNo, 'ดูใบสำคัญ') + btn('voidrun:payroll:' + run.period, 'ยกเลิกงวดนี้', 'danger')
                  : btn('run:payroll', 'ทำเงินเดือนงวดนี้', periodIsOpen() ? 'primary' : 'disabled'),
-    body: run
+    body: voidedRunsNote('payRun') + (run
       ? kpi([
           { label:'พนักงาน', value: run.count + ' คน' },
           { label:'เงินได้รวม', value: fmt(run.gross) },
@@ -1173,7 +1264,7 @@ function scPayroll() {
             {n:run.slips.reduce((a,s)=>a+s.ot,0)}, {n:run.gross}, {n:run.pit}, {n:run.ssoEmp}, {n:run.pvdEmp}, {n:run.net}],
         })
       : '<div class="empty">ยังไม่ได้ทำเงินเดือนงวดนี้'
-        + '<div style="margin-top:12px">' + btn('run:payroll', 'ทำเงินเดือนเดี๋ยวนี้', 'primary') + '</div></div>',
+        + '<div style="margin-top:12px">' + btn('run:payroll', 'ทำเงินเดือนเดี๋ยวนี้', 'primary') + '</div></div>'),
     foot: run
       ? 'ฐานค่าจ้างประกันสังคมสูงสุด ' + fmt(run.ssoCeiling) + ' บาท เงินสมทบสูงสุด ' + fmt(run.ssoMax)
         + ' บาทต่อคนต่อเดือน (มีผลตั้งแต่ 1 มกราคม 2569) — ระบบเลือกอัตราตามวันที่จ่ายเงิน ไม่ใช่วันที่ทำรายการ'
@@ -1377,16 +1468,16 @@ function scAbout() {
    =================================================================== */
 function scDebitNotes() {
   const rows = DB.docs.debitNote.filter((d) => periodOf(d.date) === STATE.period);
-  const t = rows.reduce((a, d) => ({ base:a.base + d.base, vat:a.vat + d.vat, total:a.total + d.total }), {base:0,vat:0,total:0});
-  return card({
-    title:'ใบเพิ่มหนี้', sub:'ใช้เมื่อเก็บเงินต่ำกว่าที่ควร ต้องอ้างใบกำกับเดิมและเข้าเหตุตามมาตรา 86/9',
+  const t = liveOnly(rows).reduce((a, d) => ({ base:a.base + d.base, vat:a.vat + d.vat, total:a.total + d.total }), {base:0,vat:0,total:0});
+  return (STATE.sel ? noteDetail('debitNote', STATE.sel) : '') + card({
+    title:'ใบเพิ่มหนี้', sub: thPeriod(STATE.period) + ' · ' + countNote(rows, 'ฉบับ') + ' · ใช้เมื่อเก็บเงินต่ำกว่าที่ควร ต้องอ้างใบกำกับเดิมและเข้าเหตุตามมาตรา 86/9',
     actions: btn('new:debitnote', '+ ออกใบเพิ่มหนี้', periodIsOpen() ? 'primary' : 'disabled'),
     body: tbl({
-      cols:[{t:'เลขที่'},{t:'วันที่'},{t:'ลูกค้า'},{t:'อ้างใบกำกับเดิม'},{t:'เหตุตามกฎหมาย'},{t:'มูลค่า',a:'r'},{t:'ภาษี',a:'r'},{t:'รวม',a:'r'}],
+      cols:[{t:'เลขที่'},{t:'วันที่'},{t:'ลูกค้า'},{t:'อ้างใบกำกับเดิม'},{t:'เหตุตามกฎหมาย'},{t:'มูลค่า',a:'r'},{t:'ภาษี',a:'r'},{t:'รวม',a:'r'},{t:'สถานะ'}],
       rows: rows.map((d) => [{mono:d.no}, thDateNum(d.date), d.partnerName, {mono:d.invoiceNo},
-        d.reasonText, {n:d.base}, {n:d.vat}, {n:d.total}]),
-      rowAttr: (r) => 'class="row-link" data-act="printdoc:debitNote:' + r[0].mono + '" title="คลิกเพื่อดูและพิมพ์"',
-      foot: rows.length ? ['รวม','','','','', {n:t.base}, {n:t.vat}, {n:t.total}] : null,
+        d.reasonText, {n:d.base}, {n:d.vat}, {n:d.total}, statusPill(d.status || 'posted')]),
+      rowAttr: (r, i) => rowCls(rows[i]) + ' data-act="sel:' + r[0].mono + '" title="คลิกเพื่อดูรายละเอียด พิมพ์ หรือยกเลิก"',
+      foot: rows.length ? ['รวม','','','','', {n:t.base}, {n:t.vat}, {n:t.total}, ''] : null,
       empty:'ไม่มีใบเพิ่มหนี้ในงวดนี้',
     }),
     foot:'กดออกใบเพิ่มหนี้แล้วเลือกใบกำกับเดิม หรือออกจากหน้าใบกำกับภาษีก็ได้ · ภาษีขายที่เพิ่มเข้ารายงานเดือนที่ออกใบเพิ่มหนี้',
@@ -1558,7 +1649,7 @@ function scBillingNotes() {
 /* ===================================================================
    ใบรับสินค้า
    =================================================================== */
-const GRN_LABEL = { received:['wait','รอใบกำกับจากผู้ขาย'], closed:['paid','ตั้งหนี้แล้ว'], void:['late','ยกเลิก'] };
+const GRN_LABEL = { received:['wait','รอใบกำกับจากผู้ขาย'], closed:['paid','ตั้งหนี้แล้ว'], void:['void','ยกเลิก'] };
 
 function goodsReceiptDetail(no) {
   const g = DB.docs.goodsReceipt.find((x) => x.no === no);
@@ -1569,14 +1660,15 @@ function goodsReceiptDetail(no) {
       + (g.vendorDoNo ? ' · ใบส่งของ ' + g.vendorDoNo : '') + (g.poNo ? ' · จากใบสั่งซื้อ ' + g.poNo : ''),
     actions: (g.status === 'received' ? btn('grn:bill:' + g.no, 'ตั้งหนี้จากใบรับสินค้า', 'primary') : '')
       + (g.billNo ? btn('open:bills:' + g.billNo, 'ดูรายการตั้งหนี้') : '')
-      + printBtn('goodsReceipt', g.no) + btn('entry:' + g.entryNo, 'ดูใบสำคัญ') + btn('sel:', 'ปิด'),
-    body: tbl({
+      + printBtn('goodsReceipt', g.no) + btn('entry:' + g.entryNo, 'ดูใบสำคัญ') + voidBtn('goodsReceipt', g) + btn('sel:', 'ปิด'),
+    body: voidBanner(g) + tbl({
       cols:[{t:'รหัสสินค้า'},{t:'รายการ'},{t:'จำนวน',a:'r'},{t:'หน่วย'},{t:'ต้นทุนต่อหน่วย',a:'r'},{t:'มูลค่า',a:'r'}],
       rows: g.lines.map((l) => [{mono:l.itemCode}, l.desc, {n:M(String(l.qty))}, l.uom || '', {n:l.price}, {n:l.amount}]),
     })
     + '<div class="totals">'
     + '<div class="gt"><span>มูลค่ารับเข้าคลัง (ก่อนภาษี)</span><b>' + fmt(g.total) + '</b></div>'
-    + '<div><span>สถานะ</span><b>' + (g.billNo ? 'ตั้งหนี้แล้ว ' + esc(g.billNo) + ' วันที่ ' + thDateNum(g.billDate)
+    + '<div><span>สถานะ</span><b>' + (isVoid(g) ? 'ยกเลิก — นำสินค้าออกจากคลังแล้ว'
+        : g.billNo ? 'ตั้งหนี้แล้ว ' + esc(g.billNo) + ' วันที่ ' + thDateNum(g.billDate)
         : 'รอใบกำกับภาษีจากผู้ขาย') + '</b></div>'
     + '</div>',
     foot:'รับของ: Dr สินค้าคงเหลือ / Cr พักรับสินค้า · ตั้งหนี้: Dr พักรับสินค้า + ภาษีซื้อ / Cr เจ้าหนี้ — ภาษีซื้อเกิดเมื่อได้ใบกำกับภาษีเท่านั้น',
@@ -1599,7 +1691,7 @@ function scGoodsReceipts() {
         rows: rows.map((g) => [{mono:g.no}, thDateNum(g.date), g.partnerName,
           g.vendorDoNo ? {mono:g.vendorDoNo} : {dim:'—'}, g.poNo ? {mono:g.poNo} : {dim:'—'},
           {n:g.total}, { st: GRN_LABEL[g.status] || ['draft', g.status] }, g.billNo ? {mono:g.billNo} : {dim:'—'}]),
-        rowAttr: (r) => 'class="row-link" data-act="sel:' + r[0].mono + '"',
+        rowAttr: (r, i) => rowCls(rows[i]) + ' data-act="sel:' + r[0].mono + '"',
         empty:'ยังไม่มีใบรับสินค้าในงวดนี้',
         emptyAction: periodIsOpen() ? btn('new:goodsreceipt', 'ออกใบรับสินค้าใบแรก', 'primary') : '',
       }),
@@ -1620,9 +1712,9 @@ function expenseDetail(no) {
     title:'ค่าใช้จ่าย เลขที่ ' + e.no,
     sub:'จ่ายวันที่ ' + thDate(e.date) + ' · ' + (PAY_METHOD[e.method] || e.method) + ' จาก ' + acc(e.payFrom).name,
     actions: (e.certNo ? btn('open:whtcert:' + e.certNo, 'ดูหนังสือรับรอง ' + e.certNo) : '')
-      + printBtn('expense', e.no) + btn('entry:' + e.entryNo, 'ดูใบสำคัญ') + btn('sel:', 'ปิด'),
-    body:
-      '<div class="docgrid">'
+      + printBtn('expense', e.no) + btn('entry:' + e.entryNo, 'ดูใบสำคัญ') + voidBtn('expense', e) + btn('sel:', 'ปิด'),
+    body: voidBanner(e)
+      + '<div class="docgrid">'
       + '<div><div class="dim">ผู้รับเงิน</div><b>' + esc(e.partnerName) + '</b>'
       + '<div>เลขประจำตัวผู้เสียภาษี ' + esc(p.taxId || '—') + '</div></div>'
       + '<div><div class="dim">หลักฐาน</div><b>' + (e.taxInvoiceNo ? 'ใบกำกับภาษีเลขที่ ' + esc(e.taxInvoiceNo) : 'ไม่มีใบกำกับภาษี') + '</b>'
@@ -1643,17 +1735,18 @@ function expenseDetail(no) {
       + (e.wht ? '<div class="note">' + (e.certNo
           ? 'หักภาษี ณ ที่จ่ายแล้ว ระบบออกหนังสือรับรอง 50 ทวิ เลขที่ ' + esc(e.certNo) + ' ในแถบหัก ณ ที่จ่ายให้อัตโนมัติ และจะเข้าแบบ ' + (p.entityType === 'individual' ? 'ภ.ง.ด.3' : 'ภ.ง.ด.53') + ' ของงวดนี้'
           : 'นำส่งผ่าน e-Withholding Tax — ธนาคารนำส่งและออกหลักฐานให้ ระบบจึงไม่ออก 50 ทวิ ซ้ำ') + '</div>' : ''),
-    foot:'ค่าใช้จ่ายที่ลงบัญชีแล้วแก้ไม่ได้ ถ้าผิดให้กลับรายการที่ใบสำคัญ',
+    foot: isVoid(e) ? 'ยกเลิกแล้ว — ใบสำคัญถูกกลับรายการ ณ วันที่เดิม' + (e.certNo ? ' และ 50 ทวิ ' + e.certNo + ' ถูกยกเลิกด้วย' : '')
+      : 'ค่าใช้จ่ายที่ลงบัญชีแล้วแก้ไม่ได้ ถ้าผิดให้กดยกเลิกเอกสาร ระบบจะยกเลิก 50 ทวิ และภาษีซื้อให้ด้วย แล้วบันทึกใหม่',
   });
 }
 
 function scExpenses() {
   const rows = DB.docs.expense.filter((e) => periodOf(e.date) === STATE.period
     && (hit(e.no) || hit(e.partnerName) || hit(e.taxInvoiceNo || '') || e.lines.some((l) => hit(l.desc))));
-  const t = rows.reduce((a, e) => ({ b:a.b + e.base, v:a.v + e.vat, w:a.w + e.wht, n:a.n + e.net }), {b:0,v:0,w:0,n:0});
+  const t = liveOnly(rows).reduce((a, e) => ({ b:a.b + e.base, v:a.v + e.vat, w:a.w + e.wht, n:a.n + e.net }), {b:0,v:0,w:0,n:0});
   return (STATE.sel ? expenseDetail(STATE.sel) : '')
     + card({
-      title:'ค่าใช้จ่าย', sub: thPeriod(STATE.period) + ' · ' + rows.length + ' รายการ · หัก ณ ที่จ่ายรวม ' + fmt(t.w) + ' บาท',
+      title:'ค่าใช้จ่าย', sub: thPeriod(STATE.period) + ' · ' + countNote(rows, 'รายการ') + ' · หัก ณ ที่จ่ายรวม ' + fmt(t.w) + ' บาท',
       actions: btn('new:expense', '+ บันทึกค่าใช้จ่าย', periodIsOpen() ? 'primary' : 'disabled'),
       filters: searchBox('ค้นหาเลขที่ ผู้รับเงิน เลขใบกำกับ หรือรายการ'),
       body: tbl({
@@ -1662,7 +1755,7 @@ function scExpenses() {
           e.lines[0].desc + (e.lines.length > 1 ? ' และอีก ' + (e.lines.length - 1) + ' รายการ' : ''),
           {n:e.base}, {n:e.vat}, {n:e.wht}, {n:e.net},
           e.certNo ? {mono:e.certNo} : (e.wht ? {dim:'ธนาคารออกให้'} : {dim:'—'})]),
-        rowAttr: (r) => 'class="row-link" data-act="sel:' + r[0].mono + '"',
+        rowAttr: (r, i) => rowCls(rows[i]) + ' data-act="sel:' + r[0].mono + '"',
         foot: ['รวม','','','', {n:t.b}, {n:t.v}, {n:t.w}, {n:t.n}, ''],
         empty:'ยังไม่มีค่าใช้จ่ายในงวดนี้',
         emptyAction: periodIsOpen() ? btn('new:expense', 'บันทึกค่าใช้จ่ายรายการแรก', 'primary') : '',
@@ -1686,8 +1779,9 @@ function whtCertDetail(no) {
     actions: (c.expenseNo ? btn('open:expenses:' + c.expenseNo, 'ดูค่าใช้จ่าย ' + c.expenseNo) : '')
       + (pv ? btn('open:bills:' + pv.billNo, 'ดูรายการตั้งหนี้ ' + pv.billNo) : '')
       + printBtn('whtCert', c.no) + btn('sel:', 'ปิด'),
-    body:
-      '<div class="docgrid">'
+    body: (isVoid(c) ? '<div class="void-banner"><b>ยกเลิกแล้ว</b><span>เพราะยกเลิก'
+        + (c.expenseNo ? 'ค่าใช้จ่าย ' + esc(c.expenseNo) : 'ใบสำคัญจ่าย ' + esc(c.paymentNo || '')) + ' — ไม่เข้าแบบ ' + esc(c.form) + '</span></div>' : '')
+      + '<div class="docgrid">'
       + '<div><div class="dim">ผู้มีหน้าที่หักภาษี ณ ที่จ่าย</div><b>' + esc(DB.company.name) + '</b>'
       + '<div>' + esc(DB.company.address) + '</div>'
       + '<div>เลขประจำตัวผู้เสียภาษี ' + esc(DB.company.taxId) + '</div></div>'
@@ -1707,11 +1801,11 @@ function whtCertDetail(no) {
 function scWhtCert() {
   const rows = DB.docs.whtCert.filter((c) => periodOf(c.date) === STATE.period
     && (hit(c.no) || hit(c.partnerName) || hit(c.expenseNo || '') || hit(c.paymentNo || '')));
-  const ewht = DB.taxTx.filter((t) => t.kind === 'wht' && t.period === STATE.period && t.channel === 'e_wht');
+  const ewht = DB.taxTx.filter((t) => t.kind === 'wht' && t.period === STATE.period && t.channel === 'e_wht' && !t.void);
   return (STATE.sel ? whtCertDetail(STATE.sel) : '')
     + card({
       title:'หัก ณ ที่จ่าย — หนังสือรับรอง 50 ทวิ',
-      sub: thPeriod(STATE.period) + ' · ' + rows.length + ' ฉบับ',
+      sub: thPeriod(STATE.period) + ' · ' + countNote(rows, 'ฉบับ'),
       actions: btn('new:whtcert', '+ ออกหนังสือรับรองหัก ณ ที่จ่าย', periodIsOpen() ? 'primary' : 'disabled'),
       filters: searchBox('ค้นหาเลขที่ ผู้ถูกหัก หรือเอกสารต้นทาง'),
       body: tbl({
@@ -1719,8 +1813,8 @@ function scWhtCert() {
         rows: rows.map((c) => [{mono:c.no}, thDateNum(c.date), c.partnerName, {mono:c.taxId},
           c.form, c.incomeType, {c:c.rate + '%'}, {n:c.base}, {n:c.wht},
           {mono: c.expenseNo || c.paymentNo || '—'}]),
-        rowAttr: (r) => 'class="row-link" data-act="sel:' + r[0].mono + '"',
-        foot: ['','','','','','','รวม', '', {n:rows.reduce((s, c) => s + c.wht, 0)}, ''],
+        rowAttr: (r, i) => rowCls(rows[i]) + ' data-act="sel:' + r[0].mono + '"',
+        foot: ['','','','','','','รวม', {n:liveOnly(rows).reduce((s, c) => s + c.base, 0)}, {n:liveOnly(rows).reduce((s, c) => s + c.wht, 0)}, ''],
         empty:'ไม่มีหนังสือรับรองที่ต้องออกในงวดนี้',
         emptyAction: periodIsOpen() ? btn('new:whtcert', 'ออกหนังสือรับรองฉบับแรก', 'primary') : '',
       })

@@ -117,7 +117,7 @@ const DOC_PRINT = {
         + pTotals(d.gross, [['จำนวนเงินที่ชำระ', pm(d.gross)],
           ['หัก ภาษีหัก ณ ที่จ่าย' + (d.whtRate ? ' ' + d.whtRate + '%' : ''), pm(d.wht)], ['รับสุทธิ', pm(d.net), true]])
         + '<div class="p-note">ใบเสร็จนี้จะสมบูรณ์เมื่อบริษัทได้รับเงินครบถ้วนแล้ว · กรณีชำระด้วยเช็ค ถือว่าชำระเมื่อเช็คผ่านบัญชีแล้ว</div>'
-        + pSign(['ผู้รับเงิน', 'ผู้มีอำนาจลงนาม']), d.no);
+        + pSign(['ผู้รับเงิน', 'ผู้มีอำนาจลงนาม']), d.no, isVoid(d) ? 'ยกเลิก' : '');
     },
   },
   billingNote: {
@@ -158,7 +158,7 @@ const DOC_PRINT = {
           d.lines.map((l, i) => [String(i + 1), l.itemCode, l.desc, String(l.qty), l.uom || '', pm(l.price), pm(l.amount)]), 8)
         + pTotals(d.total, [['มูลค่ารับเข้าคลัง (ก่อนภาษี)', pm(d.total), true]])
         + pEntry(d.entryNo)
-        + pSign(['ผู้ส่งสินค้า', 'ผู้ตรวจรับสินค้า', 'ผู้บันทึกบัญชี']), d.no);
+        + pSign(['ผู้ส่งสินค้า', 'ผู้ตรวจรับสินค้า', 'ผู้บันทึกบัญชี']), d.no, isVoid(d) ? 'ยกเลิก' : '');
     },
   },
   payment: {
@@ -176,7 +176,7 @@ const DOC_PRINT = {
           ['หัก ภาษีหัก ณ ที่จ่าย' + (d.whtRate ? ' ' + d.whtRate + '%' : ''), pm(d.wht)], ['จ่ายสุทธิ', pm(d.net), true]])
         + (d.certNo ? '<div class="p-note">ออกหนังสือรับรองการหักภาษี ณ ที่จ่ายเลขที่ ' + esc(d.certNo) + '</div>' : '')
         + pEntry(d.entryNo)
-        + pSign(['ผู้จัดทำ', 'ผู้ตรวจสอบ', 'ผู้อนุมัติ', 'ผู้รับเงิน']), d.no);
+        + pSign(['ผู้จัดทำ', 'ผู้ตรวจสอบ', 'ผู้อนุมัติ', 'ผู้รับเงิน']), d.no, isVoid(d) ? 'ยกเลิก' : '');
     },
   },
   expense: {
@@ -192,7 +192,7 @@ const DOC_PRINT = {
         + pTotals(d.net, [['มูลค่าก่อนภาษี', pm(d.base)], ['ภาษีซื้อ', pm(d.vat)], ['รวมทั้งสิ้น', pm(d.total)],
           ['หัก ภาษีหัก ณ ที่จ่าย' + (d.whtRate ? ' ' + d.whtRate + '%' : ''), pm(d.wht)], ['จ่ายสุทธิ', pm(d.net), true]])
         + pEntry(d.entryNo)
-        + pSign(['ผู้จัดทำ', 'ผู้ตรวจสอบ', 'ผู้อนุมัติ', 'ผู้รับเงิน']), d.no);
+        + pSign(['ผู้จัดทำ', 'ผู้ตรวจสอบ', 'ผู้อนุมัติ', 'ผู้รับเงิน']), d.no, isVoid(d) ? 'ยกเลิก' : '');
     },
   },
   paymentBatch: {
@@ -254,7 +254,7 @@ function adjustNote(d, copy, kind) {
     + pTable([{ t:'รายการ' }, { t:'มูลค่าตามใบกำกับเดิม', w:'38mm', n:1 }, { t:'มูลค่าที่ถูกต้อง', w:'34mm', n:1 }, { t:'ผลต่าง', w:'30mm', n:1 }],
       [[(isCN ? 'ลดหนี้' : 'เพิ่มหนี้') + 'ตามใบกำกับภาษีเลขที่ ' + d.invoiceNo, pm(before), pm(correct), pm(d.base)]], 4)
     + pTotals(d.total, [['มูลค่าผลต่าง', pm(d.base)], ['ภาษีมูลค่าเพิ่ม 7%', pm(d.vat)], ['รวมทั้งสิ้น', pm(d.total), true]])
-    + pSign(['ผู้รับเอกสาร', 'ผู้มีอำนาจลงนาม']), d.no);
+    + pSign(['ผู้รับเอกสาร', 'ผู้มีอำนาจลงนาม']), d.no, isVoid(d) ? 'ยกเลิก' : '');
 }
 
 function tradePrint(d, copy, kind) {
@@ -322,7 +322,7 @@ function whtCertPrint(c, copy) {
     + '<div>วันที่ ' + d + ' เดือน ' + TH_MF[m - 1] + ' พ.ศ. ' + (y + 543) + '</div>'
     + '<div style="font-size:10.5pt; margin-top:4px">(ประทับตรานิติบุคคล ถ้ามี)</div></div></div>'
     + (c.expenseNo || c.paymentNo ? '<div class="p-note" style="font-size:10.5pt">อ้างอิงรายการจ่ายเงิน ' + esc(c.expenseNo || c.paymentNo) + '</div>' : ''),
-    c.no);
+    c.no, isVoid(c) ? 'ยกเลิก' : '');
 }
 
 /* ---------- ตัวอย่างก่อนพิมพ์ ---------- */

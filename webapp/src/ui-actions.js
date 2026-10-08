@@ -1061,6 +1061,63 @@ function modalReverse(no) {
   });
 }
 
+/* ---------- ยกเลิกเอกสาร ----------
+   ตรวจก่อนเปิดหน้าต่าง ถ้ายกเลิกไม่ได้บอกเหตุผลและวิธีแก้ทันที ไม่ต้องให้กรอกเหตุผลก่อนแล้วค่อยรู้ */
+function modalVoid(kind, no) {
+  let lines;
+  try { lines = voidPreview(kind, no); }
+  catch (e) {
+    if (e instanceof DomainError) toast(e.message, 'err', e.hint);
+    else { console.error(e); toast('เกิดข้อผิดพลาดที่ไม่คาดคิด', 'err', e.message); }
+    return;
+  }
+  const label = VOIDABLE[kind].label;
+  modal({
+    title:'ยกเลิก' + label + ' ' + no,
+    sub:'เลขที่เอกสารยังอยู่และขึ้นว่า "ยกเลิก" — ระบบไม่ลบข้อมูลใด ๆ ทิ้ง',
+    body:'<div class="void-prev"><b>ระบบจะทำสิ่งเหล่านี้ให้ในครั้งเดียว ถ้าขั้นใดไม่ผ่านจะไม่มีอะไรเปลี่ยน</b><ul>'
+      + lines.map((l) => '<li>' + esc(l) + '</li>').join('') + '</ul></div>'
+      + '<div class="flds">' + field({ name:'reason', label:'เหตุผลที่ยกเลิก', wide:true,
+          placeholder:'เช่น ออกผิดลูกค้า / ลูกค้ายกเลิกคำสั่งซื้อ — อย่างน้อย 5 ตัวอักษร' }) + '</div>',
+    submitLabel:'ยืนยันยกเลิก' + label, submitKind:'danger',
+    onSubmit: function () {
+      submitAction(function () {
+        const d = voidDocument(kind, no, val('reason'));
+        toast('ยกเลิก' + label + ' ' + no + ' แล้ว', 'ok', 'กลับรายการใบสำคัญ ณ วันที่ ' + thDate(d.date) + ' และปรับทะเบียนที่เกี่ยวข้องครบแล้ว');
+        return d;
+      });
+    },
+  });
+}
+function modalVoidRun(kind, period) {
+  try { runCheck(kind, period); }
+  catch (e) {
+    if (e instanceof DomainError) toast(e.message, 'err', e.hint);
+    else { console.error(e); toast('เกิดข้อผิดพลาดที่ไม่คาดคิด', 'err', e.message); }
+    return;
+  }
+  const label = RUN_KINDS[kind].label;
+  const what = kind === 'depreciation'
+    ? ['กลับรายการใบสำคัญค่าเสื่อมราคา ณ วันสิ้นงวด', 'คืนค่าเสื่อมสะสมทางบัญชีและทางภาษีของทรัพย์สินทุกรายการในงวดนี้']
+    : ['กลับรายการใบสำคัญเงินเดือน ณ วันจ่าย', 'ตัดรายการออกจากแบบ ภ.ง.ด.1 ของงวด', 'ทำเงินเดือนงวดนี้ใหม่ได้หลังยกเลิก'];
+  modal({
+    title:'ยกเลิก' + label + ' ' + thPeriod(period),
+    sub:'ยกเลิกแล้วทำใหม่ได้ ประวัติการยกเลิกเก็บไว้ในร่องรอยการตรวจสอบ',
+    body:'<div class="void-prev"><b>ระบบจะทำสิ่งเหล่านี้ให้ในครั้งเดียว</b><ul>'
+      + what.map((l) => '<li>' + esc(l) + '</li>').join('') + '</ul></div>'
+      + '<div class="flds">' + field({ name:'reason', label:'เหตุผลที่ยกเลิก', wide:true,
+          placeholder:'อย่างน้อย 5 ตัวอักษร' }) + '</div>',
+    submitLabel:'ยืนยันยกเลิกงวด', submitKind:'danger',
+    onSubmit: function () {
+      submitAction(function () {
+        const r = voidRun(kind, period, val('reason'));
+        toast('ยกเลิก' + label + ' ' + thPeriod(period) + ' แล้ว', 'ok', 'ทำใหม่ได้ทันทีถ้าต้องการ');
+        return r;
+      });
+    },
+  });
+}
+
 function modalReopen() {
   modal({
     title:'ขอเปิดงวด ' + thPeriod(STATE.period) + ' ใหม่',
@@ -1191,10 +1248,14 @@ function dispatch(act) {
   if (head === 'open') {
     const [screen, no] = rest;
     const coll = { expenses:'expense', whtcert:'whtCert', bills:'bill', goodsreceipts:'goodsReceipt',
-      invoices:'invoice', billingnotes:'billingNote', paymentprep:'paymentBatch' }[screen];
+      invoices:'invoice', billingnotes:'billingNote', paymentprep:'paymentBatch', receipts:'receipt',
+      creditnotes:'creditNote', debitnotes:'debitNote', payments:'payment' }[screen];
     const doc = coll ? (DB.docs[coll] || []).find((d) => d.no === no) : null;
     if (doc && DB.periods.some((p) => p.code === periodOf(doc.date))) STATE.period = periodOf(doc.date);
-    STATE.screen = screen; STATE.sel = no; STATE.filter = '';
+    /* เงินเดือนและค่าเสื่อมอ้างด้วยรหัสงวด — เปิดงวดนั้นเลย */
+    const byPeriod = screen === 'payroll' || screen === 'deprec';
+    if (byPeriod && DB.periods.some((p) => p.code === no)) STATE.period = no;
+    STATE.screen = screen; STATE.sel = byPeriod || screen === 'import' ? null : no; STATE.filter = '';
     render();
     return;
   }
@@ -1263,6 +1324,8 @@ function dispatch(act) {
   }
   if (head === 'paybill') { modalPayBill(arg); return; }
   if (head === 'rev')     { modalReverse(arg); return; }
+  if (head === 'void')    { modalVoid(rest[0], rest.slice(1).join(':')); return; }
+  if (head === 'voidrun') { modalVoidRun(rest[0], rest[1]); return; }
   if (head === 'reopen')  { modalReopen(); return; }
 
   if (head === 'bank') {

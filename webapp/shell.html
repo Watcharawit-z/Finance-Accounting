@@ -262,6 +262,10 @@ kbd{font-family:var(--mono); font-size:11px; padding:1px 6px; border:1px solid v
 .btn.primary{background:var(--accent); border-color:var(--accent); color:var(--on-accent)}
 .btn.primary:hover{background:var(--accent-d); border-color:var(--accent-d)}
 .btn.disabled{opacity:.45; cursor:not-allowed}
+.btn.danger{color:var(--neg)}
+.btn.danger:hover{background:var(--neg-w); border-color:var(--neg)}
+.modal-f .btn.danger{background:var(--neg); border-color:var(--neg); color:#fff}
+.modal-f .btn.danger:hover{filter:brightness(.92)}
 .btn svg.i{width:16px; height:16px}
 .ghost{
   display:inline-grid; place-items:center; width:32px; height:32px; border-radius:var(--radius-sm); border:1px solid transparent;
@@ -309,6 +313,14 @@ tr.je-l td.acc-cr{padding-inline-start:52px}
 .st.paid{color:var(--good); background:var(--good-w)} .st.open{color:var(--info); background:var(--info-w)}
 .st.late{color:var(--neg); background:var(--neg-w)} .st.draft{color:var(--muted); background:var(--sunken)}
 .st.wait{color:var(--warn); background:var(--warn-w)}
+.st.void{color:var(--neg); background:transparent; box-shadow:inset 0 0 0 1px var(--neg-w)}
+tr.is-void td{color:var(--muted)}
+tr.is-void td.num{text-decoration:line-through; text-decoration-color:var(--neg)}
+.void-banner{display:flex; flex-wrap:wrap; gap:6px 16px; align-items:center; margin:0 0 14px; padding:10px 14px;
+  border-radius:8px; background:var(--neg-w); color:var(--neg); font-size:13px}
+.void-banner span{color:var(--ink-2)}
+.void-prev{margin:0 0 14px; padding:12px 14px; border-radius:8px; background:var(--sunken); font-size:13px}
+.void-prev ul{margin:8px 0 0; padding-left:20px} .void-prev li{margin:3px 0}
 
 /* ---------- ตัวเลขสรุป ---------- */
 .kpis{

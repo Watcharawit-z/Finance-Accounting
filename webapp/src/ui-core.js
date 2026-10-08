@@ -73,13 +73,33 @@ const btn  = (act, label, kind, extra) =>
 const btnI = (act, ic, label, kind, extra) =>
   '<button class="btn' + (kind ? ' ' + kind : '') + '" data-act="' + act + '"' + (extra || '') + '>' + icon(ic) + esc(label) + '</button>';
 const printBtn = (kind, no) => btnI('printdoc:' + kind + ':' + no, 'printer', 'พิมพ์');
+
+/* ---------- เอกสารที่ยกเลิก ----------
+   เลขที่ยังอยู่และเห็นได้ทุกที่ แต่ตัวเลขไม่ถูกนับในยอดรวมของตาราง
+   ยอดรวมที่นับเอกสารยกเลิกเข้าไปด้วยจะไม่ตรงกับบัญชีแยกประเภท */
+const isVoid = (d) => !!d && d.status === 'void';
+const liveOnly = (rows) => rows.filter((d) => !isVoid(d));
+const voidBtn = (kind, d) => (d && !isVoid(d)) ? btn('void:' + kind + ':' + d.no, 'ยกเลิกเอกสาร', 'danger') : '';
+/** class ของแถว: กดได้ และจางลงพร้อมขีดฆ่าตัวเลขถ้ายกเลิกแล้ว */
+const rowCls = (d, extra) => 'class="row-link' + (isVoid(d) ? ' is-void' : '') + (extra ? ' ' + extra : '') + '"';
+/** "12 ฉบับ · ยกเลิก 1" — บอกให้รู้ว่ามีใบที่ยกเลิกอยู่ในรายการ */
+function countNote(rows, unit) {
+  const v = rows.filter(isVoid).length;
+  return (rows.length - v) + ' ' + unit + (v ? ' · ยกเลิก ' + v : '');
+}
+function voidBanner(d) {
+  if (!isVoid(d)) return '';
+  return '<div class="void-banner"><b>ยกเลิกแล้ว</b>'
+    + (d.voidedAt ? '<span>เมื่อ ' + thDate(String(d.voidedAt).slice(0, 10)) + '</span>' : '')
+    + '<span>เหตุผล: ' + esc(d.voidReason || '—') + '</span></div>';
+}
 const chip = (act, label, on) =>
   '<button class="chip' + (on ? ' on' : '') + '"' + (act ? ' data-act="' + act + '"' : '') + '>' + esc(label) + '</button>';
 
 function statusPill(s) {
   const map = {
     issued:['open','ลงบัญชีแล้ว'], paid:['paid','ชำระแล้ว'], partially_paid:['wait','ชำระบางส่วน'],
-    draft:['draft','ฉบับร่าง'], void:['late','ยกเลิก'], posted:['paid','ลงบัญชีแล้ว'],
+    draft:['draft','ฉบับร่าง'], void:['void','ยกเลิก'], posted:['paid','ลงบัญชีแล้ว'],
     reversed:['late','กลับรายการ'], open:['open','เปิดอยู่'], closed:['paid','ปิดแล้ว'],
     approved:['paid','อนุมัติแล้ว'], rejected:['late','ถูกปฏิเสธ'], expired:['late','หมดอายุ'],
     cancelled:['late','ยกเลิก'], received:['open','รับเข้าคลังแล้ว'],
@@ -124,7 +144,7 @@ function modal(o) {
     + '<div class="modal-f">' + (o.note ? '<span class="dim">' + esc(o.note) + '</span>' : '')
     + '<span class="grow"></span>'
     + btn('modal:close', o.cancelLabel || 'ยกเลิก')
-    + (o.submitLabel ? btn('modal:submit', o.submitLabel, 'primary') : '')
+    + (o.submitLabel ? btn('modal:submit', o.submitLabel, o.submitKind || 'primary') : '')
     + '</div></div>';
   m.classList.add('show');
   modalSubmit = o.onSubmit || null;

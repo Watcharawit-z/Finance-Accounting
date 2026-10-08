@@ -183,6 +183,7 @@ function loadState(obj) {
   if (DB.isDemo === undefined) {
     DB.isDemo = !!(DB.company && DB.company.name === 'บริษัท ศรีวัฒนาการค้า จำกัด');
   }
+  if (Array.isArray(DB.entries) && DB.entries.length) repairDuplicateEntryNos();
   return !!DB.company;
 }
 
@@ -295,12 +296,63 @@ const SEQ_PREFIX = {
   je_general:'JV', je_adjustment:'JV', je_payroll:'PR', je_asset:'AS',
   je_inventory:'IV', je_opening:'OB', je_closing:'CL',
 };
+/* ชนิดที่ใช้คำนำหน้าเดียวกันต้องนับด้วยตัวนับเดียวกัน — ใบสำคัญทั่วไปกับใบปรับปรุงใช้ JV ร่วมกัน
+   เดิมนับแยกตามชนิด จึงได้ JV2601-00001 สองใบ (ค่าธรรมเนียมธนาคาร กับ ปิดภาษี ภ.พ.30) */
+const SEQ_SHARE = {};
+Object.keys(SEQ_PREFIX).forEach((t) => { if (!SEQ_SHARE[SEQ_PREFIX[t]]) SEQ_SHARE[SEQ_PREFIX[t]] = t; });
 function nextNo(docType, date) {
-  const p = periodOf(date).replace('-', '').slice(2);   // 2026-07 → 2607
-  const key = docType + '|' + periodOf(date);
-  DB.seq[key] = (DB.seq[key] || 0) + 1;
+  const period = periodOf(date);
+  const p = period.replace('-', '').slice(2);   // 2026-07 → 2607
   const prefix = SEQ_PREFIX[docType] || docType.toUpperCase().slice(0, 3);
-  return prefix + p + '-' + String(DB.seq[key]).padStart(5, '0');
+  const canon = SEQ_SHARE[prefix] || docType;
+  const key = canon + '|' + period;
+  const own = docType + '|' + period;
+  if (canon !== docType && DB.seq[own] !== undefined) {
+    DB.seq[key] = Math.max(DB.seq[key] || 0, DB.seq[own]);
+    delete DB.seq[own];
+  }
+  let no;
+  do {
+    DB.seq[key] = (DB.seq[key] || 0) + 1;
+    no = prefix + p + '-' + String(DB.seq[key]).padStart(5, '0');
+  } while (docType.indexOf('je_') === 0 && DB.entries.some((e) => e.no === no));
+  return no;
+}
+
+/** ข้อมูลที่บันทึกไว้ก่อนแก้ตัวนับ อาจมีเลขที่ใบสำคัญซ้ำ — ใบแรกคงเลขเดิม ใบหลังได้เลขใหม่
+    แล้วตามแก้ทุกที่ที่อ้างถึงใบนั้น โดยดูจากต้นทางของใบ (src/srcId) จึงไม่แก้ผิดใบ */
+function repairDuplicateEntryNos() {
+  const seen = new Set();
+  const fixed = [];
+  DB.entries.forEach(function (e) {
+    if (!seen.has(e.no)) { seen.add(e.no); return; }
+    const old = e.no;
+    const neu = nextNo('je_' + (e.type || 'general'), e.date);
+    e.no = neu;
+    e.renumberedFrom = old;
+    seen.add(neu);
+    const swap = (o, k) => { if (o && o[k] === old) o[k] = neu; };
+    if (e.src === 'filing') DB.docs.filing.forEach((f) => { if (f.form + '|' + f.period === e.srcId) swap(f, 'entryNo'); });
+    if (e.src === 'reversal') DB.entries.forEach((x) => { if (x.no === e.srcId) swap(x, 'reversedBy'); });
+    if (e.reversedBy) DB.entries.forEach((x) => { if (x.no === e.reversedBy && x.src === 'reversal') swap(x, 'srcId'); });
+    if (e.src === 'bank') DB.bankTxns.forEach((t) => { if (String(t.id) === String(e.srcId)) swap(t, 'matchedTo'); });
+    if (e.src === 'depreciation') DB.docs.depreciation.forEach((r) => { if (r.period === e.srcId) swap(r, 'entryNo'); });
+    if (e.src === 'payroll') {
+      DB.docs.payRun.forEach((r) => { if (r.period === e.srcId) swap(r, 'entryNo'); });
+      DB.taxTx.forEach((t) => { if (t.docType === 'payroll' && t.period === e.srcId) { swap(t, 'entryNo'); swap(t, 'docNo'); } });
+    }
+    const coll = e.src && DB.docs[e.src];
+    if (Array.isArray(coll)) {
+      coll.forEach((d) => { if (d.no === e.srcId) { swap(d, 'entryNo'); swap(d, 'cogsEntryNo'); } });
+      DB.taxTx.forEach((t) => { if (t.docNo === e.srcId || t.expenseNo === e.srcId) swap(t, 'entryNo'); });
+    }
+    fixed.push(old + ' → ' + neu);
+  });
+  if (fixed.length) {
+    audit('journal_entry', 'ALL', 'renumber', null, { count: fixed.length, list: fixed.join(', ') },
+      'แก้เลขที่ใบสำคัญที่ซ้ำกันจากตัวนับเดิม ใบแรกคงเลขเดิม');
+  }
+  return fixed;
 }
 
 /* ===================================================================
@@ -376,11 +428,35 @@ function atomically(fn) {
   catch (e) { loadState(JSON.parse(before)); throw e; }
 }
 
-function reverse(entryNo, reason, date) {
+/* ใบสำคัญที่เกิดจากเอกสาร ต้องยกเลิกที่ตัวเอกสาร ไม่ใช่กลับรายการที่ใบสำคัญ
+   ถ้ากลับที่ใบสำคัญ บัญชีแยกประเภทจะเป็นศูนย์ แต่ทะเบียนลูกหนี้ ทะเบียนภาษี 50 ทวิ และสต๊อก
+   ยังนับเอกสารใบนั้นอยู่ — ยอดคุมจะไม่ตรงและแบบภาษีที่ยื่นจะผิด */
+const ENTRY_FROM = {
+  invoice:['ใบกำกับภาษี', 'เปิดใบกำกับแล้วกดยกเลิกเอกสาร หรือออกใบลดหนี้ถ้ายื่นภาษีไปแล้ว'],
+  receipt:['ใบเสร็จรับเงิน', 'เปิดใบเสร็จแล้วกดยกเลิกเอกสาร'],
+  creditNote:['ใบลดหนี้', 'เปิดใบลดหนี้แล้วกดยกเลิกเอกสาร'],
+  debitNote:['ใบเพิ่มหนี้', 'เปิดใบเพิ่มหนี้แล้วกดยกเลิกเอกสาร'],
+  bill:['รายการตั้งหนี้', 'เปิดรายการตั้งหนี้แล้วกดยกเลิกเอกสาร'],
+  payment:['ใบสำคัญจ่าย', 'เปิดใบสำคัญจ่ายแล้วกดยกเลิกเอกสาร ระบบจะยกเลิก 50 ทวิ ให้ด้วย'],
+  expense:['ค่าใช้จ่าย', 'เปิดรายการค่าใช้จ่ายแล้วกดยกเลิกเอกสาร ระบบจะยกเลิก 50 ทวิ ให้ด้วย'],
+  goodsReceipt:['ใบรับสินค้า', 'เปิดใบรับสินค้าแล้วกดยกเลิกเอกสาร'],
+  payroll:['งวดเงินเดือน', 'ไปที่หน้าเงินเดือนแล้วกดยกเลิกงวดเงินเดือน ระบบจะตัดออกจาก ภ.ง.ด.1 ให้ด้วย'],
+  depreciation:['ค่าเสื่อมราคาประจำงวด', 'ไปที่หน้าค่าเสื่อมราคาแล้วกดยกเลิกงวด ระบบจะคืนค่าเสื่อมสะสมของทรัพย์สินให้ด้วย'],
+  filing:['การยื่นแบบภาษี', 'แบบที่ยื่นแล้วต้องยื่นเพิ่มเติมกับกรมสรรพากร แล้วบันทึกปรับปรุงแทน'],
+  import:['การนำเข้าข้อมูล', 'ยกเลิกที่หน้านำเข้าข้อมูลจากระบบเดิม'],
+  reversal:['การกลับรายการ', 'กลับรายการซ้อนไม่ได้ ให้บันทึกใบสำคัญใหม่แทน'],
+};
+
+function reverse(entryNo, reason, date, opts) {
   const e = DB.entries.find((x) => x.no === entryNo);
   if (!e) throw new DomainError('ENTRY_NOT_FOUND', 'ไม่พบรายการ ' + entryNo);
   if (e.status !== 'posted') {
     throw new DomainError('ALREADY_REVERSED', 'รายการ ' + entryNo + ' ถูกกลับรายการไปแล้ว');
+  }
+  const from = ENTRY_FROM[e.src];
+  if (from && !(opts && opts.fromSource)) {
+    throw new DomainError('ENTRY_FROM_DOCUMENT',
+      'ใบสำคัญ ' + e.no + ' เกิดจาก' + from[0] + (e.srcId ? ' ' + e.srcId : '') + ' กลับรายการที่ใบสำคัญโดยตรงไม่ได้', from[1]);
   }
   if (!reason || reason.trim().length < 5) {
     throw new DomainError('REASON_REQUIRED',
@@ -396,6 +472,11 @@ function reverse(entryNo, reason, date) {
   e.status = 'reversed';
   e.reversedBy = rev.no;
   e.reason = reason.trim();
+  /* ใบสำคัญที่จับคู่กับบรรทัดสเตทเมนต์ไว้ถูกกลับรายการ บรรทัดนั้นต้องกลับไปรอกระทบยอดใหม่
+     ไม่งั้นเงินในธนาคารจะดูเหมือนมีเอกสารรองรับ ทั้งที่เอกสารถูกยกเลิกไปแล้ว */
+  DB.bankTxns.forEach(function (t) {
+    if (t.matchedTo === e.no) { t.matched = false; t.matchedTo = null; }
+  });
   audit('journal_entry', e.no, 'reverse', { status: 'posted' }, { status: 'reversed', by: rev.no }, reason);
   return rev;
 }
@@ -640,14 +721,16 @@ function cashFlow(from, to) {
 function settledUpto(kind, docNo, asOf) {
   if (kind === 'ar') {
     let v = 0;
-    DB.docs.receipt.forEach((r) => { if (r.invoiceNo === docNo && r.date <= asOf) v += r.gross; });
-    DB.docs.creditNote.forEach((c) => { if (c.invoiceNo === docNo && c.date <= asOf) v += c.total; });
+    /* เอกสารที่ยกเลิกแล้วไม่นับ — ใบสำคัญของมันถูกกลับรายการ ณ วันเดียวกันแล้ว */
+    const live = (x) => x.invoiceNo === docNo && x.date <= asOf && x.status !== 'void';
+    DB.docs.receipt.forEach((r) => { if (live(r)) v += r.gross; });
+    DB.docs.creditNote.forEach((c) => { if (live(c)) v += c.total; });
     /* ใบเพิ่มหนี้เดินกลับทาง — ทำให้ลูกหนี้ค้างมากขึ้น ไม่ใช่น้อยลง */
-    DB.docs.debitNote.forEach((c) => { if (c.invoiceNo === docNo && c.date <= asOf) v -= c.total; });
+    DB.docs.debitNote.forEach((c) => { if (live(c)) v -= c.total; });
     return v;
   }
   let v = 0;
-  DB.docs.payment.forEach((p) => { if (p.billNo === docNo && p.date <= asOf) v += p.gross; });
+  DB.docs.payment.forEach((p) => { if (p.billNo === docNo && p.date <= asOf && p.status !== 'void') v += p.gross; });
   return v;
 }
 /* bfPaid = ยอดที่ชำระไปแล้วก่อนวันตัดยอด ตอนย้ายข้อมูลเข้ามา
@@ -658,8 +741,9 @@ const outstandingAsOf = (kind, d, asOf) =>
 
 /* ยอดคงค้าง ณ ปัจจุบัน — เขียนไว้ที่เดียว หน้าจอและรายงานต้องเรียกตัวนี้เท่านั้น
    ไม่งั้นพอเพิ่มประเภทเอกสารใหม่ จะมีบางหน้าลืมนับแล้วตัวเลขเพี้ยนแบบหายาก */
-const invOutstanding = (d) => d.total + (d.debited || 0) - d.paid - d.credited;
-const billOutstanding = (d) => d.total - d.paid;
+/* เอกสารที่ยกเลิกแล้วไม่มียอดค้าง — ใบสำคัญของมันถูกกลับรายการไปแล้ว */
+const invOutstanding = (d) => d.status === 'void' ? 0 : d.total + (d.debited || 0) - d.paid - d.credited;
+const billOutstanding = (d) => d.status === 'void' ? 0 : d.total - d.paid;
 
 /* ---------- อายุหนี้ ---------- */
 function aging(kind, asOf) {

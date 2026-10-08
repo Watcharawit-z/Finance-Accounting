@@ -688,7 +688,7 @@ function reverseImport(entryNo, reason) {
   if (!e || e.src !== 'import') {
     throw new DomainError('NOT_AN_IMPORT', 'ใบสำคัญ ' + entryNo + ' ไม่ใช่รายการที่มาจากการนำเข้า');
   }
-  return reverse(entryNo, reason || 'ยกเลิกการนำเข้าเพื่อนำเข้าใหม่ให้ถูกต้อง', e.date);
+  return reverse(entryNo, reason || 'ยกเลิกการนำเข้าเพื่อนำเข้าใหม่ให้ถูกต้อง', e.date, { fromSource: true });
 }
 
 /* ===================================================================
