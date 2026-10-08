@@ -1425,6 +1425,7 @@ function dispatch(act) {
   }
   if (head === 'paybill') { modalPayBill(arg); return; }
   if (head === 'rev')     { modalReverse(arg); return; }
+  if (head === 'impverify') { if (STATE.imp) { STATE.imp.verifyBadOnly = !STATE.imp.verifyBadOnly; render(); } return; }
   if (head === 'void')    { modalVoid(rest[0], rest.slice(1).join(':')); return; }
   if (head === 'voidrun') { modalVoidRun(rest[0], rest[1]); return; }
   if (head === 'reopen')  { modalReopen(); return; }
@@ -1515,6 +1516,9 @@ function bindEvents() {
       if (t.files && t.files[0]) handleFile(t.files[0]);
       return;
     }
+    if (t.id === 'impVerify') { if (STATE.imp) { STATE.imp.verifyNo = t.value; render(); } return; }
+    /* วันตัดยอดเปลี่ยน — การ์ดตรวจเทียบต้องเปลี่ยนไปเทียบกับยอดยกมาของวันนั้นด้วย */
+    if (t.name === 'cutoff' && STATE.imp && STATE.imp.rows) { STATE.imp.cutoff = t.value; STATE.imp.verifyNo = null; render(); return; }
     if (t.id === 'impMode') {
       const I = STATE.imp;
       if (I) {

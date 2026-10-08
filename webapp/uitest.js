@@ -567,6 +567,25 @@ const overflowInfo = (page) => page.evaluate(() => {
   ok('บัญชีใหม่เก็บรหัสเดิมและไปอยู่บรรทัดเงินฝากธนาคาร', faAfter.kept);
   ok('ยอดคุมที่ยังไม่ตรงมีคำอธิบายกำกับ ไม่ใช่ขึ้นแดงเปล่า ๆ', faAfter.why >= 1);
 
+  /* ---- ลากไฟล์เดิมเข้ามาอีกครั้ง ต้องตรวจเทียบได้ทุกบัญชี โดยไม่ลงบัญชีซ้ำ ---- */
+  const entriesBeforeVerify = await page.evaluate(() => DB.entries.length);
+  await page.evaluate(() => { STATE.screen = 'import'; STATE.imp = null; render(); });
+  await page.evaluate(() => handleFile(window.__xlsxFa));
+  await page.waitForTimeout(500);
+  await page.fill('[name="cutoff"]', '2026-12-31');
+  await page.dispatchEvent('[name="cutoff"]', 'change');
+  await page.waitForTimeout(200);
+  const ver = await page.evaluate(() => {
+    const cards = [...document.querySelectorAll('#main .card')];
+    const vc = cards.find((c) => c.textContent.indexOf('ตรวจเทียบไฟล์นี้กับที่นำเข้าไปแล้ว') >= 0);
+    const hc = cards.find((c) => c.textContent.indexOf('ตรวจสุขภาพข้อมูลที่นำเข้า') >= 0);
+    return { verify: !!vc, ok: vc ? vc.querySelector('.pk-chk.ok') !== null : false,
+      rows: vc ? vc.querySelectorAll('tbody tr').length : 0, health: !!hc, entries: DB.entries.length };
+  });
+  ok('★ ลากไฟล์เดิมเข้ามาอีกครั้ง ระบบเทียบให้ทีละบัญชี ตรงกันทุกบัญชี', ver.verify && ver.ok && ver.rows === 6, ver.rows + ' บัญชี');
+  ok('การตรวจเทียบไม่ลงบัญชีอะไรเพิ่ม', ver.entries === entriesBeforeVerify);
+  ok('★ หน้านำเข้ามีการ์ดตรวจสุขภาพข้อมูลที่นำเข้า', ver.health);
+
   /* ---- ไฟล์บัญชีแยกประเภทต้องถูกกันไว้ ---- */
   await page.evaluate(() => {
     window.__xlsxGl = window.__mkXlsx([[

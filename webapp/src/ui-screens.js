@@ -2101,7 +2101,8 @@ function scImport() {
       + 'บัญชีที่สร้างไว้จากการนำเข้ายังอยู่ในผังบัญชี ยอดเป็นศูนย์ ใช้ต่อได้เลย',
   }) : '';
 
-  if (!IMP.rows) return step1 + history + blank;
+  const health = past.some((im) => im.status !== 'reversed') ? importHealthCard() : '';
+  if (!IMP.rows) return step1 + health + history + blank;
 
   /* ---- ไฟล์ไม่ใช่งบทดลอง บอกให้ชัดว่าไฟล์ไหนที่ต้องใช้ ---- */
   if (IMP.kind === 'ledger' || IMP.kind === 'chart') {
@@ -2266,7 +2267,8 @@ function scImport() {
           : ''),
   });
 
-  if (!preview) return step1 + step2 + history + blank;
+  const verify = preview ? importVerifyCard(IMP, mode) : '';
+  if (!preview) return step1 + step2 + health + history + blank;
 
   /* ตัวเลือกบรรทัดงบสำหรับบัญชีที่จะสร้างใหม่ จัดกลุ่มตามบรรทัดงบให้เลือกง่าย */
   const fsOpts = (function () {
@@ -2334,7 +2336,66 @@ function scImport() {
       : 'ยังนำเข้าไม่ได้ — ' + (!preview.balanced ? 'งบทดลองไม่สมดุล' : 'ยังจับคู่บัญชีไม่ครบ'),
   });
 
-  return step1 + step2 + step3 + history + blank;
+  return step1 + step2 + verify + step3 + health + history + blank;
+}
+
+/* ===================================================================
+   ตรวจตัวเลขที่นำเข้า (ตรรกะอยู่ใน verify.js)
+   =================================================================== */
+const HEALTH_ST = { ok:['paid','ผ่าน'], warn:['wait','ควรตรวจ'], bad:['late','ต้องแก้'] };
+function importHealthCard() {
+  const h = importHealth(pEnd());
+  return card({
+    title:'ตรวจสุขภาพข้อมูลที่นำเข้า',
+    sub:'ณ วันที่ ' + thDate(h.asOf) + ' · นำเข้าที่ใช้งานอยู่ ' + h.imports.length + ' ครั้ง · '
+      + (h.bad ? 'ต้องแก้ ' + h.bad + ' ข้อ' : 'ไม่มีข้อที่ต้องแก้') + (h.warn ? ' · ควรตรวจ ' + h.warn + ' ข้อ' : ''),
+    body: tbl({
+      cols:[{t:'ผล'},{t:'เรื่อง'},{t:'รายละเอียด'},{t:'วิธีแก้'}],
+      rows: h.items.map((x) => [{st: HEALTH_ST[x.level]}, x.title, x.detail || {dim:'—'}, x.fix || {dim:'—'}]),
+    }),
+    foot:'ตรวจจากข้อมูลที่อยู่ในระบบตอนนี้ ไม่ต้องมีไฟล์ · อยากรู้ว่าทุกตัวเลขตรงกับไฟล์ต้นทางหรือไม่ '
+      + 'ให้ลากไฟล์งบทดลองเดิมเข้ามาอีกครั้ง ระบบจะเทียบให้ทีละบัญชีโดยไม่ลงบัญชีซ้ำ',
+  });
+}
+function importVerifyCard(IMP, mode) {
+  const live = DB.entries.filter((e) => e.src === 'import' && e.status === 'posted');
+  if (!live.length || !IMP.tb) return '';
+  const key = mode === 'movement' ? (IMP.period || STATE.period) : (IMP.cutoff || pStart());
+  const auto = importFor(mode, key);
+  const no = IMP.verifyNo && live.some((e) => e.no === IMP.verifyNo) ? IMP.verifyNo : (auto ? auto.no : live[live.length - 1].no);
+  const v = verifyAgainstFile(IMP.tb.rows, IMP.overrides || {}, no, IMP.tb.skipped);
+  const only = IMP.verifyBadOnly && v.bad.length;
+  const ST = { ok:['paid','ตรง'], diff:['late','ไม่ตรง'], missing:['late','ไม่ได้นำเข้า'], extra:['late','ไม่มีในไฟล์'],
+    no_account:['late','ไม่มีบัญชีนี้ในระบบ'] };
+  const rows = only ? v.bad : v.rows;
+  return card({
+    title:'ตรวจเทียบไฟล์นี้กับที่นำเข้าไปแล้ว',
+    sub:'เทียบกับ ' + v.entry.no + ' · ' + v.label + ' · ไม่ลงบัญชีอะไรเพิ่ม',
+    actions: '<select id="impVerify" class="search" aria-label="เลือกการนำเข้าที่จะเทียบ">'
+      + live.map((e) => '<option value="' + esc(e.no) + '"' + (e.no === v.entry.no ? ' selected' : '') + '>'
+        + esc(e.no + ' · ' + importLabel(e)) + '</option>').join('') + '</select>'
+      + (v.bad.length ? chip('impverify:bad', 'เฉพาะที่ไม่ตรง ' + v.bad.length, !!only) : ''),
+    body: '<div class="pk-chk ' + (v.ok ? 'ok' : 'bad') + '" style="margin:12px 16px">'
+      + (v.ok ? '<b>ตรงกันทุกบัญชี ✓</b> ' + v.rows.length + ' บัญชี ทุกสตางค์ — ตัวเลขในระบบเท่ากับไฟล์ต้นทาง'
+        : '<b>ไม่ตรง ' + v.bad.length + ' บัญชี</b>' + (v.unmatched.length ? ' · บรรทัดในไฟล์ที่ไม่มีบัญชีรองรับ ' + v.unmatched.length + ' บรรทัด' : '')
+          + (v.fileBalanced ? '' : ' · ไฟล์ไม่สมดุล') + ' — ดูคอลัมน์ผลต่าง')
+      + '</div>'
+      + '<div class="reco" style="margin:0 16px 12px">'
+      + '<div><span>บรรทัดในไฟล์ที่อ่านได้</span><b>' + IMP.tb.rows.length + ' บรรทัด</b></div>'
+      + '<div><span>บรรทัดที่ข้าม (ผลรวม/อ่านไม่ออก)</span><b>' + v.skipped.length + ' บรรทัด</b></div>'
+      + '<div><span>เดบิตรวมในไฟล์</span><b>' + fmt(v.fileDr) + '</b></div>'
+      + '<div><span>เครดิตรวมในไฟล์</span><b>' + fmt(v.fileCr) + '</b></div>'
+      + '<div class="gt"><span>ยอดสุทธิทุกบัญชี ไฟล์ / ระบบ</span><b>' + fmt(v.fileAbs / 2) + ' / ' + fmt(v.entryAbs / 2) + '</b></div></div>'
+      + tbl({
+        cols:[{t:'รหัส'},{t:'ชื่อบัญชี'},{t:'มาจากบรรทัดในไฟล์'},{t:'ในไฟล์',a:'r'},{t:'ที่นำเข้า',a:'r'},{t:'ผลต่าง',a:'r'},{t:'ผล'},{t:'หมายเหตุ'}],
+        rows: rows.map((r) => [{mono:r.code}, r.name, {dim: r.from.join(' · ') || '—'}, {n:r.file}, {n:r.entry}, {n:r.diff},
+          {st: ST[r.status]}, r.other ? {dim:'มีรายการอื่นในบัญชีนี้ช่วงเดียวกัน ' + fmt(r.other) + ' ยอดในบัญชีตอนนี้ ' + fmt(r.gl)} : {dim:''}]),
+        empty:'ไม่มีบัญชีที่มียอด',
+      })
+      + (v.skipped.length ? '<div class="note">บรรทัดที่ข้าม: ' + esc(v.skipped.map((s) => 'แถว ' + s.line + ' ' + (s.code || '') + ' ' + (s.name || '') + ' (' + s.why + ')').join(' · ')) + '</div>' : ''),
+    foot:'ยอดเป็นเดบิตบวก เครดิตติดลบ · "ไม่ได้นำเข้า" = มีในไฟล์แต่ไม่มีในใบสำคัญ · "ไม่มีในไฟล์" = มีในใบสำคัญแต่ไฟล์ไม่มี · '
+      + 'ถ้าไม่ตรง ให้ยกเลิกการนำเข้านั้นแล้วนำเข้าใหม่จากไฟล์นี้',
+  });
 }
 
 function scImportResult() {

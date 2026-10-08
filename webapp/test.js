@@ -1,6 +1,6 @@
 /* ทดสอบเครื่องบัญชีในเบราว์เซอร์ — รันด้วย node webapp/test.js */
 const fs = require('fs');
-const src = ['engine','operations','seed','import'].map(f => fs.readFileSync(__dirname + '/src/' + f + '.js','utf8')).join('\n');
+const src = ['engine','operations','seed','import','verify'].map(f => fs.readFileSync(__dirname + '/src/' + f + '.js','utf8')).join('\n');
 const ctx = new Function(src + '\nreturn {DB,buildSeed,trialBalance,balanceSheet,incomeStatement,cashFlow,' +
   'reconciliationChecks,aging,issueInvoice,receivePayment,issueCreditNote,recordBill,payBill,' +
   'runPayroll,runDepreciation,fileVat,fileWht,post,reverse,fmt,M,validTaxId,DomainError,' +
@@ -15,7 +15,7 @@ const ctx = new Function(src + '\nreturn {DB,buildSeed,trialBalance,balanceSheet
   'issueBillingNote,cancelBillingNote,receiveBillingNote,billingNoteStatus,' +
   'issueGoodsReceipt,receiveGoodsFromPo,billGoodsReceipt,recordExpense,billOutstanding,' +
   'createPaymentBatch,approvePaymentBatch,payPaymentBatch,postJournalVoucher,journalOf,' +
-  'bahtText,equityStatement,saveCompany,companyGaps,voidDocument,voidPreview,voidCheck,voidRun,runCheck,' +
+  'bahtText,equityStatement,saveCompany,companyGaps,verifyAgainstFile,importHealth,importFor,voidDocument,voidPreview,voidCheck,voidRun,runCheck,' +
   'creditableBase,matchBankTxn,reopenPeriod,repairDuplicateEntryNos,loadState};')();
 
 let pass = 0, fail = 0;
@@ -1160,6 +1160,31 @@ ok('รายการนำเข้าทั้งสองแบบขึ้�
 const again = ctx.importOpeningBalances(faTb.rows, '2026-12-31', {});
 ok('★ ยกเลิกแล้วนำเข้าวันเดิมใหม่ได้ ไม่ติดว่าซ้ำ', !!again.entry.no, again.entry.no);
 ok('คราวนี้ไม่ต้องสร้างบัญชีใหม่แล้ว เพราะรหัสเดิมอยู่ในผังแล้ว', again.created === 0);
+
+console.log('\n=== 10.1 ตรวจตัวเลขที่นำเข้าเทียบกับไฟล์ต้นทาง ===');
+{
+  const opening = ctx.importFor('opening', '2026-12-31');
+  const v = ctx.verifyAgainstFile(faTb.rows, {}, opening.no, faTb.skipped);
+  ok('★ ลากไฟล์เดิมเข้ามาเทียบ ตรงกันทุกบัญชีทุกสตางค์', v.ok && v.bad.length === 0 && v.rows.length === faTb.rows.length,
+    v.rows.length + ' บัญชี · ข้าม ' + v.skipped.length + ' บรรทัด');
+  ok('การตรวจเทียบไม่ลงบัญชีอะไรเพิ่ม', ctx.listImports().length === 3);
+  const tampered = faTb.rows.map((r, i) => i === 2 ? Object.assign({}, r, { debit: r.debit ? r.debit + ctx.M('0.01') : r.debit,
+    credit: r.credit ? r.credit + ctx.M('0.01') : r.credit }) : r);
+  const v2 = ctx.verifyAgainstFile(tampered, {}, opening.no, []);
+  ok('★ ตัวเลขในไฟล์ต่างจากที่นำเข้าแค่ 1 สตางค์ ระบบชี้ได้ว่าบัญชีไหน', !v2.ok && v2.bad.length === 1
+    && Math.abs(v2.bad[0].diff) === ctx.M('0.01'), v2.bad.map((x) => x.code + ' ต่าง ' + ctx.fmt(x.diff)).join(' · '));
+  const missing = faTb.rows.concat([{ code:'11999', name:'บัญชีที่ไม่ได้นำเข้า', debit: ctx.M('100'), credit: 0 }]);
+  const v3 = ctx.verifyAgainstFile(missing, {}, opening.no, []);
+  ok('บรรทัดที่มีในไฟล์แต่ไม่เคยนำเข้า ถูกจับได้', v3.bad.some((x) => x.code === '11999' && x.status === 'no_account'));
+  const h = ctx.importHealth('2026-12-31');
+  ok('★ ตรวจสุขภาพจับได้ว่ายอดยกมา (ยอดสะสม) กับยอดเคลื่อนไหวเดือนก่อนหน้าซ้อนกัน อาจนับซ้ำ',
+    h.items.some((x) => x.level === 'bad' && x.title.indexOf('อาจนับซ้ำ') === 0), h.items.filter((x) => x.level !== 'ok').map((x) => x.title).join(' | '));
+  ok('ตรวจสุขภาพบอกว่ายอดยกมามีบัญชีรายได้/ค่าใช้จ่าย ทำให้งบกำไรขาดทุนเดือนนั้นรวมยอดก่อนวันตัดยอด',
+    h.items.some((x) => x.level === 'warn' && x.title.indexOf('มีบัญชีรายได้และค่าใช้จ่าย') >= 0));
+  ok('ตรวจสุขภาพยืนยันว่างบทดลองและงบแสดงฐานะการเงินสมดุล', h.items.some((x) => x.level === 'ok' && x.title === 'งบทดลองสมดุล')
+    && h.items.some((x) => x.level === 'ok' && x.title === 'งบแสดงฐานะการเงินสมดุล'));
+  ok('ยอดเจ้าหนี้ที่ยกมาไม่มีใบค้างรองรับ ตรวจสุขภาพบอกวิธีแก้', h.items.some((x) => x.level === 'bad' && /เจ้าหนี้/.test(x.title) && /รายใบ/.test(x.fix)));
+}
 
 /* ไฟล์บัญชีแยกประเภทต้องไม่ถูกนับเป็นงบทดลอง */
 const LEDGER = [
