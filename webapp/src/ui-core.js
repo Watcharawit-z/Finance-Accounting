@@ -628,4 +628,33 @@ function render() {
   const spot = STATE.screen + '|' + (STATE.sel || '');
   if (spot !== render.lastSpot) window.scrollTo(0, 0);
   render.lastSpot = spot;
+  fitNums(main);
+}
+
+/* ยอดเงินตัวใหญ่ในการ์ดสรุปต้องเห็นครบทุกหลัก ห้ามล้นการ์ดหรือถูกตัด
+   ยอดหลักร้อยล้านกว้างกว่าการ์ดตอนจอแคบ ลดขนาดตัวอักษรลงทีละ 1px จนพอดี
+   ทั้งแถวใช้ขนาดเดียวกัน (ขนาดของใบที่ต้องเล็กที่สุด) ตัวเลขข้างกันจะได้ไม่ใหญ่เล็กสลับกันจนดูเหมือนสำคัญไม่เท่ากัน
+   วัดใหม่ทุกครั้งที่วาดหน้า ตอนฟอนต์โหลดเสร็จ (ความกว้างตัวเลขเปลี่ยน) และตอนย่อขยายหน้าต่าง */
+function fitNums(root) {
+  (root || document).querySelectorAll('.kpis').forEach(function (row) {
+    const vals = Array.prototype.slice.call(row.querySelectorAll('.kpi-v'));
+    vals.forEach(function (el) { el.style.fontSize = ''; });
+    let size = Infinity;
+    vals.forEach(function (el) {
+      let s = parseFloat(getComputedStyle(el).fontSize);
+      while (el.scrollWidth > el.clientWidth + 0.5 && s > 14) {
+        s -= 1;
+        el.style.fontSize = s + 'px';
+      }
+      size = Math.min(size, s);
+    });
+    if (size !== Infinity) vals.forEach(function (el) { el.style.fontSize = size + 'px'; });
+  });
+}
+if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+  window.addEventListener('resize', function () {
+    clearTimeout(fitNums.t);
+    fitNums.t = setTimeout(function () { fitNums(); }, 120);
+  });
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { fitNums(); });
 }

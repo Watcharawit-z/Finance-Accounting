@@ -257,6 +257,18 @@ const overflowInfo = (page) => page.evaluate(() => {
   await page.waitForTimeout(250);
   const dashOver = await overflowInfo(page);
   ok('แดชบอร์ดบนจอ 390px ไม่ล้นแนวนอน', dashOver.over <= 1, 'ล้น ' + dashOver.over + 'px · ' + dashOver.who);
+  /* ยอดในการ์ดสรุปต้องเห็นครบทุกหลัก แม้ยอดหลักแสนล้านบนจอโทรศัพท์ และทั้งแถวขนาดเท่ากัน */
+  const kpiFit = await page.evaluate(() => {
+    const vals = Array.prototype.slice.call(document.querySelectorAll('#main .kpis .kpi-v'));
+    vals[0].textContent = '999,999,999,999.99';
+    fitNums(document.getElementById('main'));
+    const sizes = vals.map((el) => getComputedStyle(el).fontSize);
+    return { n: vals.length, cut: vals.filter((el) => el.scrollWidth > el.clientWidth + 0.5).map((el) => el.textContent),
+      same: sizes.every((x) => x === sizes[0]), size: parseFloat(sizes[0]) };
+  });
+  ok('★ ยอดในการ์ดสรุปไม่ล้นการ์ด แม้ยอดหลักแสนล้านบนจอ 390px', kpiFit.n > 0 && kpiFit.cut.length === 0, kpiFit.cut.join(', '));
+  ok('ตัวเลขในการ์ดสรุปแถวเดียวกันขนาดเท่ากัน และไม่เล็กจนอ่านยาก', kpiFit.same && kpiFit.size >= 14, kpiFit.size + 'px');
+  await page.evaluate(() => render());
 
   await page.evaluate(() => { STATE.screen = 'invoices'; STATE.sel = null; render(); });
   await page.waitForTimeout(200);
@@ -268,6 +280,21 @@ const overflowInfo = (page) => page.evaluate(() => {
   await page.waitForTimeout(250);
   ok('กดปุ่มเมนูแล้วลิ้นชักเปิด', await page.evaluate(() =>
     document.getElementById('nav').getBoundingClientRect().right > 100));
+
+  console.log('\n[11.1] ฟอนต์: ไทยแบบมีหัวคู่กับ Inter ตัวเลขกว้างเท่ากัน');
+  const fonts = await page.evaluate(() => {
+    const css = getComputedStyle(document.documentElement);
+    const num = document.querySelector('#main td.num');
+    return { body: getComputedStyle(document.body).fontFamily,
+      print: css.getPropertyValue('--print'),
+      tnum: num ? getComputedStyle(num).fontVariantNumeric : 'no td.num',
+      link: Array.prototype.some.call(document.querySelectorAll('link[rel="stylesheet"]'),
+        (l) => /family=Inter/.test(l.href) && /Noto\+Sans\+Thai\+Looped/.test(l.href) && /Sarabun/.test(l.href)) };
+  });
+  ok('ตัวหนังสือบนจอใช้ Inter คู่กับ Noto Sans Thai Looped', /^"?Inter"?, "Noto Sans Thai Looped"/.test(fonts.body), fonts.body);
+  ok('โหลดฟอนต์ครบสามตระกูล (Inter, Noto Sans Thai Looped, Sarabun สำหรับพิมพ์)', fonts.link);
+  ok('เอกสารพิมพ์ยังใช้ Sarabun แบบหนังสือราชการ', /^\s*"?Sarabun/.test(fonts.print), fonts.print);
+  ok('ช่องจำนวนเงินใช้ตัวเลขกว้างเท่ากัน หลักตรงกันทุกแถว', /tabular-nums/.test(fonts.tnum), fonts.tnum);
 
   console.log('\n[12] บอกให้ชัดว่านี่คือข้อมูลตัวอย่าง');
   await page.setViewportSize({ width: 1440, height: 950 });

@@ -83,9 +83,9 @@ start webapp\index.html         # Windows
 ## พัฒนาต่อ
 
 ```bash
-node webapp/test.js      # ทดสอบเครื่องบัญชี 331 ข้อ (ไม่ต้องมีเบราว์เซอร์)
-node webapp/uitest.js    # ทดสอบหน้าเว็บจริงใน Chromium 274 ข้อ
-DATABASE_URL=... node webapp/synctest.js   # 34 ข้อ — เก็บข้อมูลบนเซิร์ฟเวอร์ สองเบราว์เซอร์พร้อมกัน
+node webapp/test.js      # ทดสอบเครื่องบัญชี 339 ข้อ (ไม่ต้องมีเบราว์เซอร์)
+node webapp/uitest.js    # ทดสอบหน้าเว็บจริงใน Chromium 295 ข้อ
+DATABASE_URL=... node webapp/synctest.js   # 43 ข้อ — เก็บข้อมูลบนเซิร์ฟเวอร์ สองเบราว์เซอร์พร้อมกัน
 node webapp/build.js     # รวม src/*.js กลับเป็น index.html ไฟล์เดียว
 ```
 

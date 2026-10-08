@@ -3,7 +3,7 @@
 <title>Financii</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400..700&family=Noto+Sans+Thai+Looped:wght@400;500;600;700&family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
 <style>
 /* ===================================================================
    โทเค็นดีไซน์ — โครง "หมึกบนกระดาษ" ตาม docs/06
@@ -28,10 +28,14 @@
   --shadow-2:0 8px 24px rgba(16,24,40,.12);
   --shadow-3:0 24px 64px rgba(16,24,40,.24);
   --radius:8px; --radius-sm:6px; --radius-lg:12px;
-  --sans:"IBM Plex Sans Thai","IBM Plex Sans","Noto Sans Thai",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
-  --num:"IBM Plex Sans","IBM Plex Sans Thai",-apple-system,"Segoe UI",sans-serif;
-  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
-  --print:"Sarabun","TH Sarabun New","IBM Plex Sans Thai",sans-serif;
+  /* ฟอนต์ (docs/06 §3.3): ไทยแบบมีหัว Noto Sans Thai Looped ให้ความรู้สึกเป็นทางการ
+     แบบเอกสารราชการและใบแจ้งยอดธนาคาร ละตินกับตัวเลขใช้ Inter ที่ตัวเลขกว้างเท่ากัน
+     หลักตรงกันทุกแถว เลข 0 กับตัว O และ 1 กับ l แยกกันชัด
+     Inter ไม่มีอักษรไทย ตัวไทยจึงตกไปที่ Noto เองทุกที่ ไม่ต้องสลับคลาส */
+  --sans:"Inter","Noto Sans Thai Looped",-apple-system,BlinkMacSystemFont,"Segoe UI","Thonburi","Leelawadee UI",Tahoma,sans-serif;
+  --num:"Inter","Noto Sans Thai Looped",-apple-system,BlinkMacSystemFont,"Segoe UI",Tahoma,sans-serif;
+  --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,monospace;
+  --print:"Sarabun","TH Sarabun New","Noto Sans Thai Looped",sans-serif;
   --side-w:256px; --top-h:56px;
   color-scheme:light;
 }
@@ -71,9 +75,12 @@ html{background:var(--paper)}
 body{
   margin:0; background:var(--paper); color:var(--ink); font-family:var(--sans);
   font-size:14.5px; line-height:1.6; -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
+  font-optical-sizing:auto; font-synthesis:none;
 }
 h2,h3{margin:0; font-weight:600; text-wrap:balance; letter-spacing:-.01em}
-.mono{font-family:var(--mono)}
+/* .mono = เลขที่เอกสาร รหัสบัญชี เลขผู้เสียภาษี ใช้ตัวเลขกว้างเท่ากันของ Inter แทนฟอนต์พิมพ์ดีด
+   ให้ดูเป็นเอกสารธุรกิจ ไม่ใช่โค้ด (ชื่อคลาสคงไว้เพราะหน้าจอทุกหน้าใช้อยู่) */
+.mono{font-family:var(--num); letter-spacing:.01em}
 .num,.mono,input,select{font-variant-numeric:tabular-nums}
 .grow{flex:1}
 .dim{color:var(--muted)}
@@ -107,7 +114,7 @@ kbd{font-family:var(--mono); font-size:11px; padding:1px 6px; border:1px solid v
   background:rgba(111,176,203,.18); color:var(--side-accent); font-weight:700; font-size:13px}
 .co-txt{min-width:0; flex:1; line-height:1.3}
 .co-name{display:block; color:#fff; font-size:13.5px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
-.co-meta{display:block; color:var(--side-muted); font-size:11px; font-family:var(--mono); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+.co-meta{display:block; color:var(--side-muted); font-size:11px; font-family:var(--num); font-variant-numeric:tabular-nums; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
 .book-sel{
   width:100%; font:inherit; font-size:13.5px; font-weight:600; color:#fff; background:transparent;
   border:0; padding:0; cursor:pointer; text-overflow:ellipsis; appearance:auto;
@@ -307,7 +314,7 @@ th{
 }
 td{padding:9px 12px; border-bottom:1px solid var(--rule-2); vertical-align:top; line-height:1.5}
 td.num{text-align:right; font-family:var(--num); font-variant-numeric:tabular-nums; letter-spacing:-.005em; white-space:nowrap}
-td.mono{font-family:var(--mono); font-size:12.5px; white-space:nowrap; color:var(--ink-2)}
+td.mono{font-family:var(--num); font-size:13px; font-variant-numeric:tabular-nums; letter-spacing:.01em; white-space:nowrap; color:var(--ink-2)}
 td.num.bad{color:var(--neg)} td.num.good{color:var(--good)}
 tbody tr:last-child td{border-bottom:none}
 tfoot td{padding:10px 12px; border-top:1px solid var(--rule); border-bottom:none; font-weight:600; background:var(--hover)}
@@ -341,13 +348,13 @@ tr.is-void td.num{text-decoration:line-through; text-decoration-color:var(--neg)
   background:var(--panel); border:1px solid var(--rule); border-radius:var(--radius);
   margin-bottom:16px; overflow:hidden; box-shadow:var(--shadow);
 }
-.kpi{padding:14px 16px 12px; border-inline-end:1px solid var(--rule); display:flex; flex-direction:column; position:relative}
+.kpi{padding:14px 16px 12px; border-inline-end:1px solid var(--rule); display:flex; flex-direction:column; position:relative; min-width:0}
 .kpi:last-child{border-inline-end:0}
 .kpi.clickable{cursor:pointer}
 .kpi.clickable:hover{background:var(--hover)}
 .kpi-l{font-size:12.5px; color:var(--muted); display:flex; align-items:center; gap:7px}
 .kpi-l svg.i{width:15px; height:15px; color:var(--faint)}
-.kpi-v{font-family:var(--num); font-size:25px; font-weight:600; font-variant-numeric:tabular-nums; margin-top:4px; letter-spacing:-.02em; line-height:1.2}
+.kpi-v{font-family:var(--num); font-size:25px; font-weight:600; font-variant-numeric:tabular-nums; margin-top:4px; letter-spacing:-.02em; line-height:1.2; white-space:nowrap}
 .kpi-s{font-size:12px; color:var(--muted); margin-top:3px; line-height:1.4}
 .kpi.good .kpi-v{color:var(--good)} .kpi.bad .kpi-v{color:var(--neg)} .kpi.warn .kpi-v{color:var(--warn)}
 
@@ -399,7 +406,7 @@ table.eq tr.op td{font-weight:600; background:var(--hover)}
 /* ตารางดิบตอนนำเข้าไฟล์ — ให้เห็นหน้าตาไฟล์เหมือนเปิดใน Excel */
 table.grid{font-size:12px; width:auto; min-width:100%; table-layout:auto}
 table.grid th{padding:5px 9px; background:var(--rule-2); color:var(--muted);
-  font-family:var(--mono); font-size:11px; text-align:center; border:1px solid var(--rule)}
+  font-family:var(--num); font-variant-numeric:tabular-nums; font-size:11px; text-align:center; border:1px solid var(--rule)}
 table.grid td{padding:5px 9px; border:1px solid var(--rule-2); white-space:nowrap; max-width:190px;
   overflow:hidden; text-overflow:ellipsis}
 table.grid tbody th{text-align:right; position:sticky; inset-inline-start:0}
@@ -576,7 +583,7 @@ td.peekable:hover,tr.peekable:hover td.num{color:var(--accent); text-decoration:
 #rowMenu{position:fixed; z-index:90; display:none; min-width:220px; max-width:300px; background:var(--panel);
   border:1px solid var(--rule); border-radius:var(--radius); box-shadow:var(--shadow-3); padding:6px}
 #rowMenu.show{display:block}
-.rm-h{font-family:var(--mono); font-size:12px; color:var(--faint); padding:4px 10px 6px; border-bottom:1px solid var(--rule-2); margin-bottom:4px}
+.rm-h{font-family:var(--num); font-variant-numeric:tabular-nums; font-size:12px; color:var(--faint); padding:4px 10px 6px; border-bottom:1px solid var(--rule-2); margin-bottom:4px}
 .rm-i{display:flex; align-items:center; gap:9px; width:100%; text-align:left; font:inherit; font-size:13.5px; color:var(--ink);
   background:none; border:0; padding:7px 10px; border-radius:var(--radius-sm); cursor:pointer}
 .rm-i svg.i{width:16px; height:16px; color:var(--muted)}
