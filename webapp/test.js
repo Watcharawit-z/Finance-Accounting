@@ -14,7 +14,8 @@ const ctx = new Function(src + '\nreturn {DB,buildSeed,trialBalance,balanceSheet
   'TRADE_DOCS,invOutstanding,outstandingAsOf,unM,' +
   'issueBillingNote,cancelBillingNote,receiveBillingNote,billingNoteStatus,' +
   'issueGoodsReceipt,receiveGoodsFromPo,billGoodsReceipt,recordExpense,billOutstanding,' +
-  'createPaymentBatch,approvePaymentBatch,payPaymentBatch,postJournalVoucher,journalOf};')();
+  'createPaymentBatch,approvePaymentBatch,payPaymentBatch,postJournalVoucher,journalOf,' +
+  'bahtText,equityStatement,saveCompany,companyGaps};')();
 
 let pass = 0, fail = 0;
 function ok(label, cond, extra) {
@@ -645,6 +646,39 @@ console.log('\n=== 7.11 เอกสารชุดใหม่ที่ฝ่�
   ok('★ งบทดลองสมดุลหลังใช้เอกสารใหม่ครบทุกแบบ', tbOk());
   ok('★ ยอดคุมทุกตัวยังตรง (ลูกหนี้ เจ้าหนี้ พักรับสินค้า ภาษีซื้อ ภาษีขาย)', recOk(),
     ctx.reconciliationChecks('2026-07-31').checks.filter((c) => !c.ok).map((c) => c.label).join(', '));
+}
+
+console.log('\n=== 7.12 เอกสารพิมพ์ งบส่วนของผู้ถือหุ้น และข้อมูลกิจการ ===');
+{
+  const BAHT = [
+    ['1', 'หนึ่งบาทถ้วน'], ['11', 'สิบเอ็ดบาทถ้วน'], ['21', 'ยี่สิบเอ็ดบาทถ้วน'], ['101', 'หนึ่งร้อยเอ็ดบาทถ้วน'],
+    ['20', 'ยี่สิบบาทถ้วน'], ['107000', 'หนึ่งแสนเจ็ดพันบาทถ้วน'], ['900940', 'เก้าแสนเก้าร้อยสี่สิบบาทถ้วน'],
+    ['1000001', 'หนึ่งล้านเอ็ดบาทถ้วน'], ['21000000', 'ยี่สิบเอ็ดล้านบาทถ้วน'],
+    ['1250000000', 'หนึ่งพันสองร้อยห้าสิบล้านบาทถ้วน'],
+    ['26750.50', 'สองหมื่นหกพันเจ็ดร้อยห้าสิบบาทห้าสิบสตางค์'], ['0.25', 'ยี่สิบห้าสตางค์'],
+    ['0.11', 'สิบเอ็ดสตางค์'], ['0', 'ศูนย์บาทถ้วน'], ['1.005', 'หนึ่งบาทหนึ่งสตางค์'],
+  ];
+  const bad = BAHT.filter((b) => ctx.bahtText(ctx.M(b[0])) !== b[1]);
+  ok('★ จำนวนเงินเป็นตัวอักษรถูกทุกกรณี (เอ็ด ยี่สิบ ล้าน สตางค์ ปัดเศษ)', bad.length === 0,
+    bad.length ? bad.map((b) => b[0] + '→' + ctx.bahtText(ctx.M(b[0]))).join(' · ') : BAHT.length + ' กรณี');
+
+  const eq = ctx.equityStatement('2026-01-01', '2026-07-31');
+  ok('★ งบแสดงการเปลี่ยนแปลงส่วนของผู้ถือหุ้นปลายงวดตรงกับงบแสดงฐานะการเงิน', eq.matchesBs, ctx.fmt(eq.total));
+  ok('กำไรสุทธิในงบส่วนของผู้ถือหุ้นเท่ากับงบกำไรขาดทุน',
+    eq.net === ctx.incomeStatement('2026-01-01', '2026-07-31').net, ctx.fmt(eq.net));
+  const opening = eq.rows.find((r) => r.k === 'op'), closing = eq.rows.find((r) => r.k === 'tot');
+  ok('ยอดต้นงวด + การเปลี่ยนแปลงทุกบรรทัด = ยอดปลายงวด',
+    eq.rows.filter((r) => !r.k).reduce((x, r) => x + r.total, opening.total) === closing.total);
+
+  throws('เลขผู้เสียภาษีของกิจการผิดหลักที่ 13', () => ctx.saveCompany({ name:'ทดสอบ', taxId:'0105548021443' }), 'TAX_ID_INVALID');
+  throws('รหัสสาขาต้องเป็นตัวเลข 5 หลัก', () => ctx.saveCompany({ name:'ทดสอบ', branch:'1' }), 'BRANCH_INVALID');
+  const keep = Object.assign({}, D.company);
+  const co = ctx.saveCompany({ name: keep.name, taxId: keep.taxId, branch:'00001', address:'99 ถนนทดสอบ กรุงเทพมหานคร 10110',
+    phone: keep.phone });
+  ok('แก้ข้อมูลกิจการได้ และชื่อสาขาตั้งให้ตามรหัส', co.branchName === 'สาขาที่ 00001' && co.address.indexOf('99 ถนนทดสอบ') === 0);
+  ok('ข้อมูลครบตามมาตรา 86/4 ไม่มีอะไรขาด', ctx.companyGaps().length === 0);
+  ctx.saveCompany(Object.assign({}, keep, { branch: keep.branch || '00000' }));
+  ok('คืนค่าเดิมได้', D.company.address === keep.address && D.company.branchName === 'สำนักงานใหญ่');
 }
 
 console.log('\n=== 8. ปิดงวด ===');

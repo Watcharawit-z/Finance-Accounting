@@ -74,7 +74,10 @@ const overflowInfo = (page) => page.evaluate(() => {
   console.log('\n[3] คลิกเมนูจริงทีละอัน');
   await page.evaluate(() => { STATE.screen = 'dashboard'; render(); });
   await page.evaluate(() => {
-    navGroups().forEach((g) => (g.subs || []).forEach((s) => { STATE.navOpen[s.s] = true; }));
+    navGroups().forEach((g) => {
+      STATE.navGroupOpen[g.g] = true;
+      (g.subs || []).forEach((s) => { STATE.navOpen[s.s] = true; });
+    });
     render();
   });
   const links = await page.$$('#nav .nav-i');
@@ -742,7 +745,19 @@ const overflowInfo = (page) => page.evaluate(() => {
 
   console.log('\n[15] เมนูแยกตามหมวดหมู่');
   await page.setViewportSize({ width: 1440, height: 950 });
-  await page.evaluate(() => { STATE.screen = 'dashboard'; STATE.navOpen = {}; render(); });
+  await page.evaluate(() => { STATE.screen = 'dashboard'; STATE.navOpen = {}; STATE.navGroupOpen = {}; render(); });
+  await page.waitForTimeout(150);
+  const shortNav = await page.evaluate(() => ({
+    links: document.querySelectorAll('#nav .nav-i').length,
+    groups: document.querySelectorAll('#nav .nav-gh').length }));
+  ok('★ เมนูสั้น: ยุบเหลือหัวกลุ่ม กางเฉพาะกลุ่มของหน้าที่เปิดอยู่',
+    shortNav.links === 2 && shortNav.groups === 12, shortNav.groups + ' กลุ่ม · ' + shortNav.links + ' ลิงก์ที่เห็น');
+  await page.click('#nav [data-act="navg:เอกสารขาย"]');
+  await page.waitForTimeout(120);
+  ok('กดหัวกลุ่มแล้วกางรายการข้างใน',
+    (await page.$$('#nav .nav-i.child')).length === 7);
+  await page.click('#nav [data-act="navg:เอกสารขาย"]');
+  await page.evaluate(() => { STATE.navGroupOpen = { 'รายงาน': true }; render(); });
   await page.waitForTimeout(150);
   const navShape = await page.evaluate(() => navGroups().map((g) =>
     g.g + ':' + ((g.items || []).length + (g.subs || []).length)));
@@ -763,7 +778,7 @@ const overflowInfo = (page) => page.evaluate(() => {
   await page.waitForTimeout(150);
   ok('กดอีกทีก็ยุบกลับ', (await page.$$('#nav .nav-i.sub')).length === beforeOpen);
 
-  await page.evaluate(() => { STATE.screen = 'tb'; STATE.navOpen = {}; render(); });
+  await page.evaluate(() => { STATE.screen = 'tb'; STATE.navOpen = {}; STATE.navGroupOpen = {}; render(); });
   await page.waitForTimeout(150);
   ok('★ เปิดรายงานไหนอยู่ หมวดนั้นกางให้เอง',
     await page.$eval('#nav .nav-s.open', (e) => e.textContent.indexOf('บัญชี') >= 0));
@@ -1196,6 +1211,166 @@ const overflowInfo = (page) => page.evaluate(() => {
   });
   ok('★ งบทดลองสมดุลและยอดคุมทุกตัวตรง หลังใช้เอกสารใหม่ครบทุกแถบ', fin.tb && fin.all,
     fin.failed.join(', ') || 'ผ่านทุกข้อ');
+
+  console.log('\n[20] หน้าตาใหม่: ค้นหา สร้างเอกสาร พิมพ์ ส่งออก และโหมดมืด');
+  await page.setViewportSize({ width: 1440, height: 950 });
+  await page.evaluate(() => { STATE.period = '2026-07'; STATE.screen = 'dashboard'; STATE.sel = null; render(); });
+  await page.waitForTimeout(120);
+
+  /* โหมดมืด — สลับได้และจำไว้ */
+  const t0 = await page.evaluate(() => themeNow());
+  await page.click('#themeBtn');
+  await page.waitForTimeout(100);
+  const t1 = await page.evaluate(() => ({ attr: document.documentElement.getAttribute('data-theme'),
+    bg: getComputedStyle(document.body).backgroundColor }));
+  ok('★ ปุ่มสลับโหมดมืด/สว่างทำงาน', t1.attr && t1.attr !== t0, t0 + ' → ' + t1.attr + ' · พื้น ' + t1.bg);
+  await page.reload();
+  await page.waitForSelector('#main .kpis');
+  ok('เปิดใหม่แล้วยังจำโหมดที่เลือก', (await page.evaluate(() => document.documentElement.getAttribute('data-theme'))) === t1.attr);
+  await page.click('#themeBtn');
+  await page.evaluate(() => { STATE.period = '2026-07'; render(); });
+
+  /* ค้นหาและสั่งงาน */
+  const junInv = await page.evaluate(() => DB.docs.invoice.find((d) => periodOf(d.date) === '2026-06').no);
+  await page.keyboard.press('Control+k');
+  await page.waitForSelector('#cmdk.show');
+  await page.keyboard.type(junInv);
+  await page.waitForTimeout(120);
+  const firstHit = await page.$eval('#cmdkList .cmdk-i.on .t', (e) => e.textContent);
+  ok('★ Ctrl+K ค้นหาเลขที่เอกสารเจอทันที', firstHit.indexOf(junInv) === 0, firstHit);
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(150);
+  const opened = await page.evaluate(() => ({ screen: STATE.screen, sel: STATE.sel, period: STATE.period,
+    shown: document.getElementById('main').innerHTML.indexOf('ใบกำกับภาษี/ใบส่งของ เลขที่') >= 0 }));
+  ok('★ กด Enter เปิดเอกสารนั้น และเลื่อนไปงวดของเอกสารให้เอง',
+    opened.screen === 'invoices' && opened.sel === junInv && opened.period === '2026-06' && opened.shown, opened.period);
+  await page.evaluate(() => { STATE.period = '2026-07'; STATE.screen = 'dashboard'; STATE.sel = null; render(); });
+  await page.keyboard.press('/');
+  await page.waitForSelector('#cmdk.show');
+  await page.keyboard.type('ภพ30');
+  await page.waitForTimeout(100);
+  ok('พิมพ์ "ภพ30" แบบไม่มีจุดก็เจอแบบ ภ.พ.30',
+    (await page.$$eval('#cmdkList .cmdk-i .t', (els) => els.map((e) => e.textContent))).some((t) => t.indexOf('ภ.พ.30') >= 0));
+  await page.keyboard.press('Escape');
+  ok('Esc ปิดกล่องค้นหา', !(await page.evaluate(() => document.getElementById('cmdk').classList.contains('show'))));
+  await page.keyboard.press('Control+k');
+  await page.keyboard.type('สร้างใบวางบิล');
+  await page.waitForTimeout(100);
+  await page.keyboard.press('Enter');
+  await page.waitForSelector('#modal.show');
+  ok('สั่งงานจากกล่องค้นหาได้ เช่น สร้างใบวางบิล', (await page.$eval('.modal-h h3', (e) => e.textContent)) === 'ออกใบวางบิล');
+  await page.click('[data-act="modal:close"]');
+
+  /* เมนูสร้างเอกสาร */
+  await page.click('#newBtn');
+  await page.waitForSelector('#pop.show');
+  const popItems = await page.$$eval('#pop .pop-i', (els) => els.length);
+  ok('★ ปุ่มสร้างเอกสารรวมทุกเอกสารไว้ที่เดียว แบ่งตามหมวด', popItems >= 20, popItems + ' รายการ');
+  await page.click('#pop [data-act="popgo:new:expense"]');
+  await page.waitForSelector('#modal.show');
+  ok('เลือกจากเมนูแล้วเปิดฟอร์มนั้นทันที', (await page.$eval('.modal-h h3', (e) => e.textContent)) === 'บันทึกค่าใช้จ่าย'
+    && !(await page.evaluate(() => document.getElementById('pop').classList.contains('show'))));
+  await page.click('[data-act="modal:close"]');
+
+  /* บริบทของหน้า */
+  await page.evaluate(() => { STATE.screen = 'invoices'; STATE.sel = null; render(); });
+  const ctxInfo = await page.evaluate(() => ({
+    on: (document.querySelector('.flow a.on') || {}).textContent || '',
+    steps: document.querySelectorAll('.flow a').length,
+    je: Array.from(document.querySelectorAll('.je-chip')).map((e) => e.textContent).join(' | '),
+    crumb: document.getElementById('crumb').textContent }));
+  ok('★ ทุกหน้าบอกว่าอยู่ตรงไหนของวงจรเอกสาร', ctxInfo.on.indexOf('ใบกำกับภาษี') === 0 && ctxInfo.steps === 7,
+    ctxInfo.steps + ' ขั้น · อยู่ที่ ' + ctxInfo.on);
+  ok('★ ทุกหน้าบอกผลทางบัญชีเป็นเดบิต/เครดิต', /Dr.*ลูกหนี้การค้า/.test(ctxInfo.je) && /Cr.*ภาษีขาย/.test(ctxInfo.je), ctxInfo.je);
+  ok('แถบบนบอกเส้นทาง หมวด / หน้า', ctxInfo.crumb.replace(/\s/g, '') === 'เอกสารขาย/ใบกำกับภาษี', ctxInfo.crumb);
+
+  /* พิมพ์เอกสารทุกชนิด */
+  const printed = await page.evaluate(() => {
+    const pick = { invoice:'invoice', receipt:'receipt', billingNote:'billingNote', creditNote:'creditNote',
+      debitNote:'debitNote', quotation:'quotation', salesOrder:'salesOrder', purchaseOrder:'purchaseOrder',
+      goodsReceipt:'goodsReceipt', payment:'payment', expense:'expense', paymentBatch:'paymentBatch', whtCert:'whtCert' };
+    const out = {};
+    Object.keys(pick).forEach(function (k) {
+      const d = DB.docs[pick[k]][0];
+      if (!d) { out[k] = 'ไม่มีเอกสาร'; return; }
+      printDoc(k, d.no);
+      const el = document.getElementById('printArea');
+      out[k] = { pages: el.querySelectorAll('.sheet').length, title: (el.querySelector('.pr-bar b') || {}).textContent,
+        words: /บาท(ถ้วน|.*สตางค์)/.test(el.textContent), co: el.textContent.indexOf(DB.company.taxId) >= 0 };
+      closePrint();
+    });
+    const e = DB.entries[DB.entries.length - 1];
+    printDoc('entry', e.no);
+    out.entry = { pages: document.querySelectorAll('#printArea .sheet').length, title: document.querySelector('.pr-bar b').textContent };
+    closePrint();
+    return out;
+  });
+  const badPrint = Object.keys(printed).filter((k) => !printed[k].pages || !printed[k].co && k !== 'entry');
+  ok('★ พิมพ์ได้ทุกเอกสาร 14 ชนิด มีหัวผู้ออกพร้อมเลขผู้เสียภาษี', badPrint.length === 0,
+    badPrint.length ? 'พัง ' + badPrint.join(', ') : Object.keys(printed).length + ' ชนิด');
+  ok('★ ใบกำกับภาษีพิมพ์ต้นฉบับและสำเนา และมีจำนวนเงินเป็นตัวอักษร',
+    printed.invoice.pages === 2 && printed.invoice.words && printed.receipt.words);
+  ok('50 ทวิ พิมพ์ฉบับที่ 1 และฉบับที่ 2', printed.whtCert.pages === 2);
+
+  await page.evaluate(() => { STATE.screen = 'receipts'; STATE.sel = null; render(); });
+  await page.click('#main tbody tr.row-link');
+  await page.waitForSelector('#printArea.show');
+  const prBar = await page.$eval('#printArea .pr-bar b', (e) => e.textContent);
+  await page.selectOption('#prCopies', '1');
+  const copyOnly = await page.evaluate(() => ({ n: document.querySelectorAll('#printArea .sheet').length,
+    label: (document.querySelector('#printArea .p-copy') || {}).textContent }));
+  ok('คลิกใบเสร็จในรายการแล้วเปิดตัวอย่างก่อนพิมพ์ เลือกพิมพ์เฉพาะสำเนาได้',
+    prBar.indexOf('ใบเสร็จรับเงิน') === 0 && copyOnly.n === 1 && copyOnly.label === 'สำเนา', prBar);
+  await page.keyboard.press('Escape');
+  ok('Esc ปิดตัวอย่างก่อนพิมพ์', !(await page.evaluate(() => document.getElementById('printArea').classList.contains('show'))));
+
+  /* ส่งออก CSV */
+  await page.evaluate(() => { STATE.screen = 'invoices'; STATE.sel = null; render(); });
+  const [dl] = await Promise.all([page.waitForEvent('download'), page.click('#main .card-h [data-act="csv"]')]);
+  const csv = require('fs').readFileSync(await dl.path(), 'utf8');
+  const csvRows = csv.split('\r\n');
+  ok('★ ส่งออกตารางเป็น CSV เปิดใน Excel ได้ (มี BOM ภาษาไทยไม่เพี้ยน)', csv.charCodeAt(0) === 0xFEFF
+    && dl.suggestedFilename() === 'Financii_invoices_2026-07.csv' && csvRows[1].indexOf('ใบกำกับภาษี') === 0,
+    dl.suggestedFilename() + ' · ' + csvRows.length + ' แถว');
+  ok('ตัวเลขใน CSV เป็นตัวเลขล้วน Excel คำนวณต่อได้', csvRows.some((r) => /,\d+\.\d{2},\d+\.\d{2},/.test(r))
+    && !csvRows.slice(3).some((r) => /"\d{1,3}(,\d{3})+\.\d{2}"/.test(r)));
+
+  /* ข้อมูลกิจการ */
+  await page.evaluate(() => { STATE.screen = 'settings'; render(); });
+  await page.click('#main [data-act="company:edit"]');
+  await page.waitForSelector('#modal.show');
+  await page.fill('[name="cophone"]', '02-555-0199');
+  await page.click('[data-act="modal:submit"]');
+  await closed(page);
+  const phoneOnPrint = await page.evaluate(() => {
+    printDoc('invoice', DB.docs.invoice[0].no);
+    const t = document.getElementById('printArea').textContent;
+    closePrint();
+    return t.indexOf('02-555-0199') >= 0;
+  });
+  ok('★ แก้ข้อมูลกิจการแล้ว หัวเอกสารที่พิมพ์เปลี่ยนตาม', phoneOnPrint);
+
+  /* งบแสดงการเปลี่ยนแปลงส่วนของผู้ถือหุ้น */
+  await page.evaluate(() => { STATE.screen = 'equity'; render(); });
+  ok('★ มีงบแสดงการเปลี่ยนแปลงส่วนของผู้ถือหุ้น และตรงกับงบแสดงฐานะการเงิน',
+    (await page.$eval('#main .card-f', (e) => e.textContent)).indexOf('ตรงกับงบแสดงฐานะการเงิน') >= 0);
+
+  /* จอโทรศัพท์ */
+  await page.setViewportSize({ width: 390, height: 844 });
+  const narrow = await page.evaluate(() => {
+    const over = [];
+    ['dashboard', 'invoices', 'expenses', 'jsales', 'settings', 'equity', 'paymentprep'].forEach(function (sc) {
+      STATE.screen = sc; STATE.sel = null; render();
+      const w = document.documentElement.scrollWidth - document.documentElement.clientWidth;
+      if (w > 1) over.push(sc + ' ' + w + 'px');
+    });
+    return over;
+  });
+  ok('★ จอ 390px ไม่ล้นแนวนอนทุกหน้าใหม่', narrow.length === 0, narrow.join(', ') || 'ไม่ล้น');
+  ok('ปุ่มค้นหาและสร้างเอกสารยังกดได้บนจอเล็ก', await page.evaluate(() =>
+    document.getElementById('cmdBtn').getBoundingClientRect().width > 20
+    && document.getElementById('newBtn').getBoundingClientRect().width > 20));
+  await page.setViewportSize({ width: 1440, height: 950 });
 
   ok('ไม่มีข้อผิดพลาดในคอนโซลเลย', errors.length === 0, errors.slice(0, 3).join(' | '));
 

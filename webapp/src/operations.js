@@ -1658,3 +1658,40 @@ function postJournalVoucher(input) {
     srcId: String(input.ref || '').trim() || null, lines,
   });
 }
+
+/* ===================================================================
+   ข้อมูลกิจการ — พิมพ์ลงเอกสารทุกใบ ต้องครบตามมาตรา 86/4 ก่อนออกใบกำกับภาษี
+   =================================================================== */
+function saveCompany(input) {
+  const name = String(input.name || '').trim();
+  if (!name) throw new DomainError('COMPANY_NAME_REQUIRED', 'ต้องมีชื่อผู้ประกอบการ');
+  const taxId = String(input.taxId || '').trim();
+  if (taxId && !validTaxId(taxId)) {
+    throw new DomainError('TAX_ID_INVALID', 'เลขประจำตัวผู้เสียภาษี ' + taxId + ' ไม่ผ่านการตรวจหลักที่ 13',
+      'ตรวจเลขกับหนังสือรับรองของบริษัท');
+  }
+  const branch = String(input.branch || '00000').trim();
+  if (!/^\d{5}$/.test(branch)) {
+    throw new DomainError('BRANCH_INVALID', 'รหัสสาขาต้องเป็นตัวเลข 5 หลัก', 'สำนักงานใหญ่ใช้ 00000 · สาขาที่ 1 ใช้ 00001');
+  }
+  const before = { name: DB.company.name, taxId: DB.company.taxId, address: DB.company.address };
+  Object.assign(DB.company, {
+    name, nameEn: String(input.nameEn || '').trim(), taxId, regNo: taxId || DB.company.regNo,
+    address: String(input.address || '').trim(), branch,
+    branchName: branch === '00000' ? 'สำนักงานใหญ่' : 'สาขาที่ ' + branch,
+    phone: String(input.phone || '').trim(), vatRegistered: input.vatRegistered !== false,
+    bookkeeper: String(input.bookkeeper || '').trim(), auditor: String(input.auditor || '').trim(),
+  });
+  audit('company', 'profile', 'update', before, { name, taxId, address: DB.company.address });
+  return DB.company;
+}
+
+/** ข้อมูลที่ยังขาดสำหรับใบกำกับภาษี — แสดงเตือนในหน้าข้อมูลกิจการ */
+function companyGaps() {
+  const c = DB.company || {};
+  const out = [];
+  if (!c.name) out.push('ชื่อผู้ประกอบการ');
+  if (!c.taxId) out.push('เลขประจำตัวผู้เสียภาษี');
+  if (!c.address) out.push('ที่อยู่สถานประกอบการ');
+  return out;
+}

@@ -50,6 +50,42 @@ function unM(a) {
   return (neg ? '-' : '') + i + '.' + String(abs - i * S).padStart(4, '0');
 }
 
+/* ---------- จำนวนเงินเป็นตัวอักษร — บังคับในใบกำกับภาษีและใบเสร็จรับเงิน (docs/11) ----------
+   หลักหน่วยที่เป็น 1 อ่าน "เอ็ด" เมื่อมีหลักที่สูงกว่า (สิบเอ็ด หนึ่งร้อยเอ็ด หนึ่งล้านเอ็ด)
+   หลักสิบที่เป็น 1 อ่าน "สิบ" และเป็น 2 อ่าน "ยี่สิบ" แบบเดียวกับ BAHTTEXT ของ Excel */
+const TH_DIGIT = ['ศูนย์', 'หนึ่ง', 'สอง', 'สาม', 'สี่', 'ห้า', 'หก', 'เจ็ด', 'แปด', 'เก้า'];
+const TH_PLACE = ['', 'สิบ', 'ร้อย', 'พัน', 'หมื่น', 'แสน'];
+function thaiGroupWords(n, hasHigher) {
+  const s = String(n);
+  let out = '';
+  for (let i = 0; i < s.length; i++) {
+    const d = Number(s[i]);
+    const pos = s.length - i - 1;
+    if (d === 0) continue;
+    if (pos === 1 && d === 1) out += 'สิบ';
+    else if (pos === 1 && d === 2) out += 'ยี่สิบ';
+    else if (pos === 0 && d === 1 && (s.length > 1 || hasHigher)) out += 'เอ็ด';
+    else out += TH_DIGIT[d] + TH_PLACE[pos];
+  }
+  return out;
+}
+function thaiNumberWords(n, hasHigher) {
+  if (n >= 1000000) {
+    const lo = n % 1000000;
+    return thaiNumberWords(Math.floor(n / 1000000), hasHigher) + 'ล้าน' + (lo ? thaiGroupWords(lo, true) : '');
+  }
+  return thaiGroupWords(n, hasHigher);
+}
+/** รับจำนวนเงินสเกล 4 ตำแหน่ง คืนข้อความ เช่น "หนึ่งแสนเจ็ดพันบาทถ้วน" */
+function bahtText(a) {
+  const satang = divRound(Math.abs(a), 100);
+  const baht = Math.floor(satang / 100), st = satang % 100;
+  if (baht === 0 && st === 0) return 'ศูนย์บาทถ้วน';
+  return (a < 0 ? 'ลบ' : '')
+    + (baht ? thaiNumberWords(baht, false) + 'บาท' : '')
+    + (st ? thaiGroupWords(st, false) + 'สตางค์' : 'ถ้วน');
+}
+
 /* ---------- วันที่แบบไทย ---------- */
 const TH_M = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
 const TH_MF = ['มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน',
@@ -522,6 +558,39 @@ function incomeStatement(from, to) {
  * วิธีนี้ทำให้ ต้นงวด + ดำเนินงาน + ลงทุน + จัดหาเงิน = ปลายงวด เสมอ
  * ไม่มีทางเหลือส่วนที่อธิบายไม่ได้
  */
+/* ---------- งบแสดงการเปลี่ยนแปลงส่วนของผู้ถือหุ้น ----------
+   ยอดต้นงวดรวมใบสำคัญยอดยกมาที่ลงวันแรกของงวดด้วย · ยอดปลายงวดต้องเท่ากับงบแสดงฐานะการเงิน */
+const RETAINED_SUB = ['retained_earnings', 'current_year_earnings', 'dividend', 'opening_balance'];
+function equityStatement(from, to) {
+  const before = addDays(from, -1);
+  const isOpen = (e) => e.type === 'opening';
+  const notOpen = (e) => !isOpen(e);
+  const pnl = (a) => a.type === 'revenue' || a.type === 'expense';
+  const bal = (f, upto, start, ef) => (typeof f === 'function' ? balanceOf(f, upto, start, ef) : balBySub(f, upto, start, ef));
+  const opening = (f) => -(bal(f, before) + bal(f, to, from, isOpen));
+  const closing = (f) => -bal(f, to);
+  const cap = { open: opening(['paid_up_capital']), close: closing(['paid_up_capital']) };
+  const res = { open: opening(['legal_reserve']), close: closing(['legal_reserve']) };
+  const ret = { open: opening(RETAINED_SUB) + opening(pnl), close: closing(RETAINED_SUB) + closing(pnl) };
+  const net = -balanceOf(pnl, to, from, notOpen);
+  const dividend = -balBySub(['dividend'], to, from, notOpen);
+  const capMove = cap.close - cap.open;
+  const resMove = res.close - res.open;
+  const other = ret.close - ret.open - net - dividend + resMove;
+  const row = (label, c, r, e, k) => ({ label, cap: c, res: r, ret: e, total: c + r + e, k });
+  const rows = [
+    row('ยอดคงเหลือต้นงวด', cap.open, res.open, ret.open, 'op'),
+    row('เพิ่ม (ลด) ทุนที่ออกและชำระแล้ว', capMove, 0, 0),
+    row('กำไร (ขาดทุน) สุทธิสำหรับงวด', 0, 0, net),
+    row('จัดสรรเป็นสำรองตามกฎหมาย', 0, resMove, -resMove),
+    row('เงินปันผลจ่าย', 0, 0, dividend),
+    row('รายการอื่นที่กระทบกำไรสะสม', 0, 0, other),
+    row('ยอดคงเหลือปลายงวด', cap.close, res.close, ret.close, 'tot'),
+  ].filter((r) => r.k || r.cap || r.res || r.ret);
+  const total = cap.close + res.close + ret.close;
+  return { rows, total, net, matchesBs: total === balanceSheet(to).equity };
+}
+
 const CASH_SUB = ['cash','bank','cash_in_transit'];
 const INVESTING_SUB = ['ppe','ppe_land','cip','intangible','long_term_investment','accum_depreciation','accum_amortization'];
 const FINANCING_SUB = ['long_term_loan','paid_up_capital','legal_reserve','dividend','share_premium'];

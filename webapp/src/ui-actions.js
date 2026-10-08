@@ -983,6 +983,38 @@ function modalJournalVoucher(book) {
   refreshJvTotals();
 }
 
+/* ---------- ข้อมูลกิจการ ---------- */
+function modalCompany() {
+  const c = DB.company;
+  modal({
+    title:'แก้ไขข้อมูลกิจการ',
+    sub:'ข้อมูลชุดนี้พิมพ์ลงหัวใบกำกับภาษี ใบเสร็จ และหนังสือรับรอง 50 ทวิ ทุกใบ',
+    body:'<div class="flds">'
+      + field({ name:'coname', label:'ชื่อผู้ประกอบการ (ตามหนังสือรับรอง)', wide:true, value: c.name })
+      + field({ name:'conameEn', label:'ชื่อภาษาอังกฤษ', wide:true, value: c.nameEn || '' })
+      + field({ name:'cotax', label:'เลขประจำตัวผู้เสียภาษี 13 หลัก', value: c.taxId || '',
+          hint:'ระบบตรวจหลักที่ 13 ให้' })
+      + field({ name:'cobranch', label:'รหัสสาขา', value: c.branch || '00000', hint:'สำนักงานใหญ่ใช้ 00000' })
+      + field({ name:'coaddr', label:'ที่อยู่สถานประกอบการ', wide:true, value: c.address || '' })
+      + field({ name:'cophone', label:'โทรศัพท์', value: c.phone || '' })
+      + field({ name:'covat', label:'จดทะเบียนภาษีมูลค่าเพิ่ม', type:'select', value: c.vatRegistered === false ? 'no' : 'yes',
+          options:[['yes','จดทะเบียนแล้ว'],['no','ยังไม่ได้จดทะเบียน']] })
+      + field({ name:'cobook', label:'ผู้ทำบัญชี', value: c.bookkeeper || '' })
+      + field({ name:'coaudit', label:'ผู้สอบบัญชี', value: c.auditor || '' })
+      + '</div>',
+    submitLabel:'บันทึกข้อมูลกิจการ',
+    onSubmit: function () {
+      submitAction(function () {
+        const r = saveCompany({ name: val('coname'), nameEn: val('conameEn'), taxId: val('cotax'), branch: val('cobranch'),
+          address: val('coaddr'), phone: val('cophone'), vatRegistered: val('covat') !== 'no',
+          bookkeeper: val('cobook'), auditor: val('coaudit') });
+        toast('บันทึกข้อมูลกิจการแล้ว', 'ok', r.name);
+        return r;
+      });
+    },
+  });
+}
+
 /* ---------- อื่น ๆ ---------- */
 function modalBankBook(id) {
   const t = DB.bankTxns.find((x) => x.id === Number(id));
@@ -1054,6 +1086,19 @@ function dispatch(act) {
   const arg = rest.join(':');
 
   if (head === 'go')      { STATE.screen = arg; STATE.sel = null; STATE.filter = ''; render(); return; }
+  if (head === 'cmdk')    { openCmdk(''); return; }
+  if (head === 'cmdkgo')  { cmdkRun(Number(arg)); return; }
+  if (head === 'pop')     { if (!closePop()) openPop(document.getElementById('newBtn')); return; }
+  if (head === 'popgo')   { closePop(); dispatch(arg); return; }
+  if (head === 'theme')   { toggleTheme(); return; }
+  if (head === 'printdoc') { printDoc(rest[0], rest.slice(1).join(':')); return; }
+  if (head === 'printgo') { printNow(); return; }
+  if (head === 'printclose') { closePrint(); return; }
+  if (head === 'navg') {
+    const g = navGroups().find((x) => x.g === arg);
+    if (g) { STATE.navGroupOpen[arg] = !navGroupIsOpen(g); renderNav(); }
+    return;
+  }
   if (head === 'nav') {
     const cur = STATE.navOpen[arg] === undefined ? arg === navSubOf(STATE.screen) : STATE.navOpen[arg];
     STATE.navOpen[arg] = !cur;
@@ -1068,7 +1113,7 @@ function dispatch(act) {
   if (head === 'view')    { STATE.dashView = arg; render(); return; }
   if (head === 'pick')    { document.getElementById('file').click(); return; }
   if (head === 'blank')   { modalBlank(); return; }
-  if (head === 'company')  { if (arg === 'new') modalNewCompany(); return; }
+  if (head === 'company')  { if (arg === 'new') modalNewCompany(); if (arg === 'edit') modalCompany(); return; }
   if (head === 'pass') {
     const code = val('passcode');
     syncUnlock(code).then(function (ok) {
@@ -1145,7 +1190,8 @@ function dispatch(act) {
   /* เปิดเอกสารปลายทางจากอีกหน้าหนึ่ง — เลื่อนงวดตามวันที่ของเอกสารให้ด้วย ไม่งั้นหาไม่เจอ */
   if (head === 'open') {
     const [screen, no] = rest;
-    const coll = { expenses:'expense', whtcert:'whtCert', bills:'bill', goodsreceipts:'goodsReceipt' }[screen];
+    const coll = { expenses:'expense', whtcert:'whtCert', bills:'bill', goodsreceipts:'goodsReceipt',
+      invoices:'invoice', billingnotes:'billingNote', paymentprep:'paymentBatch' }[screen];
     const doc = coll ? (DB.docs[coll] || []).find((d) => d.no === no) : null;
     if (doc && DB.periods.some((p) => p.code === periodOf(doc.date))) STATE.period = periodOf(doc.date);
     STATE.screen = screen; STATE.sel = no; STATE.filter = '';
@@ -1265,13 +1311,20 @@ function dispatch(act) {
 function bindEvents() {
   document.addEventListener('click', function (ev) {
     const el = ev.target.closest('[data-act]');
+    /* คลิกนอกเมนูสร้างเอกสารหรือนอกกล่องค้นหา ให้ปิด */
+    if (!ev.target.closest('#pop') && !(el && el.id === 'newBtn')) closePop();
+    if (ev.target.id === 'cmdk') { closeCmdk(); return; }
     if (!el) return;
     if (el.classList.contains('disabled')) { ev.preventDefault(); return; }
     ev.preventDefault();
-    dispatch(el.getAttribute('data-act'));
+    const act = el.getAttribute('data-act');
+    if (act === 'csv') { exportCsv(el.closest('.card')); return; }
+    dispatch(act);
   });
+  window.addEventListener('afterprint', function () { document.body.classList.remove('printing'); });
 
   document.addEventListener('input', function (ev) {
+    if (ev.target.id === 'cmdkQ') { cmdkRefresh(); return; }
     const n = ev.target.name || '';
     if (/^j\d+_(dr|cr)$/.test(n)) { refreshJvTotals(); return; }
     if (/^e\d+_(qty|price)$/.test(n)) { refreshExpenseSum(); return; }
@@ -1285,6 +1338,7 @@ function bindEvents() {
   document.addEventListener('change', function (ev) {
     const t = ev.target;
     if (t.id === 'periodSel') { STATE.period = t.value; STATE.sel = null; save(); render(); return; }
+    if (t.id === 'prCopies')  { PRINT.copies = t.value; renderPrint(); return; }
     if (t.id === 'bookSel')   { switchCompany(t.value); return; }
     if (t.id === 'accSel')    { STATE.drill = t.value; render(); return; }
     if (t.id === 'file') {
@@ -1387,6 +1441,16 @@ function bindEvents() {
   });
 
   document.addEventListener('keydown', function (ev) {
+    if ((ev.ctrlKey || ev.metaKey) && (ev.key === 'k' || ev.key === 'K')) {
+      ev.preventDefault();
+      if (!closeCmdk()) openCmdk('');
+      return;
+    }
+    if (cmdkKey(ev)) return;
+    const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(ev.target.tagName);
+    const modalOpen = document.getElementById('modal').classList.contains('show');
+    if (ev.key === '/' && !typing && !modalOpen) { ev.preventDefault(); openCmdk(''); return; }
+    if (ev.key === 'Escape' && (closePop() || closePrint())) return;
     if (ev.key === 'Escape') closeModal();
     if (ev.key === 'Enter' && document.getElementById('modal').classList.contains('show')
         && ev.target.tagName !== 'TEXTAREA' && modalSubmit) {
@@ -1624,6 +1688,7 @@ function runImportPackage(pkg) {
 
 /* ---------- เริ่มระบบ ---------- */
 async function boot() {
+  applyTheme(lsGet(THEME_KEY));
   bindEvents();
   const onServer = await syncConfig();
 
