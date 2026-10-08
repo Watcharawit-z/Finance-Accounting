@@ -1508,6 +1508,74 @@ const overflowInfo = (page) => page.evaluate(() => {
   ok('★ ฟอร์มตั้งหนี้ให้เลือกบัญชีค่าใช้จ่ายเจาะจง ค่าเริ่มต้นเป็นค่าใช้จ่ายเบ็ดเตล็ด ไม่ใช่บัญชีเงินเดือน', accOpt.def === '5358' && accOpt.has5311, accOpt.def);
   await page.keyboard.press('Escape');
 
+  console.log('\n[24] ตาราง: ตัวกรองสถานะ มุมมองที่บันทึก ความหนาแน่น หัวตารางติด และเมนูคลิกขวา');
+  await page.evaluate(() => { STATE.period = '2026-06'; STATE.screen = 'invoices'; STATE.sel = null; STATE.filter = ''; STATE.chip = {}; render(); });
+  const chipAll = await page.evaluate(() => document.querySelectorAll('#main tbody tr').length);
+  await page.click('#main [data-act="chip:invoices:open"]');
+  const chipOpen = await page.evaluate(() => ({ rows: document.querySelectorAll('#main tbody tr').length,
+    want: DB.docs.invoice.filter((d) => periodOf(d.date) === '2026-06' && invOutstanding(d) > 0).length,
+    badge: document.querySelector('#main [data-act="chip:invoices:open"] .chip-n').textContent }));
+  ok('★ กดตัวกรอง "ค้างรับ" แล้วเหลือเฉพาะใบที่ยังค้าง จำนวนบนป้ายตรงกับแถวในตาราง', chipOpen.rows === chipOpen.want
+    && String(chipOpen.want) === chipOpen.badge && chipOpen.rows < chipAll, chipOpen.rows + ' จาก ' + chipAll);
+  await page.click('#main [data-act="viewsave"]');
+  await page.waitForSelector('#modal.show [name="viewName"]');
+  await page.fill('#modal [name="viewName"]', 'ลูกหนี้ค้าง มิ.ย.');
+  await page.click('#modal [data-act="modal:submit"]');
+  await page.evaluate(() => { STATE.chip = {}; STATE.screen = 'dashboard'; render(); });
+  const viewOk = await page.evaluate(() => { const v = savedViews().find((x) => x.name === 'ลูกหนี้ค้าง มิ.ย.'); openView(v.id);
+    return { screen: STATE.screen, chip: STATE.chip.invoices, chipOn: !!document.querySelector('#main [data-act="chip:invoices:open"].on'),
+      listed: !!document.querySelector('#main [data-act="sview:' + v.id + '"]') }; });
+  ok('★ บันทึกมุมมองแล้วเปิดกลับมาได้ ตัวกรองกลับมาครบ และมีป้ายมุมมองในแถบตัวกรอง', viewOk.screen === 'invoices' && viewOk.chip === 'open'
+    && viewOk.chipOn && viewOk.listed);
+  const inCmdk = await page.evaluate(() => { openCmdk('ลูกหนี้ค้าง'); const t = document.getElementById('cmdk').textContent; closeCmdk(); return t; });
+  ok('ค้นมุมมองที่บันทึกไว้ใน Ctrl K ได้', inCmdk.indexOf('ลูกหนี้ค้าง มิ.ย.') >= 0);
+
+  await page.click('#densityBtn');
+  const dens = await page.evaluate(() => ({ attr: document.documentElement.getAttribute('data-density'), saved: localStorage.getItem('financii.density'),
+    pad: getComputedStyle(document.querySelector('#main tbody td')).paddingTop }));
+  ok('★ ปุ่มความหนาแน่นสลับตารางเป็นแบบกระชับ และจำไว้ในเครื่อง', dens.attr === 'compact' && dens.saved === 'compact' && dens.pad === '5px', JSON.stringify(dens));
+  await page.evaluate(() => setDensity('normal'));
+
+  const sticky = await page.evaluate(() => { STATE.screen = 'journals'; STATE.period = '2026-06'; render();
+    const sc = document.querySelector('#main .scroll.tall');
+    return sc ? { th: getComputedStyle(sc.querySelector('thead th')).position, h: sc.clientHeight < sc.scrollHeight } : null; });
+  ok('★ ตารางยาวเลื่อนในกรอบ หัวตารางติดอยู่ด้านบนเสมอ', sticky && sticky.th === 'sticky' && sticky.h, JSON.stringify(sticky));
+
+  await page.evaluate(() => { STATE.screen = 'invoices'; STATE.chip = {}; render(); });
+  await page.click('#main tbody tr.row-link', { button: 'right' });
+  const menu = await page.evaluate(() => ({ show: document.getElementById('rowMenu').classList.contains('show'),
+    items: [...document.querySelectorAll('#rowMenu .rm-i')].map((b) => b.textContent) }));
+  ok('★ คลิกขวาที่แถวเอกสาร มีเมนูเปิด พิมพ์ ดูใบสำคัญ และยกเลิกเอกสาร', menu.show && menu.items.some((t) => t === 'พิมพ์')
+    && menu.items.some((t) => t.indexOf('ดูใบสำคัญ') === 0) && menu.items.some((t) => t.indexOf('ยกเลิกเอกสาร') === 0), menu.items.join(' | '));
+  await page.keyboard.press('Escape');
+  ok('Esc ปิดเมนูคลิกขวา', !(await page.evaluate(() => document.getElementById('rowMenu').classList.contains('show'))));
+  await page.click('#main tbody tr.row-link', { button: 'right' });
+  await page.click('#rowMenu .rm-i:has-text("พิมพ์")');
+  ok('เลือก "พิมพ์" จากเมนูคลิกขวาแล้วเปิดตัวอย่างก่อนพิมพ์', await page.evaluate(() => document.getElementById('printArea').classList.contains('show')));
+  await page.keyboard.press('Escape');
+
+  console.log('\n[25] เจาะดูตัวเลข — คลิกแล้วเห็นที่มา และผลรวมตรงกับตัวเลขที่คลิกทุกบรรทัด');
+  const peekAll = await page.evaluate(() => {
+    STATE.period = '2026-07';
+    const out = { n: 0, bad: [] };
+    const chk = (label) => { out.n++; const c = document.querySelector('#peek .pk-chk'); if (!c || c.className.indexOf('ok') < 0) out.bad.push(label); };
+    STATE.screen = 'tb'; render(); [...document.querySelectorAll('#main tbody tr.row-link')].forEach((tr, i) => { tr.click(); chk('tb' + i); });
+    STATE.screen = 'bs'; render(); [...document.querySelectorAll('#main tr.peekable')].forEach((tr, i) => { tr.click(); chk('bs' + i); });
+    STATE.screen = 'pl'; render(); [...document.querySelectorAll('#main td.peekable')].forEach((td, i) => { td.click(); chk('pl' + i); });
+    ['ar', 'ap'].forEach((k) => { STATE.screen = k; render(); [...document.querySelectorAll('#main tbody tr.row-link')].forEach((tr, i) => { tr.click(); chk(k + i); }); });
+    closePeek();
+    return out;
+  });
+  ok('★ ทุกตัวเลขในงบทดลอง งบการเงิน และอายุหนี้ เจาะดูได้ และผลรวมรายการตรงกับตัวเลขที่คลิกทุกบรรทัด', peekAll.n > 50 && !peekAll.bad.length,
+    peekAll.n + ' จุด' + (peekAll.bad.length ? ' ไม่ตรง ' + peekAll.bad.join(',') : ''));
+  await page.evaluate(() => { STATE.screen = 'bs'; render(); });
+  await page.click('#main tr.peekable >> nth=1');
+  await page.click('#peek .row-link >> nth=0');
+  const deep = await page.evaluate(() => ({ back: !!document.querySelector('#peek [data-act="peekback"]'), ledger: !!document.querySelector('#peek [data-act^="peekgo:drill:"]') }));
+  ok('เจาะจากบรรทัดในงบลงไปถึงรายการรายบัญชีได้ และย้อนกลับได้', deep.back && deep.ledger);
+  await page.click('#peek [data-act^="peekgo:drill:"]');
+  ok('ปุ่มเปิดบัญชีแยกประเภทเต็ม พาไปหน้าแยกประเภทและปิดแผง', await page.evaluate(() => STATE.screen === 'ledger' && !document.getElementById('peek').classList.contains('show')));
+
   ok('ไม่มีข้อผิดพลาดในคอนโซลเลย', errors.length === 0, errors.slice(0, 3).join(' | '));
 
   await page.setViewportSize({ width: 1440, height: 950 });

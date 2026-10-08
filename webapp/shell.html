@@ -287,6 +287,19 @@ select.search{padding-left:12px; background-image:none}
 
 /* ---------- ตาราง ---------- */
 .scroll{overflow-x:auto}
+/* ตารางยาว: เลื่อนภายในกรอบ หัวตารางและบรรทัดรวมติดอยู่เสมอ */
+.scroll.tall{max-height:min(68vh,760px); overflow:auto; overscroll-behavior:contain}
+.scroll.tall thead th{position:sticky; top:0; z-index:2; box-shadow:0 1px 0 var(--rule)}
+.scroll.tall tfoot td{position:sticky; bottom:0; z-index:2; box-shadow:0 -1px 0 var(--rule)}
+/* ความหนาแน่น 3 ระดับ */
+:root[data-density="compact"] td{padding:5px 10px; line-height:1.35}
+:root[data-density="compact"] th{padding:6px 10px}
+:root[data-density="compact"] tfoot td{padding:6px 10px}
+:root[data-density="compact"] table{font-size:13px}
+:root[data-density="comfy"] td{padding:13px 14px}
+:root[data-density="comfy"] th{padding:11px 14px}
+:root[data-density="comfy"] tfoot td{padding:13px 14px}
+:root[data-density="comfy"] table{font-size:14px}
 table{width:100%; border-collapse:collapse; font-size:13.5px}
 th{
   text-align:left; font-weight:600; color:var(--muted); font-size:12px; letter-spacing:.01em;
@@ -543,6 +556,42 @@ td select{font:inherit; font-size:13px; height:32px; padding:0 8px; border:1px s
 .cmdk-empty{padding:28px; text-align:center; color:var(--muted); font-size:13.5px}
 
 /* ---------- เมนูสร้างเอกสาร ---------- */
+/* แผงเจาะดูตัวเลข */
+#peek{position:fixed; top:0; right:0; bottom:0; z-index:70; display:none; width:min(640px,100vw)}
+#peek.show{display:block}
+.pk-box{height:100%; display:flex; flex-direction:column; background:var(--panel); border-left:1px solid var(--rule); box-shadow:var(--shadow-3)}
+.pk-h{display:flex; align-items:flex-start; gap:8px; padding:14px 16px; border-bottom:1px solid var(--rule)}
+.pk-h h3{margin:0; font-size:16px; font-weight:600}
+.pk-t{min-width:0}
+.pk-chk{margin:12px 16px 0; padding:9px 12px; border-radius:var(--radius-sm); font-size:13px}
+.pk-chk.ok{background:var(--good-w); color:var(--good)} .pk-chk.bad{background:var(--neg-w); color:var(--neg)}
+.pk-b{flex:1; overflow:auto; padding:12px 0 0}
+.pk-b .scroll{overflow:visible; max-height:none}
+.pk-b .scroll.tall thead th{top:0}
+.pk-kv{margin:0 16px 10px; border:1px solid var(--rule-2); border-radius:var(--radius-sm)}
+.pk-b .note{margin:0 16px 10px}
+.pk-f{padding:12px 16px; border-top:1px solid var(--rule); display:flex; gap:8px; justify-content:flex-end}
+td.peekable,tr.peekable td.num{cursor:pointer}
+td.peekable:hover,tr.peekable:hover td.num{color:var(--accent); text-decoration:underline; text-underline-offset:3px}
+#rowMenu{position:fixed; z-index:90; display:none; min-width:220px; max-width:300px; background:var(--panel);
+  border:1px solid var(--rule); border-radius:var(--radius); box-shadow:var(--shadow-3); padding:6px}
+#rowMenu.show{display:block}
+.rm-h{font-family:var(--mono); font-size:12px; color:var(--faint); padding:4px 10px 6px; border-bottom:1px solid var(--rule-2); margin-bottom:4px}
+.rm-i{display:flex; align-items:center; gap:9px; width:100%; text-align:left; font:inherit; font-size:13.5px; color:var(--ink);
+  background:none; border:0; padding:7px 10px; border-radius:var(--radius-sm); cursor:pointer}
+.rm-i svg.i{width:16px; height:16px; color:var(--muted)}
+.rm-i:hover,.rm-i:focus{background:var(--accent-w); outline:none}
+.rm-i.danger{color:var(--neg)} .rm-i.danger svg.i{color:var(--neg)}
+.rm-i.danger:hover,.rm-i.danger:focus{background:var(--neg-w)}
+.chips{display:flex; flex-wrap:wrap; gap:6px}
+.chip-n{margin-left:6px; font-size:11px; color:var(--faint); font-variant-numeric:tabular-nums}
+.chip.on .chip-n{color:inherit; opacity:.8}
+.view-chip{display:inline-flex; align-items:center}
+.view-chip .chip{border-top-right-radius:0; border-bottom-right-radius:0; gap:5px; display:inline-flex; align-items:center}
+.view-chip .chip svg.i{width:13px; height:13px}
+.view-x{border:1px solid var(--rule); border-left:0; background:var(--panel); color:var(--muted); height:28px; padding:0 8px;
+  border-radius:0 999px 999px 0; cursor:pointer; font:inherit}
+.view-x:hover{color:var(--neg)}
 #pop{position:fixed; z-index:85; display:none}
 #pop.show{display:block}
 .pop-box{background:var(--panel); border:1px solid var(--rule); border-radius:var(--radius-lg); box-shadow:var(--shadow-3);
@@ -646,7 +695,9 @@ td select{font:inherit; font-size:13px; height:32px; padding:0 8px; border:1px s
 @page{size:A4; margin:0}
 @media print{
   html,body{background:#fff !important}
-  .side,.top,.ctx,.card-h .btn,.card-h .chip,.card-h .ghost,.filters,#toast,#modal,#tip,#cmdk,#pop{display:none !important}
+  .side,.top,.ctx,.card-h .btn,.card-h .chip,.card-h .ghost,.filters,#toast,#modal,#tip,#cmdk,#pop,#rowMenu,#peek{display:none !important}
+  .scroll.tall{max-height:none; overflow:visible}
+  .scroll.tall thead th,.scroll.tall tfoot td{position:static; box-shadow:none}
   .app{display:block}
   #main{padding:12mm; max-width:none}
   .card{border:none; box-shadow:none; margin-bottom:12px; break-inside:avoid}
@@ -678,6 +729,7 @@ td select{font:inherit; font-size:13px; height:32px; padding:0 8px; border:1px s
       <button class="top-btn primary" id="newBtn" data-act="pop:new" aria-haspopup="true"></button>
       <span id="syncTag" class="sync-tag" role="status" aria-live="polite"></span>
       <label class="periodwrap" id="periodWrap"><span class="pw-label">งวดบัญชี</span><select id="periodSel" aria-label="เลือกงวดบัญชี"></select></label>
+      <button class="icon-btn" id="densityBtn" data-act="density" aria-label="สลับความหนาแน่นของตาราง"></button>
       <button class="icon-btn" id="themeBtn" data-act="theme" aria-label="สลับโหมดสว่างและมืด"></button>
     </header>
     <main id="main"></main>
@@ -688,6 +740,8 @@ td select{font:inherit; font-size:13px; height:32px; padding:0 8px; border:1px s
 <div id="modal"></div>
 <div id="cmdk" role="dialog" aria-modal="true" aria-label="ค้นหาและสั่งงาน"></div>
 <div id="pop"></div>
+<div id="rowMenu" role="menu" aria-label="คำสั่งของเอกสาร"></div>
+<div id="peek"></div>
 <div id="printArea" aria-label="ตัวอย่างก่อนพิมพ์"></div>
 
 <script>

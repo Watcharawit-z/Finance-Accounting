@@ -1221,12 +1221,20 @@ function dispatch(act) {
   const [head, ...rest] = act.split(':');
   const arg = rest.join(':');
 
+  if (peekDispatch(head, arg, rest)) return;
   if (head === 'go')      { STATE.screen = arg; STATE.sel = null; STATE.filter = ''; render(); return; }
   if (head === 'cmdk')    { openCmdk(''); return; }
   if (head === 'cmdkgo')  { cmdkRun(Number(arg)); return; }
   if (head === 'pop')     { if (!closePop()) openPop(document.getElementById('newBtn')); return; }
   if (head === 'popgo')   { closePop(); dispatch(arg); return; }
   if (head === 'theme')   { toggleTheme(); return; }
+  if (head === 'density') { if (arg) setDensity(arg); else cycleDensity(); return; }
+  if (head === 'chip')    { STATE.chip[rest[0]] = rest[1]; render(); return; }
+  if (head === 'sview')   { openView(arg); return; }
+  if (head === 'sviewdel') { deleteView(arg); return; }
+  if (head === 'viewsave') { modalSaveView(); return; }
+  if (head === 'rowgo')   { closeRowMenu(); dispatch(arg); return; }
+  if (head === 'copy')    { copyText(arg); return; }
   if (head === 'printdoc') { printDoc(rest[0], rest.slice(1).join(':')); return; }
   if (head === 'printgo') { printNow(); return; }
   if (head === 'printclose') { closePrint(); return; }
@@ -1845,7 +1853,10 @@ function runImportPackage(pkg) {
 /* ---------- เริ่มระบบ ---------- */
 async function boot() {
   applyTheme(lsGet(THEME_KEY));
+  applyDensity();
   bindEvents();
+  bindTableEvents();
+  bindPeekEvents();
   const onServer = await syncConfig();
 
   if (onServer) {

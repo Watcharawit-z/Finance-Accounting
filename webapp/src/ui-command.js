@@ -94,8 +94,13 @@ function cmdkSources(q) {
   const cmds = [
     { icon: themeNow() === 'dark' ? 'sun' : 'moon', t:'สลับโหมดสว่าง / มืด', h:'การแสดงผล', act:'theme' },
     { icon:'printer', t:'พิมพ์หน้านี้', h:'รายงานบนจอ', act:'print' },
-  ].filter((c) => has(c.t, c.h));
-  if (n) add('คำสั่ง', cmds, 2);
+  ].concat(DENSITY.map((d) => ({ icon:'rows', t:'ตาราง: ' + d[1], h:'ความหนาแน่นของตาราง', act:'density:' + d[0] })))
+   .filter((c) => has(c.t, c.h));
+  if (n) add('คำสั่ง', cmds, 5);
+
+  /* มุมมองที่บันทึกไว้ */
+  add('มุมมองที่บันทึกไว้', savedViews().filter((v) => has(v.name, viewLabel(v)))
+    .map((v) => ({ icon:'bookmark', t: v.name, h: viewLabel(v), act:'sview:' + v.id })), n ? 5 : 4);
 
   if (n.length < 2) return out;
 
@@ -103,15 +108,15 @@ function cmdkSources(q) {
   const DOCS = [
     ['invoice', 'ใบกำกับภาษี', (d) => 'open:invoices:' + d.no, 'sale'],
     ['billingNote', 'ใบวางบิล', (d) => 'open:billingnotes:' + d.no, 'sale'],
-    ['receipt', 'ใบเสร็จรับเงิน', (d) => 'printdoc:receipt:' + d.no, 'sale'],
-    ['creditNote', 'ใบลดหนี้', (d) => 'printdoc:creditNote:' + d.no, 'sale'],
-    ['debitNote', 'ใบเพิ่มหนี้', (d) => 'printdoc:debitNote:' + d.no, 'sale'],
+    ['receipt', 'ใบเสร็จรับเงิน', (d) => 'open:receipts:' + d.no, 'sale'],
+    ['creditNote', 'ใบลดหนี้', (d) => 'open:creditnotes:' + d.no, 'sale'],
+    ['debitNote', 'ใบเพิ่มหนี้', (d) => 'open:debitnotes:' + d.no, 'sale'],
     ['quotation', 'ใบเสนอราคา', (d) => 'open:quotations:' + d.no, 'sale'],
     ['salesOrder', 'ใบสั่งขาย', (d) => 'open:salesorders:' + d.no, 'sale'],
     ['purchaseOrder', 'ใบสั่งซื้อ', (d) => 'open:purchaseorders:' + d.no, 'buy'],
     ['goodsReceipt', 'ใบรับสินค้า', (d) => 'open:goodsreceipts:' + d.no, 'buy'],
     ['bill', 'ตั้งหนี้', (d) => 'open:bills:' + d.no, 'buy'],
-    ['payment', 'ใบสำคัญจ่าย', (d) => 'printdoc:payment:' + d.no, 'buy'],
+    ['payment', 'ใบสำคัญจ่าย', (d) => 'open:payments:' + d.no, 'buy'],
     ['expense', 'ค่าใช้จ่าย', (d) => 'open:expenses:' + d.no, 'receipt'],
     ['whtCert', '50 ทวิ', (d) => 'open:whtcert:' + d.no, 'receipt'],
     ['paymentBatch', 'ใบเตรียมจ่าย', (d) => 'open:paymentprep:' + d.no, 'receipt'],

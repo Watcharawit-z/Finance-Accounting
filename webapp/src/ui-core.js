@@ -41,7 +41,8 @@ function tbl(o) {
     return '<div class="empty">' + esc(o.empty || 'ยังไม่มีข้อมูลในมุมมองนี้')
       + (o.emptyAction ? '<div style="margin-top:12px">' + o.emptyAction + '</div>' : '') + '</div>';
   }
-  let h = '<div class="scroll"><table><thead><tr>';
+  /* ตารางยาว: หัวตารางและบรรทัดรวมติดขอบกรอบเสมอ เลื่อนดูกลางตารางก็ยังเห็นชื่อคอลัมน์และยอดรวม */
+  let h = '<div class="scroll' + (o.rows.length > 12 ? ' tall' : '') + '"><table><thead><tr>';
   o.cols.forEach((c) => { h += '<th class="' + (c.a || 'l') + '">' + esc(c.t) + '</th>'; });
   h += '</tr></thead><tbody>';
   o.rows.forEach(function (r, i) {
@@ -320,6 +321,10 @@ const ICON_PATHS = {
   arrow: '<path d="M5 12h14M13 6l6 6-6 6"/>',
   user: '<circle cx="12" cy="8" r="4"/><path d="M4.5 21a7.5 7.5 0 0 1 15 0"/>',
   hash: '<path d="M5 9h14M5 15h14M10 4 8 20M16 4l-2 16"/>',
+  bookmark: '<path d="M6.5 3.5h11v17l-5.5-3.8-5.5 3.8z"/>',
+  rows: '<path d="M4 6h16M4 12h16M4 18h16"/>',
+  rowsTight: '<path d="M4 5h16M4 9.5h16M4 14h16M4 18.5h16"/>',
+  rowsLoose: '<path d="M4 7h16M4 17h16"/>',
   cash: '<rect x="2.5" y="6" width="19" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/><path d="M6 12h.01M18 12h.01"/>',
   trend: '<path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/>',
   check: '<circle cx="12" cy="12" r="9"/><path d="m8 12.5 2.5 2.5L16 9.5"/>',
@@ -550,6 +555,12 @@ function renderTopTools() {
   document.getElementById('cmdBtn').innerHTML = icon('search')
     + '<span>ค้นหาเอกสาร ลูกค้า บัญชี หรือคำสั่ง…</span><kbd>' + (mac ? '⌘K' : 'Ctrl K') + '</kbd>';
   document.getElementById('newBtn').innerHTML = icon('plus') + '<span class="lbl">สร้างเอกสาร</span>';
+  const db = document.getElementById('densityBtn');
+  if (db) {
+    const dn = densityNow();
+    db.innerHTML = icon(dn === 'compact' ? 'rowsTight' : dn === 'comfy' ? 'rowsLoose' : 'rows');
+    db.title = 'ความหนาแน่นของตาราง: ' + DENSITY.find((x) => x[0] === dn)[1] + ' (กดเพื่อสลับ)';
+  }
   const dark = themeNow() === 'dark';
   const tb = document.getElementById('themeBtn');
   tb.innerHTML = icon(dark ? 'sun' : 'moon');
@@ -559,6 +570,7 @@ function renderTopTools() {
 }
 
 function render() {
+  PEEK.reg.length = 0;      // ตัวเลขที่เจาะดูได้ ลงทะเบียนใหม่ทุกครั้งที่วาดหน้า
   /* ★ ตอนที่ยังใส่รหัสผ่านไม่ผ่าน ยังไม่มีข้อมูลบริษัทให้วาดแถบบนและเมนู
      ต้องออกก่อนแตะ DB.company ไม่งั้นหน้าจอขาวทั้งหน้า */
   if (SYNC.status === 'locked') {
