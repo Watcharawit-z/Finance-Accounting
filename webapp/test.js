@@ -839,6 +839,168 @@ console.log('\n=== 7.13 ยกเลิกเอกสาร — กลับท
     && D.entries.every((e) => e.status === 'posted' || e.status === 'reversed'));
 }
 
+console.log('\n=== 7.14 ตัวเลขต้องไม่พลาด — กรณีจากการตรวจสอบเชิงลึก ===');
+{
+  /* บริษัทแยกต่างหาก ไม่กระทบชุดทดสอบอื่น */
+  const A = new Function(src + '\nreturn {DB,buildSeed,issueInvoice,receivePayment,issueCreditNote,issueDebitNote,refundCustomer,' +
+    'recordBill,payBill,recordExpense,fileVat,fileWht,runDepreciation,voidDocument,reconciliationChecks,aging,balBySub,' +
+    'trialBalance,M,fmt,mulQty,mulDiv,invOutstanding,creditableBase,estimateBillWht,saveItem,createPaymentBatch,' +
+    'savePartner,openNextFiscalYear,unM};')();
+  A.buildSeed();
+  const X = A.DB, Mx = A.M;
+  const recOk = (d) => { const r = A.reconciliationChecks(d || '2026-12-31'); return r.allPassed ? '' : r.checks.filter((c) => !c.ok).map((c) => c.label).join(' · '); };
+  const cust = X.partners.find((p) => p.kind === 'customer' && p.taxId && p.address);
+  const ven = X.partners.find((p) => p.kind === 'vendor' && p.entityType !== 'individual' && p.taxId);
+  const gl = (sub, to, from) => A.balBySub([sub], to || '2026-12-31', from);
+
+  // 1) e-Withholding Tax ไม่ค้างในบัญชีภาษีหัก ณ ที่จ่ายค้างนำส่ง
+  const w0 = gl('wht_payable_pnd53'), b0 = gl('bank');
+  const rb = A.recordBill({ partnerCode: ven.code, date:'2026-08-05', vendorNo:'AUD-EWHT-1',
+    lines:[{ desc:'ค่าเช่าโกดัง', qty:1, price:'10000', expenseSub:'admin_expense' }], whtCode:'WHT_RENT' });
+  const ep = A.payBill({ date:'2026-08-06', billNo: rb.no, channel:'e_wht' });
+  ok('★ จ่ายผ่าน e-WHT ภาษีหัก ณ ที่จ่ายไม่ค้างในบัญชีค้างนำส่ง (ธนาคารนำส่งแทน)', gl('wht_payable_pnd53') === w0 && ep.wht === Mx('100'),
+    'หัก ' + A.fmt(ep.wht) + ' · ค้างนำส่งเท่าเดิม ' + A.fmt(-gl('wht_payable_pnd53')));
+  ok('★ เงินฝากธนาคารลดเต็มจำนวน (สุทธิให้ผู้ขาย + ภาษีที่ธนาคารนำส่ง)', b0 - gl('bank') === rb.total, A.fmt(b0 - gl('bank')));
+  ok('ทะเบียนภาษียังบันทึกว่าเป็นรายการ e-WHT ไว้ตรวจสอบ', X.taxTx.some((t) => t.docNo === ep.no && t.channel === 'e_wht' && t.tax === Mx('100')));
+  const ew0 = gl('wht_payable_pnd3');
+  const exE = A.recordExpense({ partnerCode: ven.code, date:'2026-08-06', method:'transfer', channel:'e_wht',
+    lines:[{ desc:'ค่าโฆษณาออนไลน์', qty:1, price:'20000', acc:'5321', taxCode:'EXEMPT' }], whtCode:'WHT_ADVERT' });
+  ok('ค่าใช้จ่ายจ่ายผ่าน e-WHT ก็ไม่ค้างในบัญชีค้างนำส่ง และใช้อัตรา e-WHT 1%', gl('wht_payable_pnd53') === w0 && gl('wht_payable_pnd3') === ew0 && exE.wht === Mx('200'), A.fmt(exE.wht));
+
+  // 2) ภ.พ.30 เดือนที่ภาษีขายเท่าภาษีซื้อ
+  const ci = A.issueInvoice({ partnerCode: cust.code, date:'2026-08-10', lines:[{ desc:'ค่าบริการ', qty:1, price:'1000', taxCode:'VAT7' }] });
+  A.recordBill({ partnerCode: ven.code, date:'2026-08-11', vendorNo:'AUD-VAT-1', lines:[{ desc:'ค่าวัสดุ', qty:1, price:'1000', expenseSub:'admin_expense' }] });
+  // ภาษีซื้อรวมของเดือนสิงหาคมต้องเท่าภาษีขาย จึงเอาบิลค่าเช่าที่มีภาษีออกจากการคำนวณ — ค่าเช่าในข้อ 1 ไม่มีภาษี (ไม่ระบุ taxCode = VAT7)
+  const augOut = X.taxTx.filter((t) => t.kind === 'vat_output' && t.period === '2026-08' && !t.void).reduce((a, t) => a + t.tax, 0);
+  const augIn = X.taxTx.filter((t) => t.kind === 'vat_input' && t.period === '2026-08' && !t.void).reduce((a, t) => a + t.tax, 0);
+  const f8 = A.fileVat('2026-08');
+  ok('★ ยื่น ภ.พ.30 แล้วบัญชีภาษีขายและภาษีซื้อของเดือนเป็นศูนย์ทั้งคู่', gl('output_vat', '2026-08-31', '2026-08-01') === 0
+    && gl('input_vat', '2026-08-31', '2026-08-01') === 0 && !!f8.entryNo, 'ขาย ' + A.fmt(augOut) + ' ซื้อ ' + A.fmt(augIn));
+
+  // 3) เดือนที่มีแต่ใบลดหนี้
+  const cn9 = A.issueCreditNote({ date:'2026-09-03', invoiceNo: ci.no, base:'100', reason:'PRICE_REDUCE' });
+  let f9 = null; try { f9 = A.fileVat('2026-09'); } catch (e) { f9 = e; }
+  ok('★ เดือนที่มีแต่ใบลดหนี้ ยื่น ภ.พ.30 ได้ ภาษีที่ชำระเกินยกไปเป็นภาษีขอคืน', f9 && f9.payable === -cn9.vat
+    && gl('output_vat', '2026-09-30', '2026-09-01') === 0 && gl('vat_receivable', '2026-09-30', '2026-09-01') === cn9.vat,
+    f9 && f9.message ? f9.message : A.fmt(f9.payable));
+
+  // 4) ค่าเสื่อมในงวดที่ปิด ต้องไม่ขยับทะเบียนทรัพย์สิน
+  const accum0 = X.assets.map((a) => a.accumBook).join(',');
+  const p10 = X.periods.find((p) => p.code === '2026-10'); p10.status = 'closed';
+  throws('ตั้งค่าเสื่อมในงวดที่ปิด', () => A.runDepreciation('2026-10'), 'PERIOD_CLOSED');
+  ok('★ ตั้งค่าเสื่อมไม่สำเร็จแล้วค่าเสื่อมสะสมของทรัพย์สินไม่ขยับเลย', X.assets.map((a) => a.accumBook).join(',') === accum0);
+  p10.status = 'open';
+
+  // 5) ลดหนี้หลังรับเงินครบ → ลูกค้ามีเครดิต → คืนเงิน
+  const i5 = A.issueInvoice({ partnerCode: cust.code, date:'2026-08-12', lines:[{ desc:'ค่าบริการติดตั้ง', qty:1, price:'1000', taxCode:'VAT7' }] });
+  A.receivePayment({ date:'2026-08-13', invoiceNo: i5.no });
+  const c5 = A.issueCreditNote({ date:'2026-08-14', invoiceNo: i5.no, base:'1000', reason:'SERVICE_INCOMPLETE' });
+  ok('★ ลดหนี้หลังรับเงินครบ ลูกค้ามียอดเครดิต สถานะบอกว่ารอคืนเงิน', A.invOutstanding(i5) === -c5.total && i5.status === 'credit_balance');
+  const ag = A.aging('ar', '2026-12-31').totals.total, arGl = gl('trade_receivable');
+  ok('★ รายงานอายุลูกหนี้รวมยอดเครดิตด้วย ยอดรวมเท่าบัญชีคุมลูกหนี้', ag === arGl, A.fmt(ag) + ' vs ' + A.fmt(arGl));
+  const rf = A.refundCustomer({ date:'2026-08-15', invoiceNo: i5.no });
+  ok('★ คืนเงินลูกค้าแล้วยอดค้างเป็นศูนย์ ลูกหนี้ยังตรงบัญชีคุม', A.invOutstanding(i5) === 0 && i5.status === 'paid' && recOk() === '', recOk());
+  throws('ยกเลิกใบลดหนี้ที่คืนเงินลูกค้าไปแล้วไม่ได้', () => A.voidDocument('creditNote', c5.no, 'ทดสอบยกเลิกใบลดหนี้'), 'VOID_HAS_DEPENDENTS');
+  A.voidDocument('customerRefund', rf.no, 'คืนเงินซ้ำ ทดสอบ');
+  ok('ยกเลิกใบคืนเงิน เครดิตของลูกค้ากลับมา', A.invOutstanding(i5) === -c5.total);
+  throws('คืนเงินเกินเครดิต', () => A.refundCustomer({ date:'2026-08-15', invoiceNo: i5.no, amount:'5000' }), 'REFUND_EXCEEDS');
+
+  // 6) ภาษีของใบลดหนี้/เพิ่มหนี้ตามอัตราของรายการเดิม
+  const z = A.issueInvoice({ partnerCode: cust.code, date:'2026-08-16', lines:[{ desc:'ส่งออก', qty:1, price:'10000', taxCode:'VAT0' }] });
+  const dz = A.issueDebitNote({ date:'2026-08-17', invoiceNo: z.no, base:'1000', reason:'GOODS_UNDERPRICED' });
+  const dzt = X.taxTx.find((t) => t.docNo === dz.no);
+  ok('★ เพิ่มหนี้ใบกำกับอัตรา 0% ไม่มีภาษี และยอดเข้าช่องอัตรา 0%', dz.vat === 0 && dzt.zero === Mx('1000') && dzt.base === 0);
+  const mix = A.issueInvoice({ partnerCode: cust.code, date:'2026-08-16', lines:[
+    { desc:'สินค้าส่งออก', qty:1, price:'1000', taxCode:'VAT0' }, { desc:'ค่าบริการในประเทศ', qty:1, price:'1000', taxCode:'VAT7' }] });
+  throws('★ ใบกำกับหลายอัตรา ต้องเลือกว่าลดหนี้รายการอัตราใด', () => A.issueCreditNote({ date:'2026-08-18', invoiceNo: mix.no, base:'400', reason:'PRICE_REDUCE' }), 'NOTE_TAX_CODE_REQUIRED');
+  const cz = A.issueCreditNote({ date:'2026-08-18', invoiceNo: mix.no, base:'400', reason:'PRICE_REDUCE', taxCode:'VAT0' });
+  const czt = X.taxTx.find((t) => t.docNo === cz.no);
+  ok('★ ลดหนี้รายการอัตรา 0% ไม่กลับภาษีขาย และลดยอดช่องอัตรา 0% ไม่ใช่ช่องอัตราปกติ', cz.vat === 0 && czt.zero === -Mx('400') && czt.base === 0);
+  ok('มูลค่าที่ลดได้แยกตามอัตรา', A.creditableBase(mix, 'VAT0') === Mx('600') && A.creditableBase(mix, 'VAT7') === Mx('1000'));
+  throws('ลดหนี้เกินมูลค่าของอัตรานั้น', () => A.issueCreditNote({ date:'2026-08-18', invoiceNo: mix.no, base:'600.01', reason:'PRICE_REDUCE', taxCode:'VAT0' }), 'CREDIT_NOTE_EXCEEDS');
+
+  // 7) ลูกค้าหัก ณ ที่จ่ายเฉพาะค่าบริการ
+  const sw = X.items.find((i) => i.type === 'stock' && i.qty >= 5);
+  const gs = A.issueInvoice({ partnerCode: cust.code, date:'2026-08-19', lines:[
+    { desc: sw.name, qty:1, price:'10000', itemCode: sw.code, taxCode:'VAT7' }, { desc:'ค่าติดตั้ง', qty:1, price:'5000', taxCode:'VAT7' }] });
+  const rg = A.receivePayment({ date:'2026-08-20', invoiceNo: gs.no, whtCode:'WHT_SERVICE' });
+  ok('★ ลูกค้าหักภาษี ณ ที่จ่ายจากค่าบริการเท่านั้น ไม่รวมค่าสินค้า', rg.whtBase === Mx('5000') && rg.wht === Mx('150'), A.fmt(rg.whtBase) + ' → ' + A.fmt(rg.wht));
+  const gs2 = A.issueInvoice({ partnerCode: cust.code, date:'2026-08-19', lines:[{ desc:'ค่าบริการ', qty:1, price:'5000', taxCode:'VAT7' }] });
+  const rg2 = A.receivePayment({ date:'2026-08-20', invoiceNo: gs2.no, whtCode:'WHT_SERVICE', whtBase:'4000' });
+  ok('ระบุฐานที่ลูกค้าหักจริงตาม 50 ทวิ ที่ได้รับได้', rg2.wht === Mx('120'));
+
+  // 8) สัดส่วนฐานภาษีต้องไม่คลาดสตางค์
+  const fr = A.issueInvoice({ partnerCode: cust.code, date:'2026-08-21', lines:[
+    { desc:'ค่าบริการ ก', qty:1, price:'903.17', taxCode:'VAT7' }, { desc:'ค่าบริการ ข', qty:1, price:'2013.65', taxCode:'EXEMPT' }] });
+  const r8 = A.receivePayment({ date:'2026-08-22', invoiceNo: fr.no, amount:'796.39', whtCode:'WHT_SERVICE' });
+  ok('★ ฐานภาษีตามสัดส่วนคำนวณแบบจำนวนเต็ม ได้ 779.50 และภาษี 23.39 (ไม่ใช่ 23.38)', r8.whtBase === Mx('779.50') && r8.wht === Mx('23.39'),
+    A.fmt(r8.whtBase) + ' → ' + A.fmt(r8.wht));
+  const r8b = A.receivePayment({ date:'2026-08-23', invoiceNo: fr.no, whtCode:'WHT_SERVICE' });
+  ok('★ รับครั้งสุดท้ายได้ฐานส่วนที่เหลือ ผลรวมฐานทุกครั้งเท่าค่าบริการเต็มพอดี', r8.whtBase + r8b.whtBase === fr.base, A.fmt(r8.whtBase + r8b.whtBase) + ' = ' + A.fmt(fr.base));
+
+  // 9) แบ่งจ่ายเพื่อเลี่ยงเกณฑ์ 1,000 บาทไม่ได้
+  const sp = A.recordBill({ partnerCode: ven.code, date:'2026-08-24', vendorNo:'AUD-SPLIT-1',
+    lines:[{ desc:'ค่าที่ปรึกษา', qty:1, price:'1500', expenseSub:'admin_expense' }], whtCode:'WHT_PROF' });
+  const s1 = A.payBill({ date:'2026-08-25', billNo: sp.no, amount:'802.50', channel:'manual' });
+  const s2 = A.payBill({ date:'2026-08-26', billNo: sp.no, channel:'manual' });
+  ok('★ แบ่งจ่ายสองงวด งวดละไม่ถึง 1,000 บาท ยังต้องหัก ณ ที่จ่ายรวม 45.00', s1.wht + s2.wht === Mx('45'), A.fmt(s1.wht) + ' + ' + A.fmt(s2.wht));
+
+  // 10) นำส่งภาษีเดือนธันวาคม
+  const dbill = A.recordBill({ partnerCode: ven.code, date:'2026-12-10', vendorNo:'AUD-DEC-1',
+    lines:[{ desc:'ค่าบริการขนส่ง', qty:1, price:'20000', expenseSub:'admin_expense' }], whtCode:'WHT_TRANSPORT' });
+  A.payBill({ date:'2026-12-15', billNo: dbill.no, channel:'manual' });
+  let fd = null; try { fd = A.fileWht('2026-12', ven.entityType === 'individual' ? 'PND3' : 'PND53'); } catch (e) { fd = e; }
+  ok('★ ยื่นภาษีหัก ณ ที่จ่ายเดือนธันวาคมได้ ระบบเปิดงวดปีถัดไปให้เพื่อบันทึกการนำส่งเดือนมกราคม',
+    fd && fd.entryNo && X.periods.some((p) => p.code === '2027-01'), fd && fd.message ? fd.message : fd.entryNo);
+
+  // 11) เศษสตางค์และตัวเลขใหญ่
+  ok('★ บรรทัดเกินร้อยล้านบาทคูณจำนวนแล้วยังถูกทุกสตางค์', A.mulQty(Mx('200000000.01'), '3') === Mx('600000000.03'));
+  ok('แปลงตัวเลขข้อความเป็นเงินโดยไม่ผ่านทศนิยมลอยตัว', Mx('123456789.1234') === 1234567891234 && Mx('1.00005') === 10001 && Mx('-0.00005') === -1);
+  const it = X.items.find((i) => i.type === 'stock' && i.qty === 0) || null;
+  const item = A.saveItem({ name:'สินค้าทดสอบเศษ', type:'stock', uom:'ชิ้น', price:'50' }).item;
+  const code = item.code;
+  A.recordBill({ partnerCode: ven.code, date:'2026-08-27', vendorNo:'AUD-STK-1', lines:[{ desc:'ซื้อ', qty:3, price:'33.3367', itemCode: code, expenseSub:'inventory' }] });
+  [1, 2, 3].forEach((k) => A.issueInvoice({ partnerCode: cust.code, date:'2026-08-28', lines:[{ desc:'ขายชิ้นที่ ' + k, qty:1, price:'50', itemCode: code, taxCode:'VAT7' }] }));
+  ok('★ ขายของหมดคลังแล้วมูลค่าคงเหลือเป็นศูนย์พอดี ไม่มีเศษสตางค์ค้าง', item.qty === 0 && item.value === 0, item.qty + ' / ' + A.fmt(item.value));
+  throws('★ ขายเกินจำนวนในคลังไม่ได้', () => A.issueInvoice({ partnerCode: cust.code, date:'2026-08-28', lines:[{ desc:'ขายเกิน', qty:1, price:'50', itemCode: code, taxCode:'VAT7' }] }), 'INSUFFICIENT_STOCK');
+  A.recordBill({ partnerCode: ven.code, date:'2026-08-27', vendorNo:'AUD-STK-2', lines:[
+    { desc:'ซื้อ ก', qty:0.1, price:'10', itemCode: code, expenseSub:'inventory' }, { desc:'ซื้อ ข', qty:0.2, price:'10', itemCode: code, expenseSub:'inventory' }] });
+  A.issueInvoice({ partnerCode: cust.code, date:'2026-08-28', lines:[{ desc:'ขาย', qty:0.3, price:'50', itemCode: code, taxCode:'VAT7' }] });
+  ok('จำนวนทศนิยม 0.1 + 0.2 − 0.3 เหลือศูนย์จริง ไม่ใช่ 5.55e-17', item.qty === 0 && item.value === 0, String(item.qty));
+
+  // 12) คำสั่งที่ล้มไม่ทำให้เลขที่ขาดช่วง
+  const seq0 = JSON.stringify(X.seq), n0 = X.entries.length;
+  throws('บรรทัดที่ปัดแล้วเป็นศูนย์ ลงบัญชีไม่ได้', () => A.issueInvoice({ partnerCode: cust.code, date:'2026-08-29', lines:[{ desc:'เล็กมาก', qty:0.001, price:'0.01', taxCode:'EXEMPT' }] }), 'ENTRY_TOO_FEW_LINES');
+  ok('★ คำสั่งที่ล้มกลางทาง เลขที่เอกสารและใบสำคัญไม่ถูกจองทิ้ง', JSON.stringify(X.seq) === seq0 && X.entries.length === n0);
+
+  // 13) ประมาณการหัก ณ ที่จ่ายของใบเตรียมจ่ายตามช่องทางจริง
+  const eb = A.recordBill({ partnerCode: ven.code, date:'2026-08-29', vendorNo:'AUD-PB-1',
+    lines:[{ desc:'ค่าบริการ', qty:1, price:'10000', expenseSub:'admin_expense' }], whtCode:'WHT_SERVICE' });
+  ok('ประมาณการหัก ณ ที่จ่ายตามช่องทาง: หักเอง 3% · e-WHT 1%', A.estimateBillWht(eb, eb.total, '2026-08-30') === Mx('300')
+    && A.estimateBillWht(eb, eb.total, '2026-08-30', 'e_wht') === Mx('100'));
+
+  // 14) รับคืนสินค้าตามใบลดหนี้ — ของกลับเข้าคลังด้วยต้นทุนเดิม
+  const st = X.items.find((i) => i.type === 'stock' && i.qty >= 10 && i.code !== code);
+  const q0 = st.qty, v0 = st.value;
+  const si = A.issueInvoice({ partnerCode: cust.code, date:'2026-08-20', lines:[{ desc: st.name, qty:4, price:'2000', itemCode: st.code, taxCode:'VAT7' }] });
+  const sold = X.docs.stockMove.find((m) => m.src === si.no).cost;
+  const rc = A.issueCreditNote({ date:'2026-08-21', invoiceNo: si.no, base:'4000', reason:'RETURN_DEFECT', returnLines:[{ itemCode: st.code, qty:2 }] });
+  ok('★ รับคืนสินค้าตามใบลดหนี้ ของกลับเข้าคลังด้วยต้นทุนเดิมครึ่งหนึ่งพอดี และกลับต้นทุนขาย', st.qty === q0 - 2 && rc.returns[0].cost * 2 === sold && !!rc.cogsEntryNo,
+    'ต้นทุนรับคืน ' + A.fmt(rc.returns[0].cost) + ' จาก ' + A.fmt(sold));
+  throws('รับคืนเกินที่ขาย', () => A.issueCreditNote({ date:'2026-08-21', invoiceNo: si.no, base:'100', reason:'RETURN_DEFECT', returnLines:[{ itemCode: st.code, qty:3 }] }), 'RETURN_EXCEEDS_SOLD');
+  const rc2 = A.issueCreditNote({ date:'2026-08-22', invoiceNo: si.no, base:'4000', reason:'RETURN_DEFECT', returnLines:[{ itemCode: st.code, qty:2 }] });
+  ok('★ รับคืนครบทุกชิ้นแล้ว สต๊อกและมูลค่ากลับเท่าก่อนขายพอดี', st.qty === q0 && st.value === v0);
+  A.voidDocument('creditNote', rc2.no, 'ทดสอบยกเลิกใบลดหนี้รับคืน');
+  ok('ยกเลิกใบลดหนี้รับคืน ของออกจากคลังอีกครั้ง', st.qty === q0 - 2);
+
+  // ภาพรวมหลังทุกกรณี
+  ok('★ หลังทุกกรณี ลูกหนี้ เจ้าหนี้ ภาษี พักรับสินค้า ตรงบัญชีคุมทุกตัว', recOk() === '', recOk());
+  const stockSum = X.items.reduce((a, i) => a + i.value, 0);
+  ok('★ มูลค่าสินค้าในทะเบียนรวมเท่าบัญชีสินค้าคงเหลือ', stockSum === gl('inventory', '2027-12-31'), A.fmt(stockSum) + ' vs ' + A.fmt(gl('inventory', '2027-12-31')));
+  const nosA = X.entries.map((e) => e.no);
+  ok('เลขที่ใบสำคัญไม่ซ้ำ', new Set(nosA).size === nosA.length);
+}
+
 console.log('\n=== 8. ปิดงวด ===');
 const chk = ctx.closeChecklist('2026-06');
 ok('รายการตรวจสอบก่อนปิดงวดครบ', chk.items.length >= 9, chk.items.length + ' ข้อ');

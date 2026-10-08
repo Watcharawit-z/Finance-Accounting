@@ -701,19 +701,42 @@ function M(v) {
   if (typeof v === 'string') {
     const t = v.trim().replace(/,/g, '');
     if (!/^-?\d*(\.\d+)?$/.test(t) || t === '' || t === '-') return 0;
-    return Math.round(parseFloat(t) * S);
+    /* แยกเลขจำนวนเต็มกับทศนิยมแล้วประกอบเป็นจำนวนเต็มเอง ไม่ผ่าน parseFloat
+       ตัวเลขหลักร้อยล้านที่มีสตางค์จะไม่ถูกปัดเพี้ยนจากทศนิยมลอยตัว */
+    const neg = t[0] === '-';
+    const parts = t.replace('-', '').split('.');
+    const frac = ((parts[1] || '') + '00000').slice(0, 5);
+    let out = Number(parts[0] || '0') * S + Number(frac.slice(0, 4));
+    if (Number(frac[4]) >= 5) out += 1;            // ปัดครึ่งขึ้นที่ตำแหน่งที่ 5
+    return neg ? -out : out;
   }
   return 0;
 }
 const divRound = (n, d) => {
   const neg = (n < 0) !== (d < 0);
   const a = Math.abs(n), b = Math.abs(d);
-  const q = Math.floor(a / b), r = a - q * b;
+  let q = Math.floor(a / b), r = a - q * b;
+  /* การหารทศนิยมลอยตัวของเลขใหญ่อาจคลาดไปหนึ่ง แก้ด้วยเศษที่คำนวณกลับเป็นจำนวนเต็ม */
+  if (r < 0) { q -= 1; r += b; } else if (r >= b) { q += 1; r -= b; }
   const out = r * 2 >= b ? q + 1 : q;
   return neg ? -out : out;
 };
-const mulQty  = (a, q) => divRound(a * M(q), S);
-const pct     = (a, rate) => divRound(a * M(rate), S * 100);
+/** a × b ÷ d ปัดครึ่งขึ้น แบบจำนวนเต็มล้วน — ผลคูณเกินช่วงที่ปลอดภัยใช้ BigInt
+    ใช้แทน round(a × (b / d)) ทุกที่ ซึ่งคลาดได้หนึ่งสตางค์เพราะสัดส่วนเป็นทศนิยมลอยตัว */
+function mulDiv(a, b, d) {
+  const p = a * b;
+  if (Number.isSafeInteger(p)) return divRound(p, d);
+  const P = BigInt(Math.round(a)) * BigInt(Math.round(b)), D = BigInt(Math.round(d));
+  const neg = (P < 0n) !== (D < 0n);
+  const A = P < 0n ? -P : P, B = D < 0n ? -D : D;
+  let q = A / B;
+  if ((A - q * B) * 2n >= B) q += 1n;
+  return Number(neg ? -q : q);
+}
+const mulQty  = (a, q) => mulDiv(a, M(q), S);
+const pct     = (a, rate) => mulDiv(a, M(rate), S * 100);
+/** จำนวนสินค้าเก็บละเอียด 3 ตำแหน่ง — บวกลบทศนิยมลอยตัวแล้วต้องปัดทุกครั้ง ไม่งั้นเหลือเศษ 5.55e-17 */
+const roundQty = (q) => Math.round(Number(q) * 1000) / 1000;
 const round2  = (a) => divRound(a, 100) * 100;
 const baseFromIncl = (incl, rate) => round2(divRound(incl * 100 * S, 100 * S + M(rate)));
 
@@ -840,7 +863,7 @@ function blankState() {
       quotation: [], salesOrder: [], invoice: [], billingNote: [], receipt: [],
       creditNote: [], debitNote: [],
       purchaseOrder: [], goodsReceipt: [], bill: [], payment: [],
-      expense: [], whtCert: [], paymentBatch: [],
+      expense: [], whtCert: [], paymentBatch: [], customerRefund: [],
       stockMove: [], payRun: [], depreciation: [], filing: [],
     },
     seq: {},             // {'invoice|2026-07': 12}
@@ -888,9 +911,13 @@ const TAX_RATES = [
   { code:'WHT_RENT',      kind:'wht', rate:'5', from:'2000-01-01', to:null, cond:{channel:'manual'}, ref:'ท.ป.4/2528 ข้อ 6', label:'ค่าเช่าอสังหาริมทรัพย์' },
   { code:'WHT_RENT',      kind:'wht', rate:'1', from:'2026-01-01', to:'2027-12-31', cond:{channel:'e_wht'}, ref:'มาตรการ e-Withholding Tax', label:'ค่าเช่าอสังหาริมทรัพย์' },
   { code:'WHT_TRANSPORT', kind:'wht', rate:'1', from:'2000-01-01', to:null, cond:{channel:'manual'}, ref:'ท.ป.4/2528 ข้อ 12', label:'ค่าขนส่ง' },
+  { code:'WHT_TRANSPORT', kind:'wht', rate:'1', from:'2026-01-01', to:'2027-12-31', cond:{channel:'e_wht'}, ref:'มาตรการ e-Withholding Tax', label:'ค่าขนส่ง' },
   { code:'WHT_ADVERT',    kind:'wht', rate:'2', from:'2000-01-01', to:null, cond:{channel:'manual'}, ref:'ท.ป.4/2528 ข้อ 10', label:'ค่าโฆษณา' },
+  { code:'WHT_ADVERT',    kind:'wht', rate:'1', from:'2026-01-01', to:'2027-12-31', cond:{channel:'e_wht'}, ref:'มาตรการ e-Withholding Tax', label:'ค่าโฆษณา' },
   { code:'WHT_PROF',      kind:'wht', rate:'3', from:'2000-01-01', to:null, cond:{channel:'manual'}, ref:'ท.ป.4/2528 ข้อ 7', label:'วิชาชีพอิสระ' },
+  { code:'WHT_PROF',      kind:'wht', rate:'1', from:'2026-01-01', to:'2027-12-31', cond:{channel:'e_wht'}, ref:'มาตรการ e-Withholding Tax', label:'วิชาชีพอิสระ' },
   { code:'WHT_CONTRACT',  kind:'wht', rate:'3', from:'2000-01-01', to:null, cond:{channel:'manual'}, ref:'ท.ป.4/2528 ข้อ 8', label:'รับเหมา' },
+  { code:'WHT_CONTRACT',  kind:'wht', rate:'1', from:'2026-01-01', to:'2027-12-31', cond:{channel:'e_wht'}, ref:'มาตรการ e-Withholding Tax', label:'รับเหมา' },
 ];
 
 const SSO_RATES = [
@@ -981,7 +1008,7 @@ function periodFor(date) {
 const SEQ_PREFIX = {
   invoice:'INV', receipt:'RC', creditNote:'CN', debitNote:'DN', quotation:'QT', salesOrder:'SO',
   purchaseOrder:'PO', bill:'AP', payment:'PV', whtCert:'WT', stockCount:'SC',
-  billingNote:'BN', goodsReceipt:'GR', expense:'EX', paymentBatch:'PB',
+  billingNote:'BN', goodsReceipt:'GR', expense:'EX', paymentBatch:'PB', customerRefund:'RF',
   je_sales:'SA', je_purchase:'PU', je_receipt:'RV', je_payment:'PY',
   je_general:'JV', je_adjustment:'JV', je_payroll:'PR', je_asset:'AS',
   je_inventory:'IV', je_opening:'OB', je_closing:'CL',
@@ -1112,10 +1139,60 @@ function post(req) {
  *   เช่น รับชำระทั้งใบวางบิล หรือจ่ายทั้งใบเตรียมจ่าย ถ้าใบที่สามล้ม
  *   ใบที่หนึ่งกับสองต้องไม่ค้างอยู่ในระบบ — จึงถ่ายสำเนาไว้ก่อนแล้วคืนกลับเมื่อพลาด
  */
+/* ---------- ทำเป็นชุดเดียว ----------
+   คำสั่งที่เขียนข้อมูลทุกตัวห่อด้วย atomically — ล้มกลางทางแล้วข้อมูลกลับเหมือนก่อนเริ่มทุกอย่าง
+   รวมถึงเลขที่เอกสารที่จองไปแล้ว ทะเบียนจึงไม่มีเลขขาดช่วงจากคำสั่งที่ล้ม
+   ตอนสร้างข้อมูลตัวอย่างทั้งชุด (TX_BULK) ถ่ายภาพครั้งเดียวที่ชั้นนอกสุด ไม่ถ่ายทุกคำสั่ง */
+let TX_BULK = 0;
+/* ถ่ายภาพแยกเป็นส่วน ๆ ตอนล้มคืนเฉพาะส่วนที่เปลี่ยนจริง — คำสั่งส่วนใหญ่ล้มที่ขั้นตรวจก่อนแตะข้อมูล
+   ถ้าคืนทั้งก้อน วัตถุทุกตัวจะถูกสร้างใหม่ ตัวแปรที่หน้าจอหรือผู้เรียกถืออยู่จะชี้ไปของเก่าที่ไม่อยู่ในระบบแล้ว */
+function txParts() {
+  const out = [];
+  Object.keys(DB).forEach(function (k) {
+    if (k === 'docs' && DB.docs && typeof DB.docs === 'object') {
+      Object.keys(DB.docs).forEach((c) => out.push([DB.docs, c]));
+    } else out.push([DB, k]);
+  });
+  return out;
+}
+function txSnapshot() {
+  return { keys: Object.keys(DB), docKeys: Object.keys(DB.docs || {}),
+    parts: txParts().map((p) => [p[0], p[1], JSON.stringify(p[0][p[1]])]) };
+}
+function txRestore(snap) {
+  Object.keys(DB).forEach((k) => { if (snap.keys.indexOf(k) < 0) delete DB[k]; });
+  Object.keys(DB.docs || {}).forEach((k) => { if (snap.docKeys.indexOf(k) < 0) delete DB.docs[k]; });
+  snap.parts.forEach(function (p) {
+    const holder = p[0], key = p[1], json = p[2];
+    const cur = holder[key];
+    if (JSON.stringify(cur) === json) return;
+    const was = json === undefined ? undefined : JSON.parse(json);
+    /* เพิ่มแถวเข้าหัวหรือท้ายอาร์เรย์อย่างเดียว — ตัดแถวที่เพิ่มออก คงวัตถุเดิมไว้ */
+    if (Array.isArray(cur) && Array.isArray(was) && cur.length > was.length) {
+      const n = cur.length - was.length;
+      if (JSON.stringify(cur.slice(n)) === json) { cur.splice(0, n); return; }
+      if (JSON.stringify(cur.slice(0, was.length)) === json) { cur.splice(was.length, n); return; }
+    }
+    holder[key] = was;
+  });
+}
 function atomically(fn) {
-  const before = JSON.stringify(DB);
+  if (TX_BULK > 0) return fn();
+  const snap = txSnapshot();
   try { return fn(); }
-  catch (e) { loadState(JSON.parse(before)); throw e; }
+  catch (e) { txRestore(snap); throw e; }
+}
+function transactional(fn) {
+  return function () { const a = arguments, t = this; return atomically(() => fn.apply(t, a)); };
+}
+function bulkTransaction(fn) {
+  return function () {
+    const a = arguments, t = this;
+    return atomically(function () {
+      TX_BULK++;
+      try { return fn.apply(t, a); } finally { TX_BULK--; }
+    });
+  };
 }
 
 /* ใบสำคัญที่เกิดจากเอกสาร ต้องยกเลิกที่ตัวเอกสาร ไม่ใช่กลับรายการที่ใบสำคัญ
@@ -1130,6 +1207,7 @@ const ENTRY_FROM = {
   payment:['ใบสำคัญจ่าย', 'เปิดใบสำคัญจ่ายแล้วกดยกเลิกเอกสาร ระบบจะยกเลิก 50 ทวิ ให้ด้วย'],
   expense:['ค่าใช้จ่าย', 'เปิดรายการค่าใช้จ่ายแล้วกดยกเลิกเอกสาร ระบบจะยกเลิก 50 ทวิ ให้ด้วย'],
   goodsReceipt:['ใบรับสินค้า', 'เปิดใบรับสินค้าแล้วกดยกเลิกเอกสาร'],
+  customerRefund:['ใบคืนเงินลูกค้า', 'เปิดใบกำกับเดิมแล้วกดยกเลิกที่ใบคืนเงิน'],
   payroll:['งวดเงินเดือน', 'ไปที่หน้าเงินเดือนแล้วกดยกเลิกงวดเงินเดือน ระบบจะตัดออกจาก ภ.ง.ด.1 ให้ด้วย'],
   depreciation:['ค่าเสื่อมราคาประจำงวด', 'ไปที่หน้าค่าเสื่อมราคาแล้วกดยกเลิกงวด ระบบจะคืนค่าเสื่อมสะสมของทรัพย์สินให้ด้วย'],
   filing:['การยื่นแบบภาษี', 'แบบที่ยื่นแล้วต้องยื่นเพิ่มเติมกับกรมสรรพากร แล้วบันทึกปรับปรุงแทน'],
@@ -1417,6 +1495,8 @@ function settledUpto(kind, docNo, asOf) {
     DB.docs.creditNote.forEach((c) => { if (live(c)) v += c.total; });
     /* ใบเพิ่มหนี้เดินกลับทาง — ทำให้ลูกหนี้ค้างมากขึ้น ไม่ใช่น้อยลง */
     DB.docs.debitNote.forEach((c) => { if (live(c)) v -= c.total; });
+    /* คืนเงินลูกค้าที่มีเครดิตเกิน ทำให้ยอดติดลบกลับขึ้นมาเป็นศูนย์ */
+    (DB.docs.customerRefund || []).forEach((r) => { if (live(r)) v -= r.amount; });
     return v;
   }
   let v = 0;
@@ -1432,7 +1512,7 @@ const outstandingAsOf = (kind, d, asOf) =>
 /* ยอดคงค้าง ณ ปัจจุบัน — เขียนไว้ที่เดียว หน้าจอและรายงานต้องเรียกตัวนี้เท่านั้น
    ไม่งั้นพอเพิ่มประเภทเอกสารใหม่ จะมีบางหน้าลืมนับแล้วตัวเลขเพี้ยนแบบหายาก */
 /* เอกสารที่ยกเลิกแล้วไม่มียอดค้าง — ใบสำคัญของมันถูกกลับรายการไปแล้ว */
-const invOutstanding = (d) => d.status === 'void' ? 0 : d.total + (d.debited || 0) - d.paid - d.credited;
+const invOutstanding = (d) => d.status === 'void' ? 0 : d.total + (d.debited || 0) + (d.refunded || 0) - d.paid - d.credited;
 const billOutstanding = (d) => d.status === 'void' ? 0 : d.total - d.paid;
 
 /* ---------- อายุหนี้ ---------- */
@@ -1443,7 +1523,8 @@ function aging(kind, asOf) {
     if (d.status === 'draft' || d.status === 'void') return;
     if (d.date > asOf) return;
     const out = outstandingAsOf(kind, d, asOf);
-    if (out <= 0) return;
+    /* ยอดติดลบ (ลูกค้าจ่ายเกิน/ได้ลดหนี้หลังจ่ายครบ) ต้องอยู่ในรายงานด้วย ไม่งั้นรวมไม่เท่าบัญชีคุม */
+    if (out === 0) return;
     const days = Math.floor((new Date(asOf) - new Date(d.due)) / 86400000);
     const b = days <= 0 ? 'notDue' : days <= 30 ? 'b30' : days <= 60 ? 'b60' : days <= 90 ? 'b90' : 'over';
     const key = d.partnerCode;
@@ -1581,7 +1662,9 @@ function assertTaxInvoiceComplete(snap, lines) {
 function syncInvStatus(inv) {
   if (inv.status === 'void' || inv.status === 'draft') return;
   const out = invOutstanding(inv);
-  if (out <= 0) inv.status = 'paid';
+  /* ลดหนี้หลังรับเงินครบ ลูกค้ามีเครดิตเกิน — ต้องคืนเงินหรือหักกับใบถัดไป */
+  if (out < 0) inv.status = 'credit_balance';
+  else if (out === 0) inv.status = 'paid';
   else if (inv.paid > 0 || inv.credited > 0) inv.status = 'partially_paid';
   else inv.status = 'issued';
 }
@@ -1803,6 +1886,7 @@ function issueInvoice(input) {
   assertTaxInvoiceComplete(snap, lines);
 
   const v = computeVat(lines, input.date);
+  assertStockAvailable(lines);
   const no = nextNo('invoice', input.date);
   const due = addDays(input.date, p.termDays || 0);
 
@@ -1828,11 +1912,13 @@ function issueInvoice(input) {
     if (!l.itemCode) return;
     const it = DB.items.find((x) => x.code === l.itemCode);
     if (!it || it.type !== 'stock') return;
-    const c = round2(mulQty(it.avgCost, l.qty));
+    const q = roundQty(l.qty);
+    /* ชิ้นสุดท้ายรับมูลค่าที่เหลือทั้งหมด — ของหมดคลังแล้วมูลค่าต้องเป็นศูนย์ ไม่เหลือเศษสตางค์ค้าง */
+    const c = q === it.qty ? it.value : round2(mulQty(it.avgCost, q));
     cogs += c;
-    it.qty -= Number(l.qty);
+    it.qty = roundQty(it.qty - q);
     it.value -= c;
-    DB.docs.stockMove.push({ date: input.date, item: it.code, dir: 'out', qty: Number(l.qty), cost: c, src: no, balance: it.qty });
+    DB.docs.stockMove.push({ date: input.date, item: it.code, dir: 'out', qty: q, cost: c, src: no, balance: it.qty });
   });
   let cogsJe = null;
   if (cogs > 0) {
@@ -1889,12 +1975,19 @@ function receivePayment(input) {
       'ยอดรับชำระ ' + fmt(gross) + ' เกินยอดคงค้าง ' + fmt(outstanding),
       'ถ้าลูกค้าจ่ายเกิน ให้บันทึกส่วนเกินเป็นเงินรับล่วงหน้าแทน');
   }
-  // ภาษีที่ลูกค้าหักไว้ คำนวณจากฐานก่อน VAT ตามสัดส่วนที่รับชำระ
-  let wht = 0, whtRate = null;
+  /* ภาษีที่ลูกค้าหักไว้ — ฐานคือค่าบริการก่อน VAT ส่วนที่รับครั้งนี้ ไม่รวมค่าสินค้า
+     ถ้าลูกค้าหักจากฐานอื่น (ตาม 50 ทวิ ที่ได้รับ) ระบุ whtBase มาแทนได้ */
+  const svcShare = receiptServiceShare(inv, gross);
+  let wht = 0, whtRate = null, whtBase = 0;
   if (input.whtCode) {
     const r = resolveRate(input.whtCode, input.date, { channel: 'manual' });
-    const ratio = gross / inv.total;
-    wht = round2(pct(round2(inv.base * ratio), r.rate));
+    const given = input.whtBase !== undefined && input.whtBase !== null && String(input.whtBase).trim() !== '';
+    whtBase = given ? M(input.whtBase) : svcShare;
+    if (whtBase < 0 || whtBase > gross) {
+      throw new DomainError('WHT_BASE_INVALID', 'ฐานภาษีที่ลูกค้าหัก ' + fmt(whtBase) + ' ต้องไม่ติดลบและไม่เกินยอดรับ ' + fmt(gross),
+        'ดูฐานภาษีจากหนังสือรับรอง 50 ทวิ ที่ลูกค้าส่งมา');
+    }
+    wht = round2(pct(whtBase, r.rate));
     whtRate = r.rate;
   }
   const net = gross - wht;
@@ -1917,7 +2010,7 @@ function receivePayment(input) {
   const doc = {
     no, date: input.date, invoiceNo: inv.no, partnerCode: inv.partnerCode,
     partnerName: inv.partnerName, method: input.method || 'transfer',
-    gross, wht, whtRate, net, entryNo: je.no, whtCertReceived: !!input.whtCode,
+    gross, wht, whtRate, whtBase, svcShare, net, entryNo: je.no, whtCertReceived: !!input.whtCode,
   };
   DB.docs.receipt.unshift(doc);
   audit('receipt', no, 'create', null, { invoice: inv.no, net: fmt(net) });
@@ -1954,15 +2047,18 @@ function issueCreditNote(input) {
   }
   const base = M(input.base);
   if (base <= 0) throw new DomainError('CREDIT_NOTE_ZERO', 'มูลค่าที่ลดต้องมากกว่าศูนย์');
-  const remaining = creditableBase(inv);
+  const code = noteTaxCode(inv, input.taxCode, 'ลดหนี้');
+  const remaining = creditableBase(inv, code);
   if (base > remaining) {
     throw new DomainError('CREDIT_NOTE_EXCEEDS',
-      'มูลค่าใบลดหนี้ ' + fmt(base) + ' เกินมูลค่าคงเหลือของใบกำกับเดิม ' + fmt(remaining) + ' บาท (ก่อนภาษี)',
+      'มูลค่าใบลดหนี้ ' + fmt(base) + ' เกินมูลค่าคงเหลือของใบกำกับเดิม ' + fmt(remaining) + ' บาท (ก่อนภาษี'
+        + (invoiceTaxCodes(inv).length > 1 ? ' เฉพาะรายการ' + TAX_CODE_LABEL[code] : '') + ')',
       'มูลค่าคงเหลือ = มูลค่าใบกำกับ + ใบเพิ่มหนี้ − ใบลดหนี้ที่ออกไปแล้ว คิดก่อนภาษีมูลค่าเพิ่ม');
   }
-  /* ภาษีในใบลดหนี้ใช้อัตราเดียวกับใบกำกับเดิม · ใบกำกับที่ไม่มีภาษี (0% / ยกเว้น) ใบลดหนี้ก็ไม่มีภาษี */
-  const vat = inv.vat ? round2(pct(base, resolveRate('VAT7', inv.date).rate)) : 0;
+  /* ภาษีในใบลดหนี้ใช้อัตราเดียวกับรายการในใบกำกับเดิม — รายการอัตรา 0% หรือยกเว้น ใบลดหนี้ก็ไม่มีภาษี */
+  const vat = code === 'VAT7' ? round2(pct(base, resolveRate('VAT7', inv.date).rate)) : 0;
   const total = base + vat;
+  const returns = creditNoteReturns(inv, input.returnLines);
   const no = nextNo('creditNote', input.date);
 
   const je = post({
@@ -1976,11 +2072,30 @@ function issueCreditNote(input) {
     ],
   });
 
+  /* รับคืนสินค้า: ของกลับเข้าคลังด้วยต้นทุนเดิมที่ตัดออกไปตอนขาย และกลับต้นทุนขายส่วนนั้น */
+  let cogsJe = null;
+  const back = returns.reduce((t, r) => t + r.cost, 0);
+  if (back > 0) {
+    cogsJe = post({
+      type: 'inventory', date: input.date, desc: 'รับคืนสินค้าตามใบลดหนี้ ' + no,
+      src: 'creditNote', srcId: no,
+      lines: [{ acc: accBySub('inventory'), dr: back }, { acc: accBySub('cogs'), cr: back }],
+    });
+    returns.forEach(function (r) {
+      const it = DB.items.find((x) => x.code === r.itemCode);
+      it.qty = roundQty(it.qty + r.qty);
+      it.value += r.cost;
+      it.avgCost = unitCost(it.value, it.qty);
+      DB.docs.stockMove.push({ date: input.date, item: it.code, dir: 'in', qty: r.qty, cost: r.cost, src: no, balance: it.qty });
+    });
+  }
+
   DB.taxTx.push({
     kind: 'vat_output', period: periodOf(input.date), date: input.date,
     docNo: no, docType: 'credit_note', refDoc: inv.no,
     partnerName: inv.partnerName, taxId: inv.snap.taxId, branch: inv.snap.branch,
-    base: -base, zero: 0, exempt: 0, tax: -vat, entryNo: je.no, filingId: null,
+    base: code === 'VAT7' ? -base : 0, zero: code === 'VAT0' ? -base : 0, exempt: code === 'EXEMPT' ? -base : 0,
+    tax: -vat, entryNo: je.no, filingId: null,
   });
 
   inv.credited += total;
@@ -1988,7 +2103,8 @@ function issueCreditNote(input) {
 
   const doc = { no, date: input.date, invoiceNo: inv.no, partnerCode: inv.partnerCode,
     partnerName: inv.partnerName, reason: input.reason, reasonText: CN_REASONS[input.reason],
-    base, vat, total, entryNo: je.no };
+    taxCode: code, base, vat, total, entryNo: je.no, cogsEntryNo: cogsJe ? cogsJe.no : null,
+    returns: returns.map((r) => ({ itemCode: r.itemCode, desc: r.desc, qty: r.qty, cost: r.cost })) };
   DB.docs.creditNote.unshift(doc);
   audit('creditNote', no, 'issue', null, { ref: inv.no, total: fmt(total), reason: CN_REASONS[input.reason] });
   return doc;
@@ -2029,8 +2145,9 @@ function issueDebitNote(input) {
   if (base <= 0) {
     throw new DomainError('DEBIT_NOTE_ZERO', 'มูลค่าที่เพิ่มต้องมากกว่าศูนย์');
   }
-  const r = resolveRate('VAT7', input.date);
-  const vat = round2(pct(base, r.rate));
+  const code = noteTaxCode(inv, input.taxCode, 'เพิ่มหนี้');
+  /* ภาษีในใบเพิ่มหนี้ตามอัตราของรายการเดิม — ใบกำกับอัตรา 0% เพิ่มหนี้แล้วก็ยังเป็น 0% */
+  const vat = code === 'VAT7' ? round2(pct(base, resolveRate('VAT7', inv.date).rate)) : 0;
   const total = base + vat;
   const no = nextNo('debitNote', input.date);
 
@@ -2049,7 +2166,8 @@ function issueDebitNote(input) {
     kind: 'vat_output', period: periodOf(input.date), date: input.date,
     docNo: no, docType: 'debit_note', refDoc: inv.no,
     partnerName: inv.partnerName, taxId: inv.snap.taxId, branch: inv.snap.branch,
-    base, zero: 0, exempt: 0, tax: vat, entryNo: je.no, filingId: null,
+    base: code === 'VAT7' ? base : 0, zero: code === 'VAT0' ? base : 0, exempt: code === 'EXEMPT' ? base : 0,
+    tax: vat, entryNo: je.no, filingId: null,
   });
 
   inv.debited = (inv.debited || 0) + total;
@@ -2057,7 +2175,7 @@ function issueDebitNote(input) {
 
   const doc = { no, date: input.date, invoiceNo: inv.no, partnerCode: inv.partnerCode,
     partnerName: inv.partnerName, reason: input.reason, reasonText: DN_REASONS[input.reason],
-    base, vat, total, entryNo: je.no };
+    taxCode: code, base, vat, total, entryNo: je.no };
   DB.docs.debitNote.unshift(doc);
   audit('debitNote', no, 'issue', null, { ref: inv.no, total: fmt(total), reason: DN_REASONS[input.reason] });
   return doc;
@@ -2251,10 +2369,10 @@ function recordBill(input) {
     const it = DB.items.find((x) => x.code === l.itemCode);
     if (!it || it.type !== 'stock') return;
     const c = round2(mulQty(M(l.price), l.qty));
-    it.qty += Number(l.qty);
+    it.qty = roundQty(it.qty + roundQty(l.qty));
     it.value += c;
-    it.avgCost = it.qty > 0 ? divRound(it.value, it.qty) : 0;
-    DB.docs.stockMove.push({ date: input.date, item: it.code, dir: 'in', qty: Number(l.qty), cost: c, src: no, balance: it.qty });
+    it.avgCost = unitCost(it.value, it.qty);
+    DB.docs.stockMove.push({ date: input.date, item: it.code, dir: 'in', qty: roundQty(l.qty), cost: c, src: no, balance: it.qty });
   });
 
   DB.taxTx.push({
@@ -2301,26 +2419,25 @@ function payBill(input) {
   if (gross > outstanding) {
     throw new DomainError('OVER_PAYMENT', 'ยอดจ่าย ' + fmt(gross) + ' เกินยอดคงค้าง ' + fmt(outstanding));
   }
-  const channel = input.channel || 'manual';
-  let wht = 0, whtRate = null, whtCode = input.whtCode || bill.whtCode;
-  const baseForWht = round2(bill.base * (gross / bill.total));
-
-  if (whtCode && baseForWht >= M('1000')) {
-    const r = resolveRate(whtCode, input.date, { channel });
-    wht = round2(pct(baseForWht, r.rate));
-    whtRate = r.rate;
-  }
+  const channel = input.channel === 'e_wht' ? 'e_wht' : 'manual';
+  const whtCode = input.whtCode || bill.whtCode;
+  const w = billWhtFor(bill, gross, input.date, channel, whtCode);
+  const wht = w.wht, whtRate = w.rate, baseForWht = w.base;
   const net = gross - wht;
   const no = nextNo('payment', input.date);
   const whtAccount = p.entityType === 'individual' ? 'wht_payable_pnd3' : 'wht_payable_pnd53';
+  const bank = input.bankAccount || accBySub('bank');
 
+  /* e-Withholding Tax: ธนาคารตัดเงินเต็มจำนวน โอนสุทธิให้ผู้รับ และนำส่งภาษีให้กรมสรรพากรเอง
+     ภาษีจึงออกจากบัญชีธนาคารพร้อมกัน ไม่ค้างเป็นภาษีหัก ณ ที่จ่ายค้างนำส่ง (แบบ ภ.ง.ด. ก็ไม่ต้องยื่น) */
   const je = post({
     type: 'payment', date: input.date,
     desc: 'จ่ายชำระ ' + p.name + ' (' + bill.no + ')',
     src: 'payment', srcId: no,
     lines: [{ acc: accBySub('trade_payable'), dr: gross, partner: p.code }]
-      .concat(wht ? [{ acc: accBySub(whtAccount), cr: wht }] : [])
-      .concat([{ acc: input.bankAccount || accBySub('bank'), cr: net }]),
+      .concat(wht && channel === 'manual' ? [{ acc: accBySub(whtAccount), cr: wht }] : [])
+      .concat([{ acc: bank, cr: net, memo: wht ? 'จ่ายผู้รับเงินสุทธิ' : null }])
+      .concat(wht && channel === 'e_wht' ? [{ acc: bank, cr: wht, memo: 'ภาษีหัก ณ ที่จ่ายที่ธนาคารนำส่งผ่าน e-Withholding Tax' }] : []),
   });
 
   bill.paid += gross;
@@ -2352,7 +2469,7 @@ function payBill(input) {
   }
 
   const doc = { no, date: input.date, billNo: bill.no, partnerCode: p.code, partnerName: p.name,
-    gross, wht, whtRate, net, channel, certNo, entryNo: je.no,
+    gross, wht, whtRate, whtBase: wht ? baseForWht : 0, baseShare: w.share, net, channel, certNo, entryNo: je.no,
     method: input.method || 'transfer' };
   DB.docs.payment.unshift(doc);
   audit('payment', no, 'create', null, { bill: bill.no, net: fmt(net), channel });
@@ -2383,13 +2500,11 @@ function runDepreciation(period) {
     const taxRemaining = taxBase - a.accumTax;
     const taxMonthly = Math.max(0, Math.min(divRound(pct(taxBase, t.rate), 12), taxRemaining));
 
-    a.accumBook += bookMonthly;
-    a.accumTax += taxMonthly;
     bookTotal += bookMonthly;
     taxTotal += taxMonthly;
     rows.push({ code: a.code, name: a.name, class: a.class, cost: a.cost,
       book: bookMonthly, tax: taxMonthly, diff: bookMonthly - taxMonthly,
-      nbvBook: a.cost - a.accumBook, nbvTax: taxBase - a.accumTax });
+      nbvBook: a.cost - a.accumBook - bookMonthly, nbvTax: taxBase - a.accumTax - taxMonthly });
   });
 
   if (bookTotal === 0) {
@@ -2402,6 +2517,12 @@ function runDepreciation(period) {
       { acc: accBySub('depreciation'), dr: bookTotal },
       { acc: accBySub('accum_depreciation'), cr: bookTotal },
     ],
+  });
+  /* ทะเบียนทรัพย์สินขยับหลังลงบัญชีสำเร็จเท่านั้น — ถ้างวดปิดอยู่ ค่าเสื่อมสะสมต้องไม่เพิ่มทั้งที่ไม่มีใบสำคัญ */
+  rows.forEach(function (r) {
+    const a = DB.assets.find((x) => x.code === r.code);
+    a.accumBook += r.book;
+    a.accumTax += r.tax;
   });
   const run = { period, date: endDate, bookTotal, taxTotal, diff: bookTotal - taxTotal, rows, entryNo: je.no };
   DB.docs.depreciation.unshift(run);
@@ -2500,19 +2621,20 @@ function fileVat(period) {
   const payable = outTax - inTax;
   const endDate = endOfMonth(period + '-01');
 
-  const je = payable !== 0 ? post({
+  /* ล้างบัญชีภาษีขายและภาษีซื้อของงวดให้เป็นศูนย์ทุกครั้งที่มียอด แม้ผลสุทธิเป็นศูนย์
+     (ภาษีขาย 70 ภาษีซื้อ 70 ต้องล้างทั้งคู่ ไม่ใช่ค้างอยู่ในงบ) และรองรับยอดติดลบ
+     (เดือนที่มีแต่ใบลดหนี้ ภาษีขายติดลบ ต้องกลับไปอยู่ฝั่งเครดิต) */
+  const signed = (acc, amt) => amt > 0 ? { acc, dr: amt } : { acc, cr: -amt };
+  const vatLines = [
+    signed(accBySub('output_vat'), outTax),
+    signed(accBySub('input_vat'), -inTax),
+    payable > 0 ? { acc: accBySub('vat_payable'), cr: payable } : { acc: accBySub('vat_receivable'), dr: -payable },
+  ].filter((l) => (l.dr || 0) !== 0 || (l.cr || 0) !== 0);
+  const je = vatLines.length ? post({
     type: 'adjustment', date: endDate,
     desc: 'ปิดภาษีมูลค่าเพิ่มงวด ' + thPeriod(period),
     src: 'filing', srcId: 'PP30|' + period,
-    lines: payable > 0 ? [
-      { acc: accBySub('output_vat'), dr: outTax },
-      { acc: accBySub('input_vat'), cr: inTax },
-      { acc: accBySub('vat_payable'), cr: payable },
-    ] : [
-      { acc: accBySub('output_vat'), dr: outTax },
-      { acc: accBySub('vat_receivable'), dr: -payable },
-      { acc: accBySub('input_vat'), cr: inTax },
-    ],
+    lines: vatLines,
   }) : null;
 
   const filing = {
@@ -2545,6 +2667,11 @@ function fileWht(period, form) {
   }
   const total = rows.reduce((s, t) => s + t.tax, 0);
   const endDate = endOfMonth(period + '-01');
+  /* นำส่งภาษีเดือนธันวาคมเกิดในเดือนมกราคมปีถัดไป — ถ้ายังไม่มีงวดปีหน้า เปิดให้ก่อน */
+  const remitDate = addDays(endDate, 7);
+  if (!DB.periods.some((x) => remitDate >= x.start && remitDate <= x.end)) {
+    openNextFiscalYear('ต้องบันทึกการนำส่ง ' + form + ' งวด ' + thPeriod(period) + ' ในเดือนถัดไป');
+  }
   const acctSub = form === 'PND1' ? 'wht_payable_pnd1' : form === 'PND3' ? 'wht_payable_pnd3' : 'wht_payable_pnd53';
 
   const je = post({
@@ -2798,9 +2925,9 @@ function issueGoodsReceipt(input) {
   });
   rows.forEach(function (r) {
     const it = DB.items.find((x) => x.code === r.itemCode);
-    it.qty += r.qty;
+    it.qty = roundQty(it.qty + r.qty);
     it.value += r.amount;
-    it.avgCost = it.qty > 0 ? divRound(it.value, it.qty) : 0;
+    it.avgCost = unitCost(it.value, it.qty);
     DB.docs.stockMove.push({ date: input.date, item: it.code, dir: 'in', qty: r.qty, cost: r.amount, src: no, balance: it.qty });
   });
 
@@ -2964,8 +3091,9 @@ function recordExpense(input) {
     src: 'expense', srcId: no,
     lines: Object.keys(debit).map((a) => ({ acc: a, dr: debit[a] }))
       .concat(claimable && v.vat ? [{ acc: accBySub('input_vat'), dr: v.vat }] : [])
-      .concat(wht ? [{ acc: accBySub(individual ? 'wht_payable_pnd3' : 'wht_payable_pnd53'), cr: wht }] : [])
-      .concat([{ acc: payFrom, cr: net }]),
+      .concat(wht && channel === 'manual' ? [{ acc: accBySub(individual ? 'wht_payable_pnd3' : 'wht_payable_pnd53'), cr: wht }] : [])
+      .concat([{ acc: payFrom, cr: net, memo: wht ? 'จ่ายผู้รับเงินสุทธิ' : null }])
+      .concat(wht && channel === 'e_wht' ? [{ acc: payFrom, cr: wht, memo: 'ภาษีหัก ณ ที่จ่ายที่ธนาคารนำส่งผ่าน e-Withholding Tax' }] : []),
   });
 
   if (v.vat > 0 || taxInvoiceNo) {
@@ -3024,11 +3152,8 @@ function paymentBatchFind(no) {
 const paymentBatchActive = (b) => b.status === 'pending_approval' || b.status === 'approved';
 
 /** ภาษีหัก ณ ที่จ่ายโดยประมาณ — สูตรเดียวกับตอนจ่ายจริง ผู้อนุมัติจะได้เห็นเงินที่ออกจริง */
-function estimateBillWht(bill, amount, date) {
-  if (!bill.whtCode) return 0;
-  const baseForWht = round2(bill.base * (amount / bill.total));
-  if (baseForWht < M('1000')) return 0;
-  return round2(pct(baseForWht, resolveRate(bill.whtCode, date, { channel: 'manual' }).rate));
+function estimateBillWht(bill, amount, date, channel) {
+  return billWhtFor(bill, amount, date, channel || 'manual', bill.whtCode).wht;
 }
 
 function createPaymentBatch(input) {
@@ -3260,6 +3385,7 @@ const VOIDABLE = {
   payment:      { label:'ใบสำคัญจ่าย', src:'payment' },
   expense:      { label:'ค่าใช้จ่าย', src:'expense' },
   goodsReceipt: { label:'ใบรับสินค้า', src:'goodsReceipt' },
+  customerRefund: { label:'ใบคืนเงินลูกค้า', src:'customerRefund' },
 };
 const liveDoc = (d) => !!d && d.status !== 'void';
 
@@ -3281,8 +3407,15 @@ function taxRowsOf(kind, d) {
 function voidBlockers(kind, d) {
   const out = [];
   const refs = (coll, key) => (DB.docs[coll] || []).filter((x) => x[key] === d.no && liveDoc(x)).map((x) => x.no);
+  /* คืนเงินลูกค้าไปแล้ว ยกเลิกใบลดหนี้หรือใบเสร็จที่ทำให้เกิดเครดิตก่อนไม่ได้ — ยอดจะกลับด้านผิดทาง */
+  if (kind === 'creditNote' || kind === 'receipt') {
+    const f = (DB.docs.customerRefund || []).filter((x) => x.invoiceNo === d.invoiceNo && liveDoc(x)).map((x) => x.no);
+    if (f.length) out.push('คืนเงินลูกค้าไปแล้วตาม ' + f.join(', ') + ' ต้องยกเลิกใบคืนเงินก่อน');
+  }
   if (kind === 'invoice') {
     const r = refs('receipt', 'invoiceNo'), c = refs('creditNote', 'invoiceNo'), n = refs('debitNote', 'invoiceNo');
+    const f = refs('customerRefund', 'invoiceNo');
+    if (f.length) out.push('มีใบคืนเงินลูกค้าอ้างถึง ' + f.join(', '));
     if (r.length) out.push('มีใบเสร็จรับเงินอ้างถึง ' + r.join(', '));
     if (c.length) out.push('มีใบลดหนี้อ้างถึง ' + c.join(', '));
     if (n.length) out.push('มีใบเพิ่มหนี้อ้างถึง ' + n.join(', '));
@@ -3298,7 +3431,7 @@ function voidBlockers(kind, d) {
   }
   if (kind === 'goodsReceipt' && d.status === 'closed') out.push('ตั้งหนี้ไปแล้ว (' + d.billNo + ') ต้องยกเลิกรายการตั้งหนี้ก่อน');
   /* ของที่รับเข้ามาถูกขายออกไปแล้ว ดึงกลับออกจากคลังไม่ได้ — ต้องขอใบลดหนี้จากผู้ขายแทน */
-  if ((kind === 'bill' && !d.grnNo) || kind === 'goodsReceipt') {
+  if ((kind === 'bill' && !d.grnNo) || kind === 'goodsReceipt' || kind === 'creditNote') {
     DB.docs.stockMove.filter((m) => m.src === d.no && m.dir === 'in').forEach(function (m) {
       const it = DB.items.find((x) => x.code === m.item);
       if (it && it.qty < m.qty) out.push(it.code + ' เหลือในคลัง ' + it.qty + ' ' + it.uom + ' น้อยกว่าที่รับเข้ามา ' + m.qty);
@@ -3350,10 +3483,12 @@ function voidPreview(kind, no) {
   if (tax.some((t) => t.kind === 'wht')) out.push('ตัดรายการออกจากแบบ ภ.ง.ด. ของงวด');
   if (d.certNo) out.push('ยกเลิกหนังสือรับรอง 50 ทวิ เลขที่ ' + d.certNo);
   if (kind === 'invoice' && d.cogsEntryNo) out.push('คืนสินค้าเข้าคลังตามที่ตัดออกไป');
-  if ((kind === 'bill' && !d.grnNo) || kind === 'goodsReceipt') {
-    if (DB.docs.stockMove.some((m) => m.src === d.no && m.dir === 'in')) out.push('นำสินค้าที่รับเข้าออกจากคลัง');
+  if ((kind === 'bill' && !d.grnNo) || kind === 'goodsReceipt' || kind === 'creditNote') {
+    if (DB.docs.stockMove.some((m) => m.src === d.no && m.dir === 'in')) {
+      out.push(kind === 'creditNote' ? 'นำสินค้าที่รับคืนออกจากคลัง และกลับต้นทุนขายส่วนนั้น' : 'นำสินค้าที่รับเข้าออกจากคลัง');
+    }
   }
-  if (kind === 'receipt' || kind === 'creditNote' || kind === 'debitNote') out.push('ยอดคงค้างของใบกำกับ ' + d.invoiceNo + ' กลับไปเหมือนก่อนออกใบนี้');
+  if (kind === 'receipt' || kind === 'creditNote' || kind === 'debitNote' || kind === 'customerRefund') out.push('ยอดคงค้างของใบกำกับ ' + d.invoiceNo + ' กลับไปเหมือนก่อนออกใบนี้');
   if (kind === 'payment') out.push('ยอดคงค้างของ ' + d.billNo + ' กลับไปเหมือนก่อนจ่าย');
   if (kind === 'bill' && d.grnNo) out.push('ใบรับสินค้า ' + d.grnNo + ' กลับไปรอตั้งหนี้');
   return out;
@@ -3364,9 +3499,9 @@ function stockBack(no, dir) {
     const it = DB.items.find((x) => x.code === m.item);
     if (!it) return;
     const sign = dir === 'out' ? 1 : -1;     // ยกเลิกการขาย = ของกลับเข้า · ยกเลิกการรับ = ของออก
-    it.qty += sign * m.qty;
+    it.qty = roundQty(it.qty + sign * m.qty);
     it.value += sign * m.cost;
-    it.avgCost = it.qty > 0 ? divRound(it.value, it.qty) : it.avgCost;
+    it.avgCost = it.qty > 0 ? unitCost(it.value, it.qty) : it.avgCost;
     DB.docs.stockMove.push({ date: m.date, item: it.code, dir: dir === 'out' ? 'in' : 'out', qty: m.qty, cost: m.cost,
       src: no + ' (ยกเลิก)', balance: it.qty });
   });
@@ -3403,7 +3538,8 @@ function voidDocument(kind, no, reason) {
     const inv = d.invoiceNo ? DB.docs.invoice.find((x) => x.no === d.invoiceNo) : null;
     if (kind === 'invoice') { stockBack(no, 'out'); reopenTradeDoc('salesOrder', no); }
     if (kind === 'receipt') { inv.paid -= d.gross; syncInvStatus(inv); }
-    if (kind === 'creditNote') { inv.credited -= d.total; syncInvStatus(inv); }
+    if (kind === 'customerRefund') { inv.refunded = (inv.refunded || 0) - d.amount; syncInvStatus(inv); }
+    if (kind === 'creditNote') { inv.credited -= d.total; stockBack(no, 'in'); syncInvStatus(inv); }
     if (kind === 'debitNote') { inv.debited = (inv.debited || 0) - d.total; syncInvStatus(inv); }
     if (kind === 'bill') {
       if (d.grnNo) {
@@ -3439,12 +3575,69 @@ function reopenGrnOnPo(g) {
 
 /** มูลค่าก่อนภาษีที่ยังลดหนี้ได้ = ใบกำกับ + ใบเพิ่มหนี้ − ใบลดหนี้ที่ยังไม่ยกเลิก
     ต้องคิดจากฐานก่อนภาษีของแต่ละใบ — inv.credited เก็บยอดรวมภาษี เอามาลบกับฐานตรง ๆ ไม่ได้ */
-function creditableBase(inv) {
-  let v = inv.base;
-  DB.docs.debitNote.forEach((d) => { if (d.invoiceNo === inv.no && liveDoc(d)) v += d.base; });
-  DB.docs.creditNote.forEach((c) => { if (c.invoiceNo === inv.no && liveDoc(c)) v -= c.base; });
+function creditableBase(inv, code) {
+  let v = inv.lines.reduce((s, l) => s + (!code || (l.taxCode || 'VAT7') === code ? l.amount : 0), 0);
+  const mine = (d) => d.invoiceNo === inv.no && liveDoc(d) && (!code || noteCodeOf(d, inv) === code);
+  DB.docs.debitNote.forEach((d) => { if (mine(d)) v += d.base; });
+  DB.docs.creditNote.forEach((c) => { if (mine(c)) v -= c.base; });
   return Math.max(0, v);
 }
+const TAX_CODE_LABEL = { VAT7:'ภาษี 7%', VAT0:'อัตรา 0%', EXEMPT:'ยกเว้นภาษี' };
+/** อัตราภาษีที่มีอยู่ในใบกำกับ (เฉพาะบรรทัดที่มีมูลค่า) */
+function invoiceTaxCodes(inv) {
+  const set = [];
+  inv.lines.forEach((l) => { const c = l.taxCode || 'VAT7'; if (l.amount && set.indexOf(c) < 0) set.push(c); });
+  return set.length ? set : ['VAT7'];
+}
+/** ใบลดหนี้/เพิ่มหนี้รุ่นก่อนไม่ได้เก็บอัตราไว้ — เดาจากภาษีในใบและอัตราของใบกำกับเดิม */
+function noteCodeOf(d, inv) {
+  if (d.taxCode) return d.taxCode;
+  if (d.vat) return 'VAT7';
+  const codes = invoiceTaxCodes(inv).filter((c) => c !== 'VAT7');
+  return codes[0] || 'VAT7';
+}
+function noteTaxCode(inv, given, verb) {
+  const codes = invoiceTaxCodes(inv);
+  if (given) {
+    if (codes.indexOf(given) < 0) {
+      throw new DomainError('NOTE_TAX_CODE_INVALID', 'ใบกำกับ ' + inv.no + ' ไม่มีรายการ' + (TAX_CODE_LABEL[given] || given),
+        'เลือกอัตราภาษีที่มีอยู่ในใบกำกับเดิม');
+    }
+    return given;
+  }
+  if (codes.length > 1) {
+    throw new DomainError('NOTE_TAX_CODE_REQUIRED', 'ใบกำกับ ' + inv.no + ' มีหลายอัตราภาษี ต้องเลือกว่า' + verb + 'รายการอัตราใด',
+      'อัตราในใบ' + verb + 'ต้องตรงกับรายการเดิม ไม่งั้นภาษีขายและยอดขายแต่ละช่องใน ภ.พ.30 จะผิด');
+  }
+  return codes[0];
+}
+/** รายการสินค้าที่รับคืน — ต้องเป็นสินค้าในใบกำกับเดิม จำนวนไม่เกินที่ขายหักที่คืนไปแล้ว
+    ต้นทุนใช้ต้นทุนเดิมที่ตัดออกตอนขาย ครั้งสุดท้ายรับต้นทุนส่วนที่เหลือทั้งหมด */
+function creditNoteReturns(inv, lines) {
+  const want = (lines || []).filter((l) => l && l.itemCode && Number(l.qty) > 0);
+  return want.map(function (l) {
+    const sold = DB.docs.stockMove.filter((m) => m.src === inv.no && m.dir === 'out' && m.item === l.itemCode);
+    if (!sold.length) {
+      throw new DomainError('RETURN_ITEM_NOT_SOLD', 'สินค้า ' + l.itemCode + ' ไม่ได้ตัดออกจากคลังในใบกำกับ ' + inv.no,
+        'รับคืนได้เฉพาะสินค้าคงคลังที่ขายในใบกำกับนี้');
+    }
+    const soldQty = roundQty(sold.reduce((s, m) => s + m.qty, 0));
+    const soldCost = sold.reduce((s, m) => s + m.cost, 0);
+    const prior = DB.docs.creditNote.filter((c) => c.invoiceNo === inv.no && liveDoc(c))
+      .reduce((a, c) => (c.returns || []).filter((r) => r.itemCode === l.itemCode)
+        .reduce((b, r) => ({ qty: roundQty(b.qty + r.qty), cost: b.cost + r.cost }), a), { qty: 0, cost: 0 });
+    const q = roundQty(l.qty);
+    const left = roundQty(soldQty - prior.qty);
+    if (q > left) {
+      throw new DomainError('RETURN_EXCEEDS_SOLD', 'รับคืน ' + l.itemCode + ' ' + q + ' หน่วย เกินที่ขายและยังไม่ได้คืน ' + left + ' หน่วย');
+    }
+    const cost = q === left ? soldCost - prior.cost : round2(mulDiv(soldCost, Math.round(q * 1000), Math.round(soldQty * 1000)));
+    const it = DB.items.find((x) => x.code === l.itemCode);
+    return { itemCode: l.itemCode, desc: it ? it.name : l.itemCode, qty: q, cost };
+  });
+}
+/** ต้นทุนต่อหน่วย = มูลค่า ÷ จำนวน (จำนวนละเอียด 3 ตำแหน่ง) */
+const unitCost = (value, qty) => qty > 0 ? mulDiv(value, 1000, Math.round(qty * 1000)) : 0;
 
 /* ===================================================================
    ยกเลิกงวดค่าเสื่อมราคา / งวดเงินเดือน
@@ -3520,6 +3713,164 @@ function voidRun(kind, period, reason) {
     return run;
   });
 }
+
+/* ===================================================================
+   ฐานภาษีหัก ณ ที่จ่าย — จำนวนเต็มล้วน และครั้งสุดท้ายรับส่วนที่เหลือ
+   ผลรวมฐานของทุกครั้งที่รับ/จ่าย จึงเท่าฐานเต็มของเอกสารพอดี ไม่คลาดสตางค์
+   =================================================================== */
+/** ค่าบริการก่อน VAT ของใบกำกับ (หลังใบเพิ่มหนี้/ลดหนี้) — ขายสินค้าไม่อยู่ในฐานหัก ณ ที่จ่าย */
+function invoiceServiceBase(inv) {
+  const lineBase = inv.lines.reduce((s, l) => s + l.amount, 0);
+  if (!lineBase) return 0;
+  const goods = inv.lines.reduce(function (s, l) {
+    const it = l.itemCode ? DB.items.find((x) => x.code === l.itemCode) : null;
+    return s + (it && it.type === 'stock' ? l.amount : 0);
+  }, 0);
+  return round2(mulDiv(creditableBase(inv), lineBase - goods, lineBase));
+}
+/** ส่วนของค่าบริการที่อยู่ในยอดรับครั้งนี้ */
+function receiptServiceShare(inv, gross) {
+  const svc = invoiceServiceBase(inv);
+  const due = inv.total + (inv.debited || 0) - inv.credited;
+  if (due <= 0 || svc <= 0) return 0;
+  const prior = DB.docs.receipt.filter((r) => r.invoiceNo === inv.no && liveDoc(r))
+    .reduce((s, r) => s + (r.svcShare !== undefined ? r.svcShare : round2(mulDiv(svc, r.gross, due))), 0);
+  /* ฐานที่พิมพ์ใน 50 ทวิ เป็นบาทกับสตางค์ — ปัดฐานก่อน แล้วค่อยคิดภาษีจากฐานที่ปัดแล้ว */
+  if (gross >= invOutstanding(inv)) return Math.max(0, svc - prior);
+  return Math.min(round2(mulDiv(svc, gross, due)), Math.max(0, svc - prior));
+}
+/** ภาษีหัก ณ ที่จ่ายของการจ่ายชำระเจ้าหนี้ครั้งนี้
+    เกณฑ์ 1,000 บาทดูจากมูลค่าทั้งใบ — แบ่งจ่ายหลายงวดเพื่อเลี่ยงการหักไม่ได้ (ท.ป.4/2528) */
+function billWhtFor(bill, gross, date, channel, whtCode) {
+  const prior = DB.docs.payment.filter((x) => x.billNo === bill.no && liveDoc(x))
+    .reduce((s, x) => s + (x.baseShare !== undefined ? x.baseShare : round2(mulDiv(bill.base, x.gross, bill.total))), 0);
+  const final = gross >= billOutstanding(bill);
+  const share = final ? Math.max(0, bill.base - prior) : Math.min(round2(mulDiv(bill.base, gross, bill.total)), Math.max(0, bill.base - prior));
+  if (!whtCode || bill.base < M('1000') || share <= 0) return { wht: 0, rate: null, base: share, share };
+  const r = resolveRate(whtCode, date, { channel });
+  return { wht: round2(pct(share, r.rate)), rate: r.rate, base: share, share };
+}
+
+/** ขายเกินของที่มีในคลังไม่ได้ — สต๊อกติดลบทำให้ต้นทุนเฉลี่ยของการรับเข้าครั้งถัดไปเพี้ยน */
+function assertStockAvailable(lines) {
+  const need = {};
+  lines.forEach(function (l) {
+    const it = l.itemCode ? DB.items.find((x) => x.code === l.itemCode) : null;
+    if (!it || it.type !== 'stock') return;
+    need[it.code] = roundQty((need[it.code] || 0) + roundQty(l.qty));
+  });
+  Object.keys(need).forEach(function (code) {
+    const it = DB.items.find((x) => x.code === code);
+    if (need[code] > it.qty) {
+      throw new DomainError('INSUFFICIENT_STOCK',
+        it.name + ' (' + code + ') มีในคลัง ' + it.qty + ' ' + (it.uom || '') + ' แต่จะขาย ' + need[code],
+        'บันทึกรับสินค้าเข้าคลังก่อน (ใบรับสินค้าหรือตั้งหนี้ผู้ขาย) แล้วจึงออกใบกำกับ');
+    }
+  });
+}
+
+/* ===================================================================
+   คืนเงินลูกค้า — ใช้เมื่อลดหนี้หลังรับเงินครบแล้ว ลูกค้ามียอดเครดิตเกิน
+   Dr ลูกหนี้ (รายตัว) / Cr เงินฝากธนาคาร · ยอดคงค้างของใบกำกับกลับเป็นศูนย์
+   =================================================================== */
+function refundCustomer(input) {
+  const inv = DB.docs.invoice.find((d) => d.no === input.invoiceNo);
+  if (!inv) throw new DomainError('INVOICE_NOT_FOUND', 'ไม่พบใบกำกับภาษี ' + input.invoiceNo);
+  if (inv.status === 'void') throw new DomainError('INVOICE_VOID', 'ใบกำกับ ' + inv.no + ' ถูกยกเลิกไปแล้ว');
+  const credit = -invOutstanding(inv);
+  if (credit <= 0) {
+    throw new DomainError('NO_CREDIT_BALANCE', 'ใบกำกับ ' + inv.no + ' ไม่มียอดที่ต้องคืนลูกค้า',
+      'คืนเงินได้เฉพาะเมื่อลดหนี้หลังรับเงินครบแล้วเท่านั้น');
+  }
+  const amount = input.amount ? M(input.amount) : credit;
+  if (amount <= 0 || amount > credit) {
+    throw new DomainError('REFUND_EXCEEDS', 'ยอดคืน ' + fmt(amount) + ' ต้องมากกว่าศูนย์และไม่เกินเครดิตของลูกค้า ' + fmt(credit));
+  }
+  if (!input.date) throw new DomainError('DATE_REQUIRED', 'ต้องระบุวันที่คืนเงิน');
+  const bank = input.bankAccount || accBySub('bank');
+  const ba = acc(bank);
+  if (ba.subType !== 'cash' && ba.subType !== 'bank') {
+    throw new DomainError('REFUND_FROM_INVALID', 'ต้องคืนจากบัญชีเงินสดหรือเงินฝากธนาคาร');
+  }
+  assertPostingOpen(input.date);
+  const no = nextNo('customerRefund', input.date);
+  const je = post({
+    type: 'payment', date: input.date,
+    desc: 'คืนเงินลูกค้า ' + inv.partnerName + ' ตามใบลดหนี้ อ้าง ' + inv.no + ' (' + no + ')',
+    src: 'customerRefund', srcId: no,
+    lines: [{ acc: accBySub('trade_receivable'), dr: amount, partner: inv.partnerCode }, { acc: bank, cr: amount }],
+  });
+  inv.refunded = (inv.refunded || 0) + amount;
+  syncInvStatus(inv);
+  const doc = { no, date: input.date, invoiceNo: inv.no, partnerCode: inv.partnerCode, partnerName: inv.partnerName,
+    amount, method: input.method || 'transfer', bankAccount: bank, note: input.note || '', entryNo: je.no };
+  DB.docs.customerRefund.unshift(doc);
+  audit('customerRefund', no, 'create', null, { invoice: inv.no, amount: fmt(amount) });
+  return doc;
+}
+
+/* ===================================================================
+   เปิดปีบัญชีถัดไป — 12 งวดต่อจากงวดสุดท้าย
+   งบแสดงฐานะการเงินรวมกำไรทุกปีเข้ากำไรสะสมเอง จึงข้ามปีได้โดยไม่ต้องลงรายการปิดบัญชี
+   =================================================================== */
+function openNextFiscalYear(reason) {
+  if (!DB.periods.length) throw new DomainError('PERIOD_NOT_FOUND', 'ยังไม่มีงวดบัญชีเลย สร้างบริษัทก่อน');
+  const last = DB.periods.slice().sort((a, b) => a.start < b.start ? -1 : 1).pop();
+  const made = [];
+  let d = addDays(last.end, 1);
+  for (let i = 0; i < 12; i++) {
+    const code = d.slice(0, 7);
+    if (!DB.periods.some((p) => p.code === code)) {
+      DB.periods.push({ code, start: code + '-01', end: endOfMonth(code + '-01'), status: 'open' });
+      made.push(code);
+    }
+    d = addDays(endOfMonth(code + '-01'), 1);
+  }
+  audit('period', made[0] + '…' + made[made.length - 1], 'open_year', null, { periods: made.length }, reason || 'เปิดปีบัญชีถัดไป');
+  return made;
+}
+
+/* ===================================================================
+   ห่อทุกคำสั่งที่เขียนข้อมูลให้เป็นชุดเดียว (ดู atomically ใน engine.js)
+   ต้องอยู่ท้ายไฟล์ และต้องห่อที่นี่ที่เดียว หน้าจอเรียกชื่อเดิมได้เลย
+   =================================================================== */
+savePartner = transactional(savePartner);
+saveItem = transactional(saveItem);
+saveEmployee = transactional(saveEmployee);
+saveAsset = transactional(saveAsset);
+saveCompany = transactional(saveCompany);
+issueInvoice = transactional(issueInvoice);
+receivePayment = transactional(receivePayment);
+issueCreditNote = transactional(issueCreditNote);
+issueDebitNote = transactional(issueDebitNote);
+refundCustomer = transactional(refundCustomer);
+issueTradeDoc = transactional(issueTradeDoc);
+setTradeDocStatus = transactional(setTradeDocStatus);
+convertTradeDoc = transactional(convertTradeDoc);
+recordBill = transactional(recordBill);
+payBill = transactional(payBill);
+runDepreciation = transactional(runDepreciation);
+runPayroll = transactional(runPayroll);
+fileVat = transactional(fileVat);
+fileWht = transactional(fileWht);
+closePeriod = transactional(closePeriod);
+reopenPeriod = transactional(reopenPeriod);
+matchBankTxn = transactional(matchBankTxn);
+bookBankTxn = transactional(bookBankTxn);
+issueBillingNote = transactional(issueBillingNote);
+cancelBillingNote = transactional(cancelBillingNote);
+receiveBillingNote = transactional(receiveBillingNote);
+issueGoodsReceipt = transactional(issueGoodsReceipt);
+receiveGoodsFromPo = transactional(receiveGoodsFromPo);
+billGoodsReceipt = transactional(billGoodsReceipt);
+recordExpense = transactional(recordExpense);
+createPaymentBatch = transactional(createPaymentBatch);
+approvePaymentBatch = transactional(approvePaymentBatch);
+cancelPaymentBatch = transactional(cancelPaymentBatch);
+payPaymentBatch = transactional(payPaymentBatch);
+postJournalVoucher = transactional(postJournalVoucher);
+openNextFiscalYear = transactional(openNextFiscalYear);
+buildSeed = bulkTransaction(buildSeed);
 
 
 /* ===== seed.js ===== */
@@ -4436,7 +4787,7 @@ function statusPill(s) {
     reversed:['late','กลับรายการ'], open:['open','เปิดอยู่'], closed:['paid','ปิดแล้ว'],
     approved:['paid','อนุมัติแล้ว'], rejected:['late','ถูกปฏิเสธ'], expired:['late','หมดอายุ'],
     cancelled:['late','ยกเลิก'], received:['open','รับเข้าคลังแล้ว'],
-    pending_approval:['wait','รออนุมัติ'],
+    pending_approval:['wait','รออนุมัติ'], credit_balance:['wait','ลูกค้ามีเครดิต รอคืนเงิน'],
   };
   const m = map[s] || ['draft', s];
   return { st: m };
@@ -6353,12 +6704,16 @@ function scClose() {
       : (chk.canClose ? 'พร้อมปิดงวด — ตรวจครบทุกข้อแล้ว'
                       : 'ยังปิดไม่ได้: ' + chk.items.filter((i) => i.blocking && !i.ok).map((i) => i.label).join(' · ')),
   })
-  + card({ title:'สถานะงวดทั้งปี', sub:'รอบบัญชี ' + DB.company.fiscalYear,
+  + card({ title:'สถานะงวดทั้งปี', sub:'รอบบัญชี ' + DB.company.fiscalYear + ' · ' + DB.periods.length + ' งวด',
+      /* เปิดปีถัดไปได้เมื่อเหลือไม่ถึงสามเดือนก่อนถึงงวดสุดท้าย กันกดเปิดปีล่วงหน้าไปไกลโดยไม่ตั้งใจ */
+      actions: btn('newyear', '+ เปิดงวดปีบัญชีถัดไป',
+        DB.periods.slice().sort((a, b) => a.start < b.start ? -1 : 1).pop().start <= addDays(TODAY, 92) ? '' : 'disabled'),
       body: '<div class="periods">' + DB.periods.map((x) =>
         '<button class="pchip ' + x.status + (x.code === STATE.period ? ' on' : '') + '" data-act="period:' + x.code + '">'
         + esc(thPeriod(x.code)) + '<span>' + (x.status === 'closed' ? 'ปิดแล้ว' : 'เปิดอยู่') + '</span></button>').join('')
         + '</div>',
-      foot: 'ปิดแล้ว ' + closedList.length + ' งวด จาก ' + DB.periods.length + ' งวด' });
+      foot: 'ปิดแล้ว ' + closedList.length + ' งวด จาก ' + DB.periods.length + ' งวด · ข้ามปีได้โดยไม่ต้องลงรายการปิดบัญชี '
+        + 'เพราะงบแสดงฐานะการเงินรวมกำไรของทุกปีก่อนหน้าเข้ากำไรสะสมให้เอง · ภาษีหัก ณ ที่จ่ายเดือนธันวาคม ระบบเปิดงวดปีถัดไปให้อัตโนมัติตอนยื่นแบบ' });
 }
 
 /* ===================================================================
@@ -6371,11 +6726,13 @@ function invoiceDetail(no) {
   const rcs = DB.docs.receipt.filter((r) => r.invoiceNo === no);
   const cns = DB.docs.creditNote.filter((c) => c.invoiceNo === no);
   const dns = DB.docs.debitNote.filter((c) => c.invoiceNo === no);
+  const rfs = (DB.docs.customerRefund || []).filter((c) => c.invoiceNo === no);
   return card({
     title: 'ใบกำกับภาษี/ใบส่งของ เลขที่ ' + d.no,
     sub: 'ออกวันที่ ' + thDate(d.date) + ' · ครบกำหนด ' + thDate(d.due),
     actions: (out > 0 ? btn('pay:' + d.no, 'รับชำระเงิน', 'primary') : '')
-      + (out > 0 ? btn('cn:' + d.no, 'ออกใบลดหนี้') : '')
+      + (out < 0 ? btn('refund:' + d.no, 'คืนเงินลูกค้า ' + fmt(-out), 'primary') : '')
+      + (!isVoid(d) && creditableBase(d) > 0 ? btn('cn:' + d.no, 'ออกใบลดหนี้') : '')
       + (d.status !== 'void' ? btn('dn:' + d.no, 'ออกใบเพิ่มหนี้') : '')
       + printBtn('invoice', d.no) + btn('entry:' + d.entryNo, 'ดูใบสำคัญ') + voidBtn('invoice', d) + btn('sel:', 'ปิด'),
     body: voidBanner(d)
@@ -6399,7 +6756,8 @@ function invoiceDetail(no) {
       + (d.paid ? '<div><span>รับชำระแล้ว</span><b>' + fmt(d.paid) + '</b></div>' : '')
       + (d.credited ? '<div><span>ลดหนี้แล้ว</span><b>' + fmt(d.credited) + '</b></div>' : '')
       + (d.debited ? '<div><span>เพิ่มหนี้แล้ว</span><b>' + fmt(d.debited) + '</b></div>' : '')
-      + '<div class="gt"><span>คงเหลือ</span><b>' + fmt(out) + '</b></div>'
+      + (d.refunded ? '<div><span>คืนเงินลูกค้าแล้ว</span><b>' + fmt(d.refunded) + '</b></div>' : '')
+      + '<div class="gt"><span>' + (out < 0 ? 'ลูกค้ามีเครดิต (ต้องคืน)' : 'คงเหลือ') + '</span><b>' + fmt(Math.abs(out)) + '</b></div>'
       + '</div>'
       + (rcs.length ? '<div class="sub-h">ใบเสร็จรับเงินที่อ้างถึงใบนี้</div>' + tbl({
           cols:[{t:'เลขที่'},{t:'วันที่'},{t:'รับก่อนหัก',a:'r'},{t:'ถูกหัก ณ ที่จ่าย',a:'r'},{t:'รับสุทธิ',a:'r'},{t:'สถานะ'}],
@@ -6412,7 +6770,12 @@ function invoiceDetail(no) {
       + (dns.length ? '<div class="sub-h">ใบเพิ่มหนี้ที่อ้างถึงใบนี้</div>' + tbl({
           cols:[{t:'เลขที่'},{t:'วันที่'},{t:'เหตุผลตามมาตรา 86/9'},{t:'รวม',a:'r'},{t:'สถานะ'}],
           rows: dns.map((c) => [{mono:c.no}, thDateNum(c.date), c.reasonText, {n:c.total}, statusPill(c.status || 'posted')]),
-          rowAttr: (r, i) => rowCls(dns[i]) + ' data-act="open:debitnotes:' + r[0].mono + '"' }) : ''),
+          rowAttr: (r, i) => rowCls(dns[i]) + ' data-act="open:debitnotes:' + r[0].mono + '"' }) : '')
+      + (rfs.length ? '<div class="sub-h">คืนเงินลูกค้า</div>' + tbl({
+          cols:[{t:'เลขที่'},{t:'วันที่'},{t:'วิธี'},{t:'จำนวนเงิน',a:'r'},{t:'สถานะ'},{t:''}],
+          rows: rfs.map((c) => [{mono:c.no}, thDateNum(c.date), PAY_METHOD[c.method] || c.method, {n:c.amount},
+            statusPill(c.status || 'posted'), {html: isVoid(c) ? '' : btn('void:customerRefund:' + c.no, 'ยกเลิก', 'danger')}]),
+          rowAttr: (r, i) => isVoid(rfs[i]) ? 'class="is-void"' : '' }) : ''),
     foot: isVoid(d)
       ? 'ใบกำกับที่ยกเลิกยังอยู่ในรายงานภาษีขายด้วยยอดศูนย์ เลขที่จึงเรียงต่อเนื่องไม่ขาดช่วง · ถ้าต้องเก็บเงินจริงให้ออกใบกำกับใบใหม่'
       : 'ครบองค์ประกอบตามมาตรา 86/4 · ส่งกรมสรรพากรแบบ e-Tax Invoice แล้ว (จำลอง)'
@@ -9043,12 +9406,15 @@ function modalReceive(no) {
           options:[['transfer','โอนเงินเข้าบัญชี'],['cheque','เช็ค'],['cash','เงินสด']] })
       + field({ name:'wht', label:'ลูกค้าหักภาษี ณ ที่จ่ายหรือไม่', type:'select',
           options: optWht('ไม่ได้ถูกหัก'), hint:'ถ้าถูกหัก ระบบจะบันทึกเป็นสินทรัพย์รอเครดิตภาษีปลายปี' })
+      + field({ name:'whtBase', label:'ฐานที่ลูกค้าหัก (ตาม 50 ทวิ)', placeholder:'เว้นว่าง = ให้ระบบคิด',
+          hint: inv ? 'ระบบคิดจากค่าบริการก่อนภาษี ไม่รวมค่าสินค้า · รับเต็มยอดนี้ = ' + fmt(receiptServiceShare(inv, out)) + ' บาท'
+            : 'ระบบคิดจากค่าบริการก่อนภาษีในยอดที่รับ ไม่รวมค่าสินค้า (ซื้อสินค้าไม่ต้องหัก ณ ที่จ่าย)' })
       + '</div>',
     submitLabel:'รับชำระและลงบัญชี',
     onSubmit: function () {
       submitAction(function () {
         const r = receivePayment({ invoiceNo: no || val('invoiceNo'), amount: val('amount'), date: val('date'),
-          method: val('method'), whtCode: val('wht') || null });
+          method: val('method'), whtCode: val('wht') || null, whtBase: val('wht') ? val('whtBase') : null });
         toast('บันทึกใบเสร็จ ' + r.no + ' แล้ว', 'ok',
           'รับสุทธิ ' + fmt(r.net) + ' บาท' + (r.wht ? ' (ถูกหักไว้ ' + fmt(r.wht) + ')' : ''));
         return r;
@@ -9057,31 +9423,98 @@ function modalReceive(no) {
   });
 }
 
-function modalCreditNote(no) {
-  const inv = no ? DB.docs.invoice.find((d) => d.no === no) : null;
-  if (no && !inv) return;
-  const refs = inv ? [] : DB.docs.invoice
-    .filter((d) => d.status !== 'void' && invOutstanding(d) > 0 && d.base - d.credited > 0)
-    .map((d) => [d.no, d.no + ' · ' + d.partnerName + ' · ลดได้อีก ' + fmt(d.base - d.credited)]);
-  if (!inv && !needRefs(refs, 'ไม่มีใบกำกับภาษีที่ออกใบลดหนี้ได้', 'ใบลดหนี้ต้องอ้างใบกำกับที่ยังมียอดค้าง (มาตรา 86/10)')) return;
+/** ตัวเลือกอัตราภาษีของใบลดหนี้/เพิ่มหนี้ — แสดงเฉพาะใบกำกับที่มีหลายอัตรา */
+function noteCodeField(inv, cn) {
+  const codes = invoiceTaxCodes(inv);
+  if (codes.length < 2) return '';
+  return field({ name:'taxCode', label: cn ? 'ลดหนี้รายการอัตรา' : 'เพิ่มหนี้รายการอัตรา', type:'select', wide:true,
+    options: codes.map((c) => [c, TAX_CODE_LABEL[c] + (cn ? ' · ลดได้อีก ' + fmt(creditableBase(inv, c)) : '')]),
+    hint:'ใบกำกับนี้มีหลายอัตรา อัตราในใบ' + (cn ? 'ลดหนี้' : 'เพิ่มหนี้') + 'ต้องตรงกับรายการเดิม ภ.พ.30 แต่ละช่องจึงถูก' });
+}
+/** สินค้าคงคลังที่ขายในใบกำกับนี้และยังรับคืนได้ */
+function returnableItems(inv) {
+  const out = [];
+  DB.docs.stockMove.filter((m) => m.src === inv.no && m.dir === 'out').forEach(function (m) {
+    const back = DB.docs.creditNote.filter((c) => c.invoiceNo === inv.no && c.status !== 'void')
+      .reduce((a, c) => a + (c.returns || []).filter((r) => r.itemCode === m.item).reduce((b, r) => b + r.qty, 0), 0);
+    const row = out.find((x) => x.code === m.item);
+    if (row) { row.sold = roundQty(row.sold + m.qty); return; }
+    const it = DB.items.find((x) => x.code === m.item) || {};
+    out.push({ code: m.item, name: it.name || m.item, uom: it.uom || '', sold: m.qty, back });
+  });
+  out.forEach((r) => { r.left = roundQty(r.sold - r.back); });
+  return out.filter((r) => r.left > 0);
+}
+function modalCreditNote(no, fromList) {
+  const pickable = (d) => d.status !== 'void' && creditableBase(d) > 0;
+  /* ใบที่ยังค้างชำระขึ้นก่อน — ลดหนี้ใบที่ชำระครบแล้วทำได้ แต่ต้องคืนเงินลูกค้าตามมา */
+  const refs = DB.docs.invoice.filter(pickable)
+    .sort((a, b) => (invOutstanding(b) > 0) - (invOutstanding(a) > 0))
+    .map((d) => [d.no, d.no + ' · ' + d.partnerName + ' · ลดได้อีก ' + fmt(creditableBase(d))
+      + (invOutstanding(d) > 0 ? '' : ' · ชำระครบแล้ว')]);
+  if (!no && !needRefs(refs, 'ไม่มีใบกำกับภาษีที่ออกใบลดหนี้ได้', 'ใบลดหนี้ต้องอ้างใบกำกับเดิมที่ยังมีมูลค่าให้ลด (มาตรา 86/10)')) return;
+  const list = fromList || !no;
+  const invNo = no || refs[0][0];
+  const inv = DB.docs.invoice.find((d) => d.no === invNo);
+  if (!inv) return;
+  const rets = returnableItems(inv);
   modal({
-    title: inv ? 'ออกใบลดหนี้อ้างใบกำกับ ' + no : 'ออกใบลดหนี้',
+    title: list ? 'ออกใบลดหนี้' : 'ออกใบลดหนี้อ้างใบกำกับ ' + invNo,
     sub:'ออกได้เฉพาะเหตุที่มาตรา 86/10 กำหนดเท่านั้น และต้องอ้างใบกำกับเดิมเสมอ',
-    body:'<div class="flds">'
-      + (inv ? '' : field({ name:'invoiceNo', label:'อ้างใบกำกับภาษีเดิม', type:'select', wide:true, options: refs }))
+    body:'<div class="flds" data-note="cn">'
+      + (list ? field({ name:'invoiceNo', label:'อ้างใบกำกับภาษีเดิม', type:'select', wide:true, options: refs, value: invNo }) : '')
+      + noteCodeField(inv, true)
       + field({ name:'base', label:'มูลค่าที่ลด (ก่อนภาษี)', value:'0',
-          hint: inv ? 'ลดได้ไม่เกินมูลค่าคงเหลือของใบกำกับเดิม ' + fmt(inv.base - inv.credited) + ' บาท'
-            : 'ลดได้ไม่เกินยอด "ลดได้อีก" ของใบกำกับที่เลือก' })
+          hint:'ลดได้ไม่เกินมูลค่าคงเหลือ ' + fmt(creditableBase(inv)) + ' บาท'
+            + (invOutstanding(inv) <= 0 ? ' · ลูกค้าชำระครบแล้ว ลดหนี้แล้วต้องคืนเงินที่หน้าใบกำกับ' : '') })
       + field({ name:'date', label:'วันที่ออกใบลดหนี้', type:'date', value: defaultDate() })
       + field({ name:'reason', label:'เหตุแห่งการลดหนี้', type:'select', wide:true,
           options: Object.keys(CN_REASONS).map((k) => [k, CN_REASONS[k]]) })
-      + '</div>',
+      + '</div>'
+      + (rets.length ? '<div class="sub-h">รับสินค้าคืนเข้าคลัง (ถ้ามี)</div><div class="flds">'
+          + rets.map((r, i) => field({ name:'ret' + i, label: r.code + ' ' + r.name, value:'0', type:'number',
+              hint:'ขายไป ' + r.sold + ' ' + r.uom + (r.back ? ' · คืนแล้ว ' + r.back : '') + ' · คืนได้อีก ' + r.left
+                + ' — ของกลับเข้าคลังด้วยต้นทุนเดิมตอนขาย' })).join('') + '</div>' : ''),
     submitLabel:'ออกใบลดหนี้',
     onSubmit: function () {
       submitAction(function () {
-        const c = issueCreditNote({ invoiceNo: no || val('invoiceNo'), base: val('base'), date: val('date'), reason: val('reason') });
-        toast('ออกใบลดหนี้ ' + c.no + ' แล้ว', 'ok', 'ลดภาษีขาย ' + fmt(c.vat) + ' บาทในงวดนี้');
+        const returnLines = rets.map((r, i) => ({ itemCode: r.code, qty: Number(val('ret' + i) || 0) })).filter((r) => r.qty > 0);
+        const c = issueCreditNote({ invoiceNo: list ? val('invoiceNo') : invNo, base: val('base'), date: val('date'),
+          reason: val('reason'), taxCode: val('taxCode') || undefined, returnLines });
+        toast('ออกใบลดหนี้ ' + c.no + ' แล้ว', 'ok', 'ลดภาษีขาย ' + fmt(c.vat) + ' บาทในงวดนี้'
+          + (c.returns.length ? ' · รับสินค้าคืนเข้าคลัง ' + c.returns.length + ' รายการ' : ''));
         return c;
+      });
+    },
+  });
+}
+
+/* ---------- คืนเงินลูกค้า — ลดหนี้หลังรับเงินครบ ---------- */
+function modalRefund(no) {
+  const inv = DB.docs.invoice.find((d) => d.no === no);
+  if (!inv) return;
+  const credit = -invOutstanding(inv);
+  if (credit <= 0) { toast('ใบกำกับ ' + no + ' ไม่มียอดที่ต้องคืนลูกค้า', 'err'); return; }
+  const banks = payFromAccounts().map((a) => [a.code, a.code + ' ' + a.name]);
+  modal({
+    title:'คืนเงินลูกค้า ตามใบกำกับ ' + no,
+    sub: inv.partnerName + ' · มีเครดิตจากใบลดหนี้ ' + fmt(credit) + ' บาท',
+    body:'<div class="flds">'
+      + field({ name:'amount', label:'จำนวนเงินที่คืน', value: fmt(credit), hint:'คืนได้ไม่เกินเครดิตของลูกค้า' })
+      + field({ name:'date', label:'วันที่คืนเงิน', type:'date', value: defaultDate() })
+      + field({ name:'bank', label:'จ่ายจากบัญชี', type:'select', options: banks, value: accBySub('bank') })
+      + field({ name:'method', label:'วิธีคืนเงิน', type:'select', value:'transfer',
+          options:[['transfer','โอนเงิน'],['cheque','เช็ค'],['cash','เงินสด']] })
+      + field({ name:'note', label:'หมายเหตุ', wide:true, placeholder:'เช่น เลขที่อ้างอิงการโอน' })
+      + '</div>',
+    submitLabel:'คืนเงินและลงบัญชี',
+    note:'Dr ลูกหนี้การค้า / Cr เงินฝากธนาคาร — ยอดเครดิตของลูกค้าจะกลับเป็นศูนย์',
+    onSubmit: function () {
+      submitAction(function () {
+        const r = refundCustomer({ invoiceNo: no, amount: val('amount'), date: val('date'), bankAccount: val('bank'),
+          method: val('method'), note: val('note') });
+        toast('บันทึกคืนเงินลูกค้า ' + r.no + ' แล้ว', 'ok', fmt(r.amount) + ' บาท');
+        return r;
       });
     },
   });
@@ -9284,19 +9717,23 @@ function modalUndoImport(no) {
   });
 }
 
-function modalDebitNote(no) {
-  const inv = no ? DB.docs.invoice.find((d) => d.no === no) : null;
-  if (no && !inv) return;
-  const refs = inv ? [] : DB.docs.invoice.filter((d) => d.status !== 'void')
+function modalDebitNote(no, fromList) {
+  const refs = DB.docs.invoice.filter((d) => d.status !== 'void')
     .map((d) => [d.no, d.no + ' · ' + d.partnerName + ' · ก่อนภาษี ' + fmt(d.base)]);
-  if (!inv && !needRefs(refs, 'ยังไม่มีใบกำกับภาษีให้อ้าง', 'ใบเพิ่มหนี้ต้องอ้างใบกำกับเดิมเสมอ (มาตรา 86/9)')) return;
+  if (!no && !needRefs(refs, 'ยังไม่มีใบกำกับภาษีให้อ้าง', 'ใบเพิ่มหนี้ต้องอ้างใบกำกับเดิมเสมอ (มาตรา 86/9)')) return;
+  const list = fromList || !no;
+  const invNo = no || refs[0][0];
+  const inv = DB.docs.invoice.find((d) => d.no === invNo);
+  if (!inv) return;
   modal({
-    title: inv ? 'ออกใบเพิ่มหนี้อ้างใบกำกับ ' + no : 'ออกใบเพิ่มหนี้',
+    title: list ? 'ออกใบเพิ่มหนี้' : 'ออกใบเพิ่มหนี้อ้างใบกำกับ ' + invNo,
     sub:'ใช้เมื่อเรียกเก็บเงินต่ำกว่าที่ควร ออกได้เฉพาะเหตุตามมาตรา 86/9 และต้องอ้างใบกำกับเดิม',
-    body:'<div class="flds">'
-      + (inv ? '' : field({ name:'invoiceNo', label:'อ้างใบกำกับภาษีเดิม', type:'select', wide:true, options: refs }))
+    body:'<div class="flds" data-note="dn">'
+      + (list ? field({ name:'invoiceNo', label:'อ้างใบกำกับภาษีเดิม', type:'select', wide:true, options: refs, value: invNo }) : '')
+      + noteCodeField(inv, false)
       + field({ name:'base', label:'มูลค่าที่เพิ่ม (ก่อนภาษี)', value:'0',
-          hint: inv ? 'ยอดเดิมของใบกำกับก่อนภาษีคือ ' + fmt(inv.base) + ' บาท' : 'มูลค่าที่เรียกเก็บเพิ่ม ไม่รวมภาษี' })
+          hint:'ยอดเดิมของใบกำกับก่อนภาษีคือ ' + fmt(inv.base) + ' บาท'
+            + (invoiceTaxCodes(inv).indexOf('VAT7') < 0 ? ' · ใบนี้ไม่มีภาษี 7% ใบเพิ่มหนี้จึงไม่มีภาษีเช่นกัน' : '') })
       + field({ name:'date', label:'วันที่ออกใบเพิ่มหนี้', type:'date', value: defaultDate() })
       + field({ name:'reason', label:'เหตุแห่งการเพิ่มหนี้', type:'select', wide:true,
           options: Object.keys(DN_REASONS).map((k) => [k, DN_REASONS[k]]) })
@@ -9305,7 +9742,8 @@ function modalDebitNote(no) {
     note:'อย่าออกใบกำกับภาษีใบใหม่ทับ เพราะรายได้และภาษีขายจะถูกนับซ้ำสองรอบ',
     onSubmit: function () {
       submitAction(function () {
-        const c = issueDebitNote({ invoiceNo: no || val('invoiceNo'), base: val('base'), date: val('date'), reason: val('reason') });
+        const c = issueDebitNote({ invoiceNo: list ? val('invoiceNo') : invNo, base: val('base'), date: val('date'),
+          reason: val('reason'), taxCode: val('taxCode') || undefined });
         toast('ออกใบเพิ่มหนี้ ' + c.no + ' แล้ว', 'ok', 'เพิ่มภาษีขาย ' + fmt(c.vat) + ' บาทในงวดนี้');
         return c;
       });
@@ -10221,6 +10659,14 @@ function dispatch(act) {
     return;
   }
   if (head === 'cn')      { modalCreditNote(arg); return; }
+  if (head === 'refund')  { modalRefund(arg); return; }
+  if (head === 'newyear') {
+    runAction(function () {
+      const made = openNextFiscalYear('เปิดจากหน้าปิดงวด');
+      toast('เปิดงวดบัญชี ' + made.length + ' งวดแล้ว', 'ok', thPeriod(made[0]) + ' ถึง ' + thPeriod(made[made.length - 1]));
+    });
+    return;
+  }
   if (head === 'dn')      { modalDebitNote(arg); return; }
   if (head === 'trade') {
     const [kind, what, docNo] = rest;
@@ -10312,6 +10758,12 @@ function bindEvents() {
     const t = ev.target;
     if (t.id === 'periodSel') { STATE.period = t.value; STATE.sel = null; save(); render(); return; }
     if (t.id === 'prCopies')  { PRINT.copies = t.value; renderPrint(); return; }
+    /* เปลี่ยนใบกำกับที่อ้างในใบลดหนี้/เพิ่มหนี้ — อัตราภาษีและสินค้าที่รับคืนได้เปลี่ยนตาม */
+    if (t.name === 'invoiceNo' && t.closest('[data-note]')) {
+      const kind = t.closest('[data-note]').getAttribute('data-note');
+      if (kind === 'cn') modalCreditNote(t.value, true); else modalDebitNote(t.value, true);
+      return;
+    }
     if (t.id === 'bookSel')   { switchCompany(t.value); return; }
     if (t.id === 'accSel')    { STATE.drill = t.value; render(); return; }
     if (t.id === 'file') {

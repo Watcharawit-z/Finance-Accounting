@@ -1434,6 +1434,55 @@ const overflowInfo = (page) => page.evaluate(() => {
   ok('ยกเลิกงวดเงินเดือนแล้วกลับมาเป็นปุ่มทำเงินเดือนใหม่ และแสดงประวัติการยกเลิก', await page.evaluate(() =>
     !!document.querySelector('#main [data-act="run:payroll"]') && /เคยทำแล้วยกเลิก/.test(document.getElementById('main').textContent)));
 
+  console.log('\n[22] ใบลดหนี้หลายอัตรา รับคืนสินค้า และคืนเงินลูกค้า');
+  const mixNo = await page.evaluate(() => {
+    const c = DB.partners.find((p) => p.kind === 'customer' && p.taxId && p.address);
+    const st = DB.items.find((i) => i.type === 'stock' && i.qty >= 5);
+    const d = issueInvoice({ partnerCode: c.code, date:'2026-07-29', lines:[
+      { desc: st.name, qty: 2, price:'1000', itemCode: st.code, taxCode:'VAT7' },
+      { desc:'ค่าขนส่งต่างประเทศ', qty: 1, price:'500', taxCode:'VAT0' }] });
+    save(); STATE.screen = 'creditnotes'; STATE.sel = null; render();
+    return d.no;
+  });
+  await page.click('#main [data-act="new:creditnote"]');
+  await page.waitForSelector('#modal.show [name="invoiceNo"]');
+  await page.selectOption('#modal [name="invoiceNo"]', mixNo);
+  await page.waitForSelector('#modal [name="taxCode"]');
+  const cnForm = await page.evaluate(() => ({
+    codes: [...document.querySelectorAll('#modal [name="taxCode"] option')].map((o) => o.value),
+    ret: !!document.querySelector('#modal [name="ret0"]'),
+    keep: document.querySelector('#modal [name="invoiceNo"]').value }));
+  ok('★ เลือกใบกำกับหลายอัตราแล้วฟอร์มถามว่าลดหนี้รายการอัตราใด และมีช่องรับสินค้าคืน', cnForm.codes.join(',') === 'VAT7,VAT0' && cnForm.ret && cnForm.keep === mixNo);
+  await page.selectOption('#modal [name="taxCode"]', 'VAT7');
+  await page.fill('#modal [name="base"]', '1000');
+  await page.fill('#modal [name="ret0"]', '1');
+  await page.click('#modal [data-act="modal:submit"]');
+  const cnDone = await page.evaluate((no) => {
+    const c = DB.docs.creditNote.find((x) => x.invoiceNo === no);
+    return c ? { vat: c.vat, ret: c.returns.length, cogs: !!c.cogsEntryNo, ok: reconciliationChecks('2026-07-31').allPassed } : null;
+  }, mixNo);
+  ok('★ ออกใบลดหนี้จากหน้าจอ ภาษี 7% ของรายการที่ลด และรับสินค้าคืนเข้าคลังพร้อมกลับต้นทุนขาย',
+    cnDone && cnDone.vat === 700000 && cnDone.ret === 1 && cnDone.cogs && cnDone.ok, JSON.stringify(cnDone));
+
+  const rfNo = await page.evaluate(() => {
+    const c = DB.partners.find((p) => p.kind === 'customer' && p.taxId && p.address);
+    const d = issueInvoice({ partnerCode: c.code, date:'2026-07-29', lines:[{ desc:'ค่าบริการทดสอบคืนเงิน', qty:1, price:'2000', taxCode:'VAT7' }] });
+    receivePayment({ invoiceNo: d.no, date:'2026-07-29' });
+    issueCreditNote({ invoiceNo: d.no, date:'2026-07-30', base:'500', reason:'PRICE_REDUCE' });
+    save(); STATE.screen = 'invoices'; STATE.sel = d.no; render();
+    return d.no;
+  });
+  const rfBtn = await page.evaluate((no) => ({ btn: !!document.querySelector('#main [data-act="refund:' + no + '"]'),
+    pill: document.getElementById('main').textContent.indexOf('ลูกค้ามีเครดิต') >= 0 }), rfNo);
+  ok('★ ลดหนี้หลังรับเงินครบ หน้าใบกำกับบอกว่าลูกค้ามีเครดิต และมีปุ่มคืนเงิน', rfBtn.btn && rfBtn.pill);
+  await page.click('#main [data-act="refund:' + rfNo + '"]');
+  await page.waitForSelector('#modal.show [name="amount"]');
+  await page.click('#modal [data-act="modal:submit"]');
+  const rfDone = await page.evaluate((no) => { const d = DB.docs.invoice.find((x) => x.no === no);
+    return { out: invOutstanding(d), st: d.status, ok: reconciliationChecks('2026-07-31').allPassed,
+      row: document.getElementById('main').textContent.indexOf('คืนเงินลูกค้า') >= 0 }; }, rfNo);
+  ok('★ คืนเงินแล้วยอดค้างเป็นศูนย์ สถานะชำระครบ และลูกหนี้ยังตรงบัญชีคุม', rfDone.out === 0 && rfDone.st === 'paid' && rfDone.ok && rfDone.row, JSON.stringify(rfDone));
+
   ok('ไม่มีข้อผิดพลาดในคอนโซลเลย', errors.length === 0, errors.slice(0, 3).join(' | '));
 
   await page.setViewportSize({ width: 1440, height: 950 });

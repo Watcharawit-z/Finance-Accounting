@@ -11,19 +11,42 @@ function M(v) {
   if (typeof v === 'string') {
     const t = v.trim().replace(/,/g, '');
     if (!/^-?\d*(\.\d+)?$/.test(t) || t === '' || t === '-') return 0;
-    return Math.round(parseFloat(t) * S);
+    /* แยกเลขจำนวนเต็มกับทศนิยมแล้วประกอบเป็นจำนวนเต็มเอง ไม่ผ่าน parseFloat
+       ตัวเลขหลักร้อยล้านที่มีสตางค์จะไม่ถูกปัดเพี้ยนจากทศนิยมลอยตัว */
+    const neg = t[0] === '-';
+    const parts = t.replace('-', '').split('.');
+    const frac = ((parts[1] || '') + '00000').slice(0, 5);
+    let out = Number(parts[0] || '0') * S + Number(frac.slice(0, 4));
+    if (Number(frac[4]) >= 5) out += 1;            // ปัดครึ่งขึ้นที่ตำแหน่งที่ 5
+    return neg ? -out : out;
   }
   return 0;
 }
 const divRound = (n, d) => {
   const neg = (n < 0) !== (d < 0);
   const a = Math.abs(n), b = Math.abs(d);
-  const q = Math.floor(a / b), r = a - q * b;
+  let q = Math.floor(a / b), r = a - q * b;
+  /* การหารทศนิยมลอยตัวของเลขใหญ่อาจคลาดไปหนึ่ง แก้ด้วยเศษที่คำนวณกลับเป็นจำนวนเต็ม */
+  if (r < 0) { q -= 1; r += b; } else if (r >= b) { q += 1; r -= b; }
   const out = r * 2 >= b ? q + 1 : q;
   return neg ? -out : out;
 };
-const mulQty  = (a, q) => divRound(a * M(q), S);
-const pct     = (a, rate) => divRound(a * M(rate), S * 100);
+/** a × b ÷ d ปัดครึ่งขึ้น แบบจำนวนเต็มล้วน — ผลคูณเกินช่วงที่ปลอดภัยใช้ BigInt
+    ใช้แทน round(a × (b / d)) ทุกที่ ซึ่งคลาดได้หนึ่งสตางค์เพราะสัดส่วนเป็นทศนิยมลอยตัว */
+function mulDiv(a, b, d) {
+  const p = a * b;
+  if (Number.isSafeInteger(p)) return divRound(p, d);
+  const P = BigInt(Math.round(a)) * BigInt(Math.round(b)), D = BigInt(Math.round(d));
+  const neg = (P < 0n) !== (D < 0n);
+  const A = P < 0n ? -P : P, B = D < 0n ? -D : D;
+  let q = A / B;
+  if ((A - q * B) * 2n >= B) q += 1n;
+  return Number(neg ? -q : q);
+}
+const mulQty  = (a, q) => mulDiv(a, M(q), S);
+const pct     = (a, rate) => mulDiv(a, M(rate), S * 100);
+/** จำนวนสินค้าเก็บละเอียด 3 ตำแหน่ง — บวกลบทศนิยมลอยตัวแล้วต้องปัดทุกครั้ง ไม่งั้นเหลือเศษ 5.55e-17 */
+const roundQty = (q) => Math.round(Number(q) * 1000) / 1000;
 const round2  = (a) => divRound(a, 100) * 100;
 const baseFromIncl = (incl, rate) => round2(divRound(incl * 100 * S, 100 * S + M(rate)));
 
@@ -150,7 +173,7 @@ function blankState() {
       quotation: [], salesOrder: [], invoice: [], billingNote: [], receipt: [],
       creditNote: [], debitNote: [],
       purchaseOrder: [], goodsReceipt: [], bill: [], payment: [],
-      expense: [], whtCert: [], paymentBatch: [],
+      expense: [], whtCert: [], paymentBatch: [], customerRefund: [],
       stockMove: [], payRun: [], depreciation: [], filing: [],
     },
     seq: {},             // {'invoice|2026-07': 12}
@@ -198,9 +221,13 @@ const TAX_RATES = [
   { code:'WHT_RENT',      kind:'wht', rate:'5', from:'2000-01-01', to:null, cond:{channel:'manual'}, ref:'ท.ป.4/2528 ข้อ 6', label:'ค่าเช่าอสังหาริมทรัพย์' },
   { code:'WHT_RENT',      kind:'wht', rate:'1', from:'2026-01-01', to:'2027-12-31', cond:{channel:'e_wht'}, ref:'มาตรการ e-Withholding Tax', label:'ค่าเช่าอสังหาริมทรัพย์' },
   { code:'WHT_TRANSPORT', kind:'wht', rate:'1', from:'2000-01-01', to:null, cond:{channel:'manual'}, ref:'ท.ป.4/2528 ข้อ 12', label:'ค่าขนส่ง' },
+  { code:'WHT_TRANSPORT', kind:'wht', rate:'1', from:'2026-01-01', to:'2027-12-31', cond:{channel:'e_wht'}, ref:'มาตรการ e-Withholding Tax', label:'ค่าขนส่ง' },
   { code:'WHT_ADVERT',    kind:'wht', rate:'2', from:'2000-01-01', to:null, cond:{channel:'manual'}, ref:'ท.ป.4/2528 ข้อ 10', label:'ค่าโฆษณา' },
+  { code:'WHT_ADVERT',    kind:'wht', rate:'1', from:'2026-01-01', to:'2027-12-31', cond:{channel:'e_wht'}, ref:'มาตรการ e-Withholding Tax', label:'ค่าโฆษณา' },
   { code:'WHT_PROF',      kind:'wht', rate:'3', from:'2000-01-01', to:null, cond:{channel:'manual'}, ref:'ท.ป.4/2528 ข้อ 7', label:'วิชาชีพอิสระ' },
+  { code:'WHT_PROF',      kind:'wht', rate:'1', from:'2026-01-01', to:'2027-12-31', cond:{channel:'e_wht'}, ref:'มาตรการ e-Withholding Tax', label:'วิชาชีพอิสระ' },
   { code:'WHT_CONTRACT',  kind:'wht', rate:'3', from:'2000-01-01', to:null, cond:{channel:'manual'}, ref:'ท.ป.4/2528 ข้อ 8', label:'รับเหมา' },
+  { code:'WHT_CONTRACT',  kind:'wht', rate:'1', from:'2026-01-01', to:'2027-12-31', cond:{channel:'e_wht'}, ref:'มาตรการ e-Withholding Tax', label:'รับเหมา' },
 ];
 
 const SSO_RATES = [
@@ -291,7 +318,7 @@ function periodFor(date) {
 const SEQ_PREFIX = {
   invoice:'INV', receipt:'RC', creditNote:'CN', debitNote:'DN', quotation:'QT', salesOrder:'SO',
   purchaseOrder:'PO', bill:'AP', payment:'PV', whtCert:'WT', stockCount:'SC',
-  billingNote:'BN', goodsReceipt:'GR', expense:'EX', paymentBatch:'PB',
+  billingNote:'BN', goodsReceipt:'GR', expense:'EX', paymentBatch:'PB', customerRefund:'RF',
   je_sales:'SA', je_purchase:'PU', je_receipt:'RV', je_payment:'PY',
   je_general:'JV', je_adjustment:'JV', je_payroll:'PR', je_asset:'AS',
   je_inventory:'IV', je_opening:'OB', je_closing:'CL',
@@ -422,10 +449,60 @@ function post(req) {
  *   เช่น รับชำระทั้งใบวางบิล หรือจ่ายทั้งใบเตรียมจ่าย ถ้าใบที่สามล้ม
  *   ใบที่หนึ่งกับสองต้องไม่ค้างอยู่ในระบบ — จึงถ่ายสำเนาไว้ก่อนแล้วคืนกลับเมื่อพลาด
  */
+/* ---------- ทำเป็นชุดเดียว ----------
+   คำสั่งที่เขียนข้อมูลทุกตัวห่อด้วย atomically — ล้มกลางทางแล้วข้อมูลกลับเหมือนก่อนเริ่มทุกอย่าง
+   รวมถึงเลขที่เอกสารที่จองไปแล้ว ทะเบียนจึงไม่มีเลขขาดช่วงจากคำสั่งที่ล้ม
+   ตอนสร้างข้อมูลตัวอย่างทั้งชุด (TX_BULK) ถ่ายภาพครั้งเดียวที่ชั้นนอกสุด ไม่ถ่ายทุกคำสั่ง */
+let TX_BULK = 0;
+/* ถ่ายภาพแยกเป็นส่วน ๆ ตอนล้มคืนเฉพาะส่วนที่เปลี่ยนจริง — คำสั่งส่วนใหญ่ล้มที่ขั้นตรวจก่อนแตะข้อมูล
+   ถ้าคืนทั้งก้อน วัตถุทุกตัวจะถูกสร้างใหม่ ตัวแปรที่หน้าจอหรือผู้เรียกถืออยู่จะชี้ไปของเก่าที่ไม่อยู่ในระบบแล้ว */
+function txParts() {
+  const out = [];
+  Object.keys(DB).forEach(function (k) {
+    if (k === 'docs' && DB.docs && typeof DB.docs === 'object') {
+      Object.keys(DB.docs).forEach((c) => out.push([DB.docs, c]));
+    } else out.push([DB, k]);
+  });
+  return out;
+}
+function txSnapshot() {
+  return { keys: Object.keys(DB), docKeys: Object.keys(DB.docs || {}),
+    parts: txParts().map((p) => [p[0], p[1], JSON.stringify(p[0][p[1]])]) };
+}
+function txRestore(snap) {
+  Object.keys(DB).forEach((k) => { if (snap.keys.indexOf(k) < 0) delete DB[k]; });
+  Object.keys(DB.docs || {}).forEach((k) => { if (snap.docKeys.indexOf(k) < 0) delete DB.docs[k]; });
+  snap.parts.forEach(function (p) {
+    const holder = p[0], key = p[1], json = p[2];
+    const cur = holder[key];
+    if (JSON.stringify(cur) === json) return;
+    const was = json === undefined ? undefined : JSON.parse(json);
+    /* เพิ่มแถวเข้าหัวหรือท้ายอาร์เรย์อย่างเดียว — ตัดแถวที่เพิ่มออก คงวัตถุเดิมไว้ */
+    if (Array.isArray(cur) && Array.isArray(was) && cur.length > was.length) {
+      const n = cur.length - was.length;
+      if (JSON.stringify(cur.slice(n)) === json) { cur.splice(0, n); return; }
+      if (JSON.stringify(cur.slice(0, was.length)) === json) { cur.splice(was.length, n); return; }
+    }
+    holder[key] = was;
+  });
+}
 function atomically(fn) {
-  const before = JSON.stringify(DB);
+  if (TX_BULK > 0) return fn();
+  const snap = txSnapshot();
   try { return fn(); }
-  catch (e) { loadState(JSON.parse(before)); throw e; }
+  catch (e) { txRestore(snap); throw e; }
+}
+function transactional(fn) {
+  return function () { const a = arguments, t = this; return atomically(() => fn.apply(t, a)); };
+}
+function bulkTransaction(fn) {
+  return function () {
+    const a = arguments, t = this;
+    return atomically(function () {
+      TX_BULK++;
+      try { return fn.apply(t, a); } finally { TX_BULK--; }
+    });
+  };
 }
 
 /* ใบสำคัญที่เกิดจากเอกสาร ต้องยกเลิกที่ตัวเอกสาร ไม่ใช่กลับรายการที่ใบสำคัญ
@@ -440,6 +517,7 @@ const ENTRY_FROM = {
   payment:['ใบสำคัญจ่าย', 'เปิดใบสำคัญจ่ายแล้วกดยกเลิกเอกสาร ระบบจะยกเลิก 50 ทวิ ให้ด้วย'],
   expense:['ค่าใช้จ่าย', 'เปิดรายการค่าใช้จ่ายแล้วกดยกเลิกเอกสาร ระบบจะยกเลิก 50 ทวิ ให้ด้วย'],
   goodsReceipt:['ใบรับสินค้า', 'เปิดใบรับสินค้าแล้วกดยกเลิกเอกสาร'],
+  customerRefund:['ใบคืนเงินลูกค้า', 'เปิดใบกำกับเดิมแล้วกดยกเลิกที่ใบคืนเงิน'],
   payroll:['งวดเงินเดือน', 'ไปที่หน้าเงินเดือนแล้วกดยกเลิกงวดเงินเดือน ระบบจะตัดออกจาก ภ.ง.ด.1 ให้ด้วย'],
   depreciation:['ค่าเสื่อมราคาประจำงวด', 'ไปที่หน้าค่าเสื่อมราคาแล้วกดยกเลิกงวด ระบบจะคืนค่าเสื่อมสะสมของทรัพย์สินให้ด้วย'],
   filing:['การยื่นแบบภาษี', 'แบบที่ยื่นแล้วต้องยื่นเพิ่มเติมกับกรมสรรพากร แล้วบันทึกปรับปรุงแทน'],
@@ -727,6 +805,8 @@ function settledUpto(kind, docNo, asOf) {
     DB.docs.creditNote.forEach((c) => { if (live(c)) v += c.total; });
     /* ใบเพิ่มหนี้เดินกลับทาง — ทำให้ลูกหนี้ค้างมากขึ้น ไม่ใช่น้อยลง */
     DB.docs.debitNote.forEach((c) => { if (live(c)) v -= c.total; });
+    /* คืนเงินลูกค้าที่มีเครดิตเกิน ทำให้ยอดติดลบกลับขึ้นมาเป็นศูนย์ */
+    (DB.docs.customerRefund || []).forEach((r) => { if (live(r)) v -= r.amount; });
     return v;
   }
   let v = 0;
@@ -742,7 +822,7 @@ const outstandingAsOf = (kind, d, asOf) =>
 /* ยอดคงค้าง ณ ปัจจุบัน — เขียนไว้ที่เดียว หน้าจอและรายงานต้องเรียกตัวนี้เท่านั้น
    ไม่งั้นพอเพิ่มประเภทเอกสารใหม่ จะมีบางหน้าลืมนับแล้วตัวเลขเพี้ยนแบบหายาก */
 /* เอกสารที่ยกเลิกแล้วไม่มียอดค้าง — ใบสำคัญของมันถูกกลับรายการไปแล้ว */
-const invOutstanding = (d) => d.status === 'void' ? 0 : d.total + (d.debited || 0) - d.paid - d.credited;
+const invOutstanding = (d) => d.status === 'void' ? 0 : d.total + (d.debited || 0) + (d.refunded || 0) - d.paid - d.credited;
 const billOutstanding = (d) => d.status === 'void' ? 0 : d.total - d.paid;
 
 /* ---------- อายุหนี้ ---------- */
@@ -753,7 +833,8 @@ function aging(kind, asOf) {
     if (d.status === 'draft' || d.status === 'void') return;
     if (d.date > asOf) return;
     const out = outstandingAsOf(kind, d, asOf);
-    if (out <= 0) return;
+    /* ยอดติดลบ (ลูกค้าจ่ายเกิน/ได้ลดหนี้หลังจ่ายครบ) ต้องอยู่ในรายงานด้วย ไม่งั้นรวมไม่เท่าบัญชีคุม */
+    if (out === 0) return;
     const days = Math.floor((new Date(asOf) - new Date(d.due)) / 86400000);
     const b = days <= 0 ? 'notDue' : days <= 30 ? 'b30' : days <= 60 ? 'b60' : days <= 90 ? 'b90' : 'over';
     const key = d.partnerCode;

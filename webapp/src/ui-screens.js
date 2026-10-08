@@ -399,12 +399,16 @@ function scClose() {
       : (chk.canClose ? 'พร้อมปิดงวด — ตรวจครบทุกข้อแล้ว'
                       : 'ยังปิดไม่ได้: ' + chk.items.filter((i) => i.blocking && !i.ok).map((i) => i.label).join(' · ')),
   })
-  + card({ title:'สถานะงวดทั้งปี', sub:'รอบบัญชี ' + DB.company.fiscalYear,
+  + card({ title:'สถานะงวดทั้งปี', sub:'รอบบัญชี ' + DB.company.fiscalYear + ' · ' + DB.periods.length + ' งวด',
+      /* เปิดปีถัดไปได้เมื่อเหลือไม่ถึงสามเดือนก่อนถึงงวดสุดท้าย กันกดเปิดปีล่วงหน้าไปไกลโดยไม่ตั้งใจ */
+      actions: btn('newyear', '+ เปิดงวดปีบัญชีถัดไป',
+        DB.periods.slice().sort((a, b) => a.start < b.start ? -1 : 1).pop().start <= addDays(TODAY, 92) ? '' : 'disabled'),
       body: '<div class="periods">' + DB.periods.map((x) =>
         '<button class="pchip ' + x.status + (x.code === STATE.period ? ' on' : '') + '" data-act="period:' + x.code + '">'
         + esc(thPeriod(x.code)) + '<span>' + (x.status === 'closed' ? 'ปิดแล้ว' : 'เปิดอยู่') + '</span></button>').join('')
         + '</div>',
-      foot: 'ปิดแล้ว ' + closedList.length + ' งวด จาก ' + DB.periods.length + ' งวด' });
+      foot: 'ปิดแล้ว ' + closedList.length + ' งวด จาก ' + DB.periods.length + ' งวด · ข้ามปีได้โดยไม่ต้องลงรายการปิดบัญชี '
+        + 'เพราะงบแสดงฐานะการเงินรวมกำไรของทุกปีก่อนหน้าเข้ากำไรสะสมให้เอง · ภาษีหัก ณ ที่จ่ายเดือนธันวาคม ระบบเปิดงวดปีถัดไปให้อัตโนมัติตอนยื่นแบบ' });
 }
 
 /* ===================================================================
@@ -417,11 +421,13 @@ function invoiceDetail(no) {
   const rcs = DB.docs.receipt.filter((r) => r.invoiceNo === no);
   const cns = DB.docs.creditNote.filter((c) => c.invoiceNo === no);
   const dns = DB.docs.debitNote.filter((c) => c.invoiceNo === no);
+  const rfs = (DB.docs.customerRefund || []).filter((c) => c.invoiceNo === no);
   return card({
     title: 'ใบกำกับภาษี/ใบส่งของ เลขที่ ' + d.no,
     sub: 'ออกวันที่ ' + thDate(d.date) + ' · ครบกำหนด ' + thDate(d.due),
     actions: (out > 0 ? btn('pay:' + d.no, 'รับชำระเงิน', 'primary') : '')
-      + (out > 0 ? btn('cn:' + d.no, 'ออกใบลดหนี้') : '')
+      + (out < 0 ? btn('refund:' + d.no, 'คืนเงินลูกค้า ' + fmt(-out), 'primary') : '')
+      + (!isVoid(d) && creditableBase(d) > 0 ? btn('cn:' + d.no, 'ออกใบลดหนี้') : '')
       + (d.status !== 'void' ? btn('dn:' + d.no, 'ออกใบเพิ่มหนี้') : '')
       + printBtn('invoice', d.no) + btn('entry:' + d.entryNo, 'ดูใบสำคัญ') + voidBtn('invoice', d) + btn('sel:', 'ปิด'),
     body: voidBanner(d)
@@ -445,7 +451,8 @@ function invoiceDetail(no) {
       + (d.paid ? '<div><span>รับชำระแล้ว</span><b>' + fmt(d.paid) + '</b></div>' : '')
       + (d.credited ? '<div><span>ลดหนี้แล้ว</span><b>' + fmt(d.credited) + '</b></div>' : '')
       + (d.debited ? '<div><span>เพิ่มหนี้แล้ว</span><b>' + fmt(d.debited) + '</b></div>' : '')
-      + '<div class="gt"><span>คงเหลือ</span><b>' + fmt(out) + '</b></div>'
+      + (d.refunded ? '<div><span>คืนเงินลูกค้าแล้ว</span><b>' + fmt(d.refunded) + '</b></div>' : '')
+      + '<div class="gt"><span>' + (out < 0 ? 'ลูกค้ามีเครดิต (ต้องคืน)' : 'คงเหลือ') + '</span><b>' + fmt(Math.abs(out)) + '</b></div>'
       + '</div>'
       + (rcs.length ? '<div class="sub-h">ใบเสร็จรับเงินที่อ้างถึงใบนี้</div>' + tbl({
           cols:[{t:'เลขที่'},{t:'วันที่'},{t:'รับก่อนหัก',a:'r'},{t:'ถูกหัก ณ ที่จ่าย',a:'r'},{t:'รับสุทธิ',a:'r'},{t:'สถานะ'}],
@@ -458,7 +465,12 @@ function invoiceDetail(no) {
       + (dns.length ? '<div class="sub-h">ใบเพิ่มหนี้ที่อ้างถึงใบนี้</div>' + tbl({
           cols:[{t:'เลขที่'},{t:'วันที่'},{t:'เหตุผลตามมาตรา 86/9'},{t:'รวม',a:'r'},{t:'สถานะ'}],
           rows: dns.map((c) => [{mono:c.no}, thDateNum(c.date), c.reasonText, {n:c.total}, statusPill(c.status || 'posted')]),
-          rowAttr: (r, i) => rowCls(dns[i]) + ' data-act="open:debitnotes:' + r[0].mono + '"' }) : ''),
+          rowAttr: (r, i) => rowCls(dns[i]) + ' data-act="open:debitnotes:' + r[0].mono + '"' }) : '')
+      + (rfs.length ? '<div class="sub-h">คืนเงินลูกค้า</div>' + tbl({
+          cols:[{t:'เลขที่'},{t:'วันที่'},{t:'วิธี'},{t:'จำนวนเงิน',a:'r'},{t:'สถานะ'},{t:''}],
+          rows: rfs.map((c) => [{mono:c.no}, thDateNum(c.date), PAY_METHOD[c.method] || c.method, {n:c.amount},
+            statusPill(c.status || 'posted'), {html: isVoid(c) ? '' : btn('void:customerRefund:' + c.no, 'ยกเลิก', 'danger')}]),
+          rowAttr: (r, i) => isVoid(rfs[i]) ? 'class="is-void"' : '' }) : ''),
     foot: isVoid(d)
       ? 'ใบกำกับที่ยกเลิกยังอยู่ในรายงานภาษีขายด้วยยอดศูนย์ เลขที่จึงเรียงต่อเนื่องไม่ขาดช่วง · ถ้าต้องเก็บเงินจริงให้ออกใบกำกับใบใหม่'
       : 'ครบองค์ประกอบตามมาตรา 86/4 · ส่งกรมสรรพากรแบบ e-Tax Invoice แล้ว (จำลอง)'

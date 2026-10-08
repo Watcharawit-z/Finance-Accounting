@@ -133,12 +133,15 @@ function modalReceive(no) {
           options:[['transfer','โอนเงินเข้าบัญชี'],['cheque','เช็ค'],['cash','เงินสด']] })
       + field({ name:'wht', label:'ลูกค้าหักภาษี ณ ที่จ่ายหรือไม่', type:'select',
           options: optWht('ไม่ได้ถูกหัก'), hint:'ถ้าถูกหัก ระบบจะบันทึกเป็นสินทรัพย์รอเครดิตภาษีปลายปี' })
+      + field({ name:'whtBase', label:'ฐานที่ลูกค้าหัก (ตาม 50 ทวิ)', placeholder:'เว้นว่าง = ให้ระบบคิด',
+          hint: inv ? 'ระบบคิดจากค่าบริการก่อนภาษี ไม่รวมค่าสินค้า · รับเต็มยอดนี้ = ' + fmt(receiptServiceShare(inv, out)) + ' บาท'
+            : 'ระบบคิดจากค่าบริการก่อนภาษีในยอดที่รับ ไม่รวมค่าสินค้า (ซื้อสินค้าไม่ต้องหัก ณ ที่จ่าย)' })
       + '</div>',
     submitLabel:'รับชำระและลงบัญชี',
     onSubmit: function () {
       submitAction(function () {
         const r = receivePayment({ invoiceNo: no || val('invoiceNo'), amount: val('amount'), date: val('date'),
-          method: val('method'), whtCode: val('wht') || null });
+          method: val('method'), whtCode: val('wht') || null, whtBase: val('wht') ? val('whtBase') : null });
         toast('บันทึกใบเสร็จ ' + r.no + ' แล้ว', 'ok',
           'รับสุทธิ ' + fmt(r.net) + ' บาท' + (r.wht ? ' (ถูกหักไว้ ' + fmt(r.wht) + ')' : ''));
         return r;
@@ -147,31 +150,98 @@ function modalReceive(no) {
   });
 }
 
-function modalCreditNote(no) {
-  const inv = no ? DB.docs.invoice.find((d) => d.no === no) : null;
-  if (no && !inv) return;
-  const refs = inv ? [] : DB.docs.invoice
-    .filter((d) => d.status !== 'void' && invOutstanding(d) > 0 && d.base - d.credited > 0)
-    .map((d) => [d.no, d.no + ' · ' + d.partnerName + ' · ลดได้อีก ' + fmt(d.base - d.credited)]);
-  if (!inv && !needRefs(refs, 'ไม่มีใบกำกับภาษีที่ออกใบลดหนี้ได้', 'ใบลดหนี้ต้องอ้างใบกำกับที่ยังมียอดค้าง (มาตรา 86/10)')) return;
+/** ตัวเลือกอัตราภาษีของใบลดหนี้/เพิ่มหนี้ — แสดงเฉพาะใบกำกับที่มีหลายอัตรา */
+function noteCodeField(inv, cn) {
+  const codes = invoiceTaxCodes(inv);
+  if (codes.length < 2) return '';
+  return field({ name:'taxCode', label: cn ? 'ลดหนี้รายการอัตรา' : 'เพิ่มหนี้รายการอัตรา', type:'select', wide:true,
+    options: codes.map((c) => [c, TAX_CODE_LABEL[c] + (cn ? ' · ลดได้อีก ' + fmt(creditableBase(inv, c)) : '')]),
+    hint:'ใบกำกับนี้มีหลายอัตรา อัตราในใบ' + (cn ? 'ลดหนี้' : 'เพิ่มหนี้') + 'ต้องตรงกับรายการเดิม ภ.พ.30 แต่ละช่องจึงถูก' });
+}
+/** สินค้าคงคลังที่ขายในใบกำกับนี้และยังรับคืนได้ */
+function returnableItems(inv) {
+  const out = [];
+  DB.docs.stockMove.filter((m) => m.src === inv.no && m.dir === 'out').forEach(function (m) {
+    const back = DB.docs.creditNote.filter((c) => c.invoiceNo === inv.no && c.status !== 'void')
+      .reduce((a, c) => a + (c.returns || []).filter((r) => r.itemCode === m.item).reduce((b, r) => b + r.qty, 0), 0);
+    const row = out.find((x) => x.code === m.item);
+    if (row) { row.sold = roundQty(row.sold + m.qty); return; }
+    const it = DB.items.find((x) => x.code === m.item) || {};
+    out.push({ code: m.item, name: it.name || m.item, uom: it.uom || '', sold: m.qty, back });
+  });
+  out.forEach((r) => { r.left = roundQty(r.sold - r.back); });
+  return out.filter((r) => r.left > 0);
+}
+function modalCreditNote(no, fromList) {
+  const pickable = (d) => d.status !== 'void' && creditableBase(d) > 0;
+  /* ใบที่ยังค้างชำระขึ้นก่อน — ลดหนี้ใบที่ชำระครบแล้วทำได้ แต่ต้องคืนเงินลูกค้าตามมา */
+  const refs = DB.docs.invoice.filter(pickable)
+    .sort((a, b) => (invOutstanding(b) > 0) - (invOutstanding(a) > 0))
+    .map((d) => [d.no, d.no + ' · ' + d.partnerName + ' · ลดได้อีก ' + fmt(creditableBase(d))
+      + (invOutstanding(d) > 0 ? '' : ' · ชำระครบแล้ว')]);
+  if (!no && !needRefs(refs, 'ไม่มีใบกำกับภาษีที่ออกใบลดหนี้ได้', 'ใบลดหนี้ต้องอ้างใบกำกับเดิมที่ยังมีมูลค่าให้ลด (มาตรา 86/10)')) return;
+  const list = fromList || !no;
+  const invNo = no || refs[0][0];
+  const inv = DB.docs.invoice.find((d) => d.no === invNo);
+  if (!inv) return;
+  const rets = returnableItems(inv);
   modal({
-    title: inv ? 'ออกใบลดหนี้อ้างใบกำกับ ' + no : 'ออกใบลดหนี้',
+    title: list ? 'ออกใบลดหนี้' : 'ออกใบลดหนี้อ้างใบกำกับ ' + invNo,
     sub:'ออกได้เฉพาะเหตุที่มาตรา 86/10 กำหนดเท่านั้น และต้องอ้างใบกำกับเดิมเสมอ',
-    body:'<div class="flds">'
-      + (inv ? '' : field({ name:'invoiceNo', label:'อ้างใบกำกับภาษีเดิม', type:'select', wide:true, options: refs }))
+    body:'<div class="flds" data-note="cn">'
+      + (list ? field({ name:'invoiceNo', label:'อ้างใบกำกับภาษีเดิม', type:'select', wide:true, options: refs, value: invNo }) : '')
+      + noteCodeField(inv, true)
       + field({ name:'base', label:'มูลค่าที่ลด (ก่อนภาษี)', value:'0',
-          hint: inv ? 'ลดได้ไม่เกินมูลค่าคงเหลือของใบกำกับเดิม ' + fmt(inv.base - inv.credited) + ' บาท'
-            : 'ลดได้ไม่เกินยอด "ลดได้อีก" ของใบกำกับที่เลือก' })
+          hint:'ลดได้ไม่เกินมูลค่าคงเหลือ ' + fmt(creditableBase(inv)) + ' บาท'
+            + (invOutstanding(inv) <= 0 ? ' · ลูกค้าชำระครบแล้ว ลดหนี้แล้วต้องคืนเงินที่หน้าใบกำกับ' : '') })
       + field({ name:'date', label:'วันที่ออกใบลดหนี้', type:'date', value: defaultDate() })
       + field({ name:'reason', label:'เหตุแห่งการลดหนี้', type:'select', wide:true,
           options: Object.keys(CN_REASONS).map((k) => [k, CN_REASONS[k]]) })
-      + '</div>',
+      + '</div>'
+      + (rets.length ? '<div class="sub-h">รับสินค้าคืนเข้าคลัง (ถ้ามี)</div><div class="flds">'
+          + rets.map((r, i) => field({ name:'ret' + i, label: r.code + ' ' + r.name, value:'0', type:'number',
+              hint:'ขายไป ' + r.sold + ' ' + r.uom + (r.back ? ' · คืนแล้ว ' + r.back : '') + ' · คืนได้อีก ' + r.left
+                + ' — ของกลับเข้าคลังด้วยต้นทุนเดิมตอนขาย' })).join('') + '</div>' : ''),
     submitLabel:'ออกใบลดหนี้',
     onSubmit: function () {
       submitAction(function () {
-        const c = issueCreditNote({ invoiceNo: no || val('invoiceNo'), base: val('base'), date: val('date'), reason: val('reason') });
-        toast('ออกใบลดหนี้ ' + c.no + ' แล้ว', 'ok', 'ลดภาษีขาย ' + fmt(c.vat) + ' บาทในงวดนี้');
+        const returnLines = rets.map((r, i) => ({ itemCode: r.code, qty: Number(val('ret' + i) || 0) })).filter((r) => r.qty > 0);
+        const c = issueCreditNote({ invoiceNo: list ? val('invoiceNo') : invNo, base: val('base'), date: val('date'),
+          reason: val('reason'), taxCode: val('taxCode') || undefined, returnLines });
+        toast('ออกใบลดหนี้ ' + c.no + ' แล้ว', 'ok', 'ลดภาษีขาย ' + fmt(c.vat) + ' บาทในงวดนี้'
+          + (c.returns.length ? ' · รับสินค้าคืนเข้าคลัง ' + c.returns.length + ' รายการ' : ''));
         return c;
+      });
+    },
+  });
+}
+
+/* ---------- คืนเงินลูกค้า — ลดหนี้หลังรับเงินครบ ---------- */
+function modalRefund(no) {
+  const inv = DB.docs.invoice.find((d) => d.no === no);
+  if (!inv) return;
+  const credit = -invOutstanding(inv);
+  if (credit <= 0) { toast('ใบกำกับ ' + no + ' ไม่มียอดที่ต้องคืนลูกค้า', 'err'); return; }
+  const banks = payFromAccounts().map((a) => [a.code, a.code + ' ' + a.name]);
+  modal({
+    title:'คืนเงินลูกค้า ตามใบกำกับ ' + no,
+    sub: inv.partnerName + ' · มีเครดิตจากใบลดหนี้ ' + fmt(credit) + ' บาท',
+    body:'<div class="flds">'
+      + field({ name:'amount', label:'จำนวนเงินที่คืน', value: fmt(credit), hint:'คืนได้ไม่เกินเครดิตของลูกค้า' })
+      + field({ name:'date', label:'วันที่คืนเงิน', type:'date', value: defaultDate() })
+      + field({ name:'bank', label:'จ่ายจากบัญชี', type:'select', options: banks, value: accBySub('bank') })
+      + field({ name:'method', label:'วิธีคืนเงิน', type:'select', value:'transfer',
+          options:[['transfer','โอนเงิน'],['cheque','เช็ค'],['cash','เงินสด']] })
+      + field({ name:'note', label:'หมายเหตุ', wide:true, placeholder:'เช่น เลขที่อ้างอิงการโอน' })
+      + '</div>',
+    submitLabel:'คืนเงินและลงบัญชี',
+    note:'Dr ลูกหนี้การค้า / Cr เงินฝากธนาคาร — ยอดเครดิตของลูกค้าจะกลับเป็นศูนย์',
+    onSubmit: function () {
+      submitAction(function () {
+        const r = refundCustomer({ invoiceNo: no, amount: val('amount'), date: val('date'), bankAccount: val('bank'),
+          method: val('method'), note: val('note') });
+        toast('บันทึกคืนเงินลูกค้า ' + r.no + ' แล้ว', 'ok', fmt(r.amount) + ' บาท');
+        return r;
       });
     },
   });
@@ -374,19 +444,23 @@ function modalUndoImport(no) {
   });
 }
 
-function modalDebitNote(no) {
-  const inv = no ? DB.docs.invoice.find((d) => d.no === no) : null;
-  if (no && !inv) return;
-  const refs = inv ? [] : DB.docs.invoice.filter((d) => d.status !== 'void')
+function modalDebitNote(no, fromList) {
+  const refs = DB.docs.invoice.filter((d) => d.status !== 'void')
     .map((d) => [d.no, d.no + ' · ' + d.partnerName + ' · ก่อนภาษี ' + fmt(d.base)]);
-  if (!inv && !needRefs(refs, 'ยังไม่มีใบกำกับภาษีให้อ้าง', 'ใบเพิ่มหนี้ต้องอ้างใบกำกับเดิมเสมอ (มาตรา 86/9)')) return;
+  if (!no && !needRefs(refs, 'ยังไม่มีใบกำกับภาษีให้อ้าง', 'ใบเพิ่มหนี้ต้องอ้างใบกำกับเดิมเสมอ (มาตรา 86/9)')) return;
+  const list = fromList || !no;
+  const invNo = no || refs[0][0];
+  const inv = DB.docs.invoice.find((d) => d.no === invNo);
+  if (!inv) return;
   modal({
-    title: inv ? 'ออกใบเพิ่มหนี้อ้างใบกำกับ ' + no : 'ออกใบเพิ่มหนี้',
+    title: list ? 'ออกใบเพิ่มหนี้' : 'ออกใบเพิ่มหนี้อ้างใบกำกับ ' + invNo,
     sub:'ใช้เมื่อเรียกเก็บเงินต่ำกว่าที่ควร ออกได้เฉพาะเหตุตามมาตรา 86/9 และต้องอ้างใบกำกับเดิม',
-    body:'<div class="flds">'
-      + (inv ? '' : field({ name:'invoiceNo', label:'อ้างใบกำกับภาษีเดิม', type:'select', wide:true, options: refs }))
+    body:'<div class="flds" data-note="dn">'
+      + (list ? field({ name:'invoiceNo', label:'อ้างใบกำกับภาษีเดิม', type:'select', wide:true, options: refs, value: invNo }) : '')
+      + noteCodeField(inv, false)
       + field({ name:'base', label:'มูลค่าที่เพิ่ม (ก่อนภาษี)', value:'0',
-          hint: inv ? 'ยอดเดิมของใบกำกับก่อนภาษีคือ ' + fmt(inv.base) + ' บาท' : 'มูลค่าที่เรียกเก็บเพิ่ม ไม่รวมภาษี' })
+          hint:'ยอดเดิมของใบกำกับก่อนภาษีคือ ' + fmt(inv.base) + ' บาท'
+            + (invoiceTaxCodes(inv).indexOf('VAT7') < 0 ? ' · ใบนี้ไม่มีภาษี 7% ใบเพิ่มหนี้จึงไม่มีภาษีเช่นกัน' : '') })
       + field({ name:'date', label:'วันที่ออกใบเพิ่มหนี้', type:'date', value: defaultDate() })
       + field({ name:'reason', label:'เหตุแห่งการเพิ่มหนี้', type:'select', wide:true,
           options: Object.keys(DN_REASONS).map((k) => [k, DN_REASONS[k]]) })
@@ -395,7 +469,8 @@ function modalDebitNote(no) {
     note:'อย่าออกใบกำกับภาษีใบใหม่ทับ เพราะรายได้และภาษีขายจะถูกนับซ้ำสองรอบ',
     onSubmit: function () {
       submitAction(function () {
-        const c = issueDebitNote({ invoiceNo: no || val('invoiceNo'), base: val('base'), date: val('date'), reason: val('reason') });
+        const c = issueDebitNote({ invoiceNo: list ? val('invoiceNo') : invNo, base: val('base'), date: val('date'),
+          reason: val('reason'), taxCode: val('taxCode') || undefined });
         toast('ออกใบเพิ่มหนี้ ' + c.no + ' แล้ว', 'ok', 'เพิ่มภาษีขาย ' + fmt(c.vat) + ' บาทในงวดนี้');
         return c;
       });
@@ -1311,6 +1386,14 @@ function dispatch(act) {
     return;
   }
   if (head === 'cn')      { modalCreditNote(arg); return; }
+  if (head === 'refund')  { modalRefund(arg); return; }
+  if (head === 'newyear') {
+    runAction(function () {
+      const made = openNextFiscalYear('เปิดจากหน้าปิดงวด');
+      toast('เปิดงวดบัญชี ' + made.length + ' งวดแล้ว', 'ok', thPeriod(made[0]) + ' ถึง ' + thPeriod(made[made.length - 1]));
+    });
+    return;
+  }
   if (head === 'dn')      { modalDebitNote(arg); return; }
   if (head === 'trade') {
     const [kind, what, docNo] = rest;
@@ -1402,6 +1485,12 @@ function bindEvents() {
     const t = ev.target;
     if (t.id === 'periodSel') { STATE.period = t.value; STATE.sel = null; save(); render(); return; }
     if (t.id === 'prCopies')  { PRINT.copies = t.value; renderPrint(); return; }
+    /* เปลี่ยนใบกำกับที่อ้างในใบลดหนี้/เพิ่มหนี้ — อัตราภาษีและสินค้าที่รับคืนได้เปลี่ยนตาม */
+    if (t.name === 'invoiceNo' && t.closest('[data-note]')) {
+      const kind = t.closest('[data-note]').getAttribute('data-note');
+      if (kind === 'cn') modalCreditNote(t.value, true); else modalDebitNote(t.value, true);
+      return;
+    }
     if (t.id === 'bookSel')   { switchCompany(t.value); return; }
     if (t.id === 'accSel')    { STATE.drill = t.value; render(); return; }
     if (t.id === 'file') {
