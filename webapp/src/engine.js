@@ -113,19 +113,23 @@ function bahtText(a) {
 const TH_M = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
 const TH_MF = ['มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน',
                'กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม'];
+/* ปีที่แสดงบนจอ: พ.ศ. (ค่าเริ่มต้น) หรือ ค.ศ. ตามที่ผู้ใช้เลือก
+   เอกสารที่พิมพ์ออกไปใช้ พ.ศ. เสมอ (lockBE) เพราะเป็นเอกสารทางภาษีที่ยื่นต่อหน่วยงานไทย */
+const YEAR_ERA = { ce: false, lockBE: 0 };
+const eraYear = (y) => (YEAR_ERA.ce && !YEAR_ERA.lockBE ? y : y + 543);
 function thDate(iso) {
   if (!iso) return '—';
   const [y, m, d] = iso.split('-').map(Number);
-  return d + ' ' + TH_M[m - 1] + ' ' + (y + 543);
+  return d + ' ' + TH_M[m - 1] + ' ' + eraYear(y);
 }
 function thDateNum(iso) {
   if (!iso) return '—';
   const [y, m, d] = iso.split('-').map(Number);
-  return String(d).padStart(2,'0') + '/' + String(m).padStart(2,'0') + '/' + (y + 543);
+  return String(d).padStart(2,'0') + '/' + String(m).padStart(2,'0') + '/' + eraYear(y);
 }
 function thPeriod(p) {           // '2026-07' → 'กรกฎาคม 2569'
   const [y, m] = p.split('-').map(Number);
-  return TH_MF[m - 1] + ' ' + (y + 543);
+  return TH_MF[m - 1] + ' ' + eraYear(y);
 }
 const periodOf = (iso) => iso.slice(0, 7);
 function addDays(iso, n) {

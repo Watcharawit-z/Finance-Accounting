@@ -95,6 +95,8 @@ function cmdkSources(q) {
     { icon: themeNow() === 'dark' ? 'sun' : 'moon', t:'สลับโหมดสว่าง / มืด', h:'การแสดงผล', act:'theme' },
     { icon:'printer', t:'พิมพ์หน้านี้', h:'รายงานบนจอ', act:'print' },
   ].concat(DENSITY.map((d) => ({ icon:'rows', t:'ตาราง: ' + d[1], h:'ความหนาแน่นของตาราง', act:'density:' + d[0] })))
+   .concat([{ icon:'calendar', t:'แสดงปีเป็น ค.ศ.', h:'การแสดงผล · ปีคริสต์ศักราช', act:'era:ce' },
+     { icon:'calendar', t:'แสดงปีเป็น พ.ศ.', h:'การแสดงผล · ปีพุทธศักราช', act:'era:be' }])
    .filter((c) => has(c.t, c.h));
   if (n) add('คำสั่ง', cmds, 5);
 

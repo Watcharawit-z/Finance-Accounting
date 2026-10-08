@@ -1980,6 +1980,24 @@ function scSettings() {
       foot:'ข้อมูลผู้ซื้อบนเอกสารเก่าไม่เปลี่ยนตาม เพราะระบบเก็บข้อมูล ณ วันที่ออกไว้ทุกใบ',
     })
     + card({
+      title:'การแสดงผล', sub:'ตั้งค่าเฉพาะเบราว์เซอร์เครื่องนี้ ไม่กระทบข้อมูลบัญชี',
+      body:'<div class="set-rows">'
+        + '<div><span>ปีบนหน้าจอ</span><div class="chips">'
+        + chip('era:be', 'พ.ศ. ' + (Number(TODAY.slice(0, 4)) + 543), !YEAR_ERA.ce) + chip('era:ce', 'ค.ศ. ' + TODAY.slice(0, 4), YEAR_ERA.ce)
+        + '</div><small>เอกสารที่พิมพ์ ใบกำกับภาษี และแบบภาษี ใช้ พ.ศ. เสมอ</small></div>'
+        + '<div><span>ความหนาแน่นของตาราง</span><div class="chips">'
+        + DENSITY.map((d) => chip('density:' + d[0], d[1], densityNow() === d[0])).join('')
+        + '</div><small>กระชับ = เห็นรายการได้มากขึ้นต่อหน้าจอ</small></div>'
+        + '<div><span>โหมดสี</span><div class="chips">'
+        + chip(themeNow() === 'dark' ? 'theme' : '', 'สว่าง', themeNow() !== 'dark') + chip(themeNow() === 'dark' ? '' : 'theme', 'มืด', themeNow() === 'dark')
+        + '</div><small>ค่าเริ่มต้นตามระบบปฏิบัติการ</small></div>'
+        + '<div><span>มุมมองที่บันทึกไว้</span><div>' + (savedViews().length
+          ? savedViews().map((v) => '<span class="view-chip"><button class="chip" data-act="sview:' + v.id + '">' + icon('bookmark') + esc(v.name)
+            + '</button><button class="view-x" data-act="sviewdel:' + v.id + '" aria-label="ลบมุมมอง ' + esc(v.name) + '">×</button></span>').join(' ')
+          : '<span class="dim">ยังไม่มี — กดไอคอนที่คั่นหน้าในแถบตัวกรองของรายการเอกสารเพื่อบันทึก</span>') + '</div></div>'
+        + '</div>',
+    })
+    + card({
       title:'เลขที่เอกสาร', sub:'ระบบจองเลขที่ตอนลงบัญชีสำเร็จเท่านั้น เลขจึงเรียงต่อเนื่องไม่มีช่องว่าง',
       body: tbl({
         cols:[{t:'เอกสาร'},{t:'รูปแบบเลขที่'},{t:'ใช้ไปแล้วงวดนี้',a:'c'}],

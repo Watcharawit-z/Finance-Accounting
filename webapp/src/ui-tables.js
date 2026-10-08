@@ -26,6 +26,17 @@ function cycleDensity() {
   toast('ตาราง: ' + next[1], 'ok');
 }
 
+/* ---------- ปี พ.ศ. / ค.ศ. บนจอ (เอกสารที่พิมพ์ใช้ พ.ศ. เสมอ) ---------- */
+const ERA_KEY = 'financii.era';
+function applyEra() { YEAR_ERA.ce = lsGet(ERA_KEY) === 'ce'; }
+function setEra(e) {
+  lsSet(ERA_KEY, e === 'ce' ? 'ce' : 'be');
+  applyEra();
+  render();
+  toast(e === 'ce' ? 'แสดงปีเป็น ค.ศ. บนหน้าจอ' : 'แสดงปีเป็น พ.ศ.', 'ok',
+    e === 'ce' ? 'เอกสารที่พิมพ์และแบบภาษียังใช้ พ.ศ. ตามที่ยื่นต่อหน่วยงานไทย' : '');
+}
+
 /* ---------- ตัวกรองสถานะของแต่ละหน้า ----------
    [รหัส, ชื่อ, เงื่อนไข] · ไม่มีเงื่อนไข = ทั้งหมด */
 const notVoid = (d) => !isVoid(d);

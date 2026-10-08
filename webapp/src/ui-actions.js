@@ -1229,6 +1229,7 @@ function dispatch(act) {
   if (head === 'popgo')   { closePop(); dispatch(arg); return; }
   if (head === 'theme')   { toggleTheme(); return; }
   if (head === 'density') { if (arg) setDensity(arg); else cycleDensity(); return; }
+  if (head === 'era')     { setEra(arg); return; }
   if (head === 'chip')    { STATE.chip[rest[0]] = rest[1]; render(); return; }
   if (head === 'sview')   { openView(arg); return; }
   if (head === 'sviewdel') { deleteView(arg); return; }
@@ -1854,6 +1855,7 @@ function runImportPackage(pkg) {
 async function boot() {
   applyTheme(lsGet(THEME_KEY));
   applyDensity();
+  applyEra();
   bindEvents();
   bindTableEvents();
   bindPeekEvents();

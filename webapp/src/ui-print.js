@@ -32,15 +32,20 @@ function pInfo(rows) {
       .map((r) => '<span>' + esc(r[0]) + '</span><div>' + esc(r[1]) + '</div>').join('')
     + '</div></div>';
 }
-/** ตารางรายการ — เติมบรรทัดว่างให้ครบ แบบฟอร์มจะได้หน้าตาเหมือนกันทุกใบ */
-function pTable(cols, rows, minRows) {
-  let h = '<table><thead><tr>' + cols.map((c) => '<th' + (c.w ? ' style="width:' + c.w + '"' : '') + '>'
+/** ตารางรายการ — เติมบรรทัดว่างให้ครบ แบบฟอร์มจะได้หน้าตาเหมือนกันทุกใบ
+    opt.paged = ตารางหลักของเอกสาร แบ่งหน้าได้เมื่อยาวเกินหนึ่งแผ่น (คอลัมน์ที่มี sum จะยกยอดไปหน้าถัดไป)
+    opt.total = บรรทัดรวมท้ายตาราง อยู่หน้าสุดท้ายเสมอ */
+function pTable(cols, rows, minRows, opt) {
+  const o = opt || {};
+  let h = '<table' + (o.paged ? ' class="p-items"' : '') + '><thead><tr>' + cols.map((c) => '<th'
+    + (c.w ? ' style="width:' + c.w + '"' : '') + (c.sum ? ' data-sum="1"' : '') + '>'
     + esc(c.t) + '</th>').join('') + '</tr></thead><tbody>';
-  rows.forEach(function (r) {
-    h += '<tr>' + r.map((v, i) => (cols[i].n ? '<td class="num">' + (v === '' ? '' : esc(v)) + '</td>'
-      : '<td' + (cols[i].c ? ' style="text-align:center"' : '') + '>' + esc(v) + '</td>')).join('') + '</tr>';
-  });
-  for (let i = rows.length; i < (minRows || 0); i++) h += '<tr>' + cols.map(() => '<td>&nbsp;</td>').join('') + '</tr>';
+  const tr = (r, cls) => '<tr' + (cls ? ' class="' + cls + '"' : '') + '>' + r.map((v, i) => (cols[i].n
+    ? '<td class="num">' + (v === '' ? '' : esc(v)) + '</td>'
+    : '<td' + (cols[i].c ? ' style="text-align:center"' : '') + '>' + esc(v) + '</td>')).join('') + '</tr>';
+  rows.forEach((r) => { h += tr(r); });
+  for (let i = rows.length; i < (minRows || 0); i++) h += '<tr class="p-fill">' + cols.map(() => '<td>&nbsp;</td>').join('') + '</tr>';
+  if (o.total) h += tr(o.total, 'p-totrow');
   return h + '</tbody></table>';
 }
 function pTotals(amountForWords, sums) {
@@ -59,7 +64,8 @@ function pSheet(inner, no, watermark) {
 }
 const lineRows = (lines) => lines.map((l, i) => [String(i + 1), l.desc, String(l.qty), l.uom || '', pm(l.price), pm(l.amount)]);
 const LINE_COLS = [{ t:'ลำดับ', w:'11mm', c:1 }, { t:'รายการ' }, { t:'จำนวน', w:'18mm', n:1 }, { t:'หน่วย', w:'16mm', c:1 },
-  { t:'ราคาต่อหน่วย', w:'28mm', n:1 }, { t:'จำนวนเงิน', w:'30mm', n:1 }];
+  { t:'ราคาต่อหน่วย', w:'28mm', n:1 }, { t:'จำนวนเงิน', w:'30mm', n:1, sum:1 }];
+const PAGED = { paged: true };
 
 /** แยกยอดตามชนิดภาษี — ใบกำกับต้องแสดงมูลค่าที่เสียภาษี อัตรา 0 และยกเว้นแยกกัน */
 function vatSplit(lines) {
@@ -98,7 +104,7 @@ const DOC_PRINT = {
       return pSheet(pHead('ใบกำกับภาษี/ใบส่งของ', 'TAX INVOICE / DELIVERY ORDER', copy)
         + '<div class="p-meta">' + pParty('ลูกค้า', d.snap)
         + pInfo([['เลขที่', d.no], ['วันที่', thDate(d.date)], ['เครดิต', term > 0 ? term + ' วัน' : 'เงินสด'], ['ครบกำหนด', thDate(d.due)]]) + '</div>'
-        + pTable(LINE_COLS, lineRows(d.lines), 8)
+        + pTable(LINE_COLS, lineRows(d.lines), 8, PAGED)
         + pTotals(d.total, vatSums(d))
         + pSign(['ผู้รับสินค้า', 'ผู้ส่งสินค้า', 'ผู้มีอำนาจลงนาม']), d.no, d.status === 'void' ? 'ยกเลิก' : '');
     },
@@ -128,8 +134,8 @@ const DOC_PRINT = {
         + '<div class="p-meta">' + pParty('ลูกค้า', d.snap)
         + pInfo([['เลขที่', d.no], ['วันที่', thDate(d.date)], ['นัดชำระ', thDate(d.dueDate)]]) + '</div>'
         + pTable([{ t:'ลำดับ', w:'11mm', c:1 }, { t:'เลขที่ใบกำกับภาษี' }, { t:'ลงวันที่', w:'30mm', c:1 },
-          { t:'ครบกำหนด', w:'30mm', c:1 }, { t:'จำนวนเงิน', w:'34mm', n:1 }],
-          d.invoices.map((r, i) => [String(i + 1), r.no, thDate(r.date), thDate(r.due), pm(r.amount)]), 8)
+          { t:'ครบกำหนด', w:'30mm', c:1 }, { t:'จำนวนเงิน', w:'34mm', n:1, sum:1 }],
+          d.invoices.map((r, i) => [String(i + 1), r.no, thDate(r.date), thDate(r.due), pm(r.amount)]), 8, PAGED)
         + pTotals(d.total, [['รวม ' + d.invoices.length + ' ใบ', pm(d.total), true]])
         + (d.note ? '<div class="p-note">หมายเหตุ: ' + esc(d.note) + '</div>' : '')
         + pSign(['ผู้วางบิล', 'ผู้รับวางบิล']), d.no, d.status === 'cancelled' ? 'ยกเลิก' : '');
@@ -154,8 +160,8 @@ const DOC_PRINT = {
         + pInfo([['เลขที่', d.no], ['วันที่รับ', thDate(d.date)], ['ใบส่งของ', d.vendorDoNo || ''], ['ใบสั่งซื้อ', d.poNo || ''],
           ['ตั้งหนี้', d.billNo || 'รอใบกำกับจากผู้ขาย']]) + '</div>'
         + pTable([{ t:'ลำดับ', w:'11mm', c:1 }, { t:'รหัส', w:'22mm', c:1 }, { t:'รายการ' }, { t:'จำนวน', w:'18mm', n:1 },
-          { t:'หน่วย', w:'16mm', c:1 }, { t:'ต้นทุนต่อหน่วย', w:'28mm', n:1 }, { t:'มูลค่า', w:'30mm', n:1 }],
-          d.lines.map((l, i) => [String(i + 1), l.itemCode, l.desc, String(l.qty), l.uom || '', pm(l.price), pm(l.amount)]), 8)
+          { t:'หน่วย', w:'16mm', c:1 }, { t:'ต้นทุนต่อหน่วย', w:'28mm', n:1 }, { t:'มูลค่า', w:'30mm', n:1, sum:1 }],
+          d.lines.map((l, i) => [String(i + 1), l.itemCode, l.desc, String(l.qty), l.uom || '', pm(l.price), pm(l.amount)]), 8, PAGED)
         + pTotals(d.total, [['มูลค่ารับเข้าคลัง (ก่อนภาษี)', pm(d.total), true]])
         + pEntry(d.entryNo)
         + pSign(['ผู้ส่งสินค้า', 'ผู้ตรวจรับสินค้า', 'ผู้บันทึกบัญชี']), d.no, isVoid(d) ? 'ยกเลิก' : '');
@@ -187,8 +193,8 @@ const DOC_PRINT = {
         + '<div class="p-meta">' + pParty('จ่ายให้', partnerOf(d.partnerCode))
         + pInfo([['เลขที่', d.no], ['วันที่', thDate(d.date)], ['ใบกำกับผู้ขาย', d.taxInvoiceNo || 'ไม่มี'],
           ['จ่ายจาก', acc(d.payFrom).name], ['50 ทวิ', d.certNo || '']]) + '</div>'
-        + pTable([{ t:'ลำดับ', w:'11mm', c:1 }, { t:'รายการ' }, { t:'บันทึกเข้าบัญชี', w:'52mm' }, { t:'จำนวนเงิน', w:'30mm', n:1 }],
-          d.lines.map((l, i) => [String(i + 1), l.desc, l.acc + ' ' + l.accName, pm(l.amount)]), 5)
+        + pTable([{ t:'ลำดับ', w:'11mm', c:1 }, { t:'รายการ' }, { t:'บันทึกเข้าบัญชี', w:'52mm' }, { t:'จำนวนเงิน', w:'30mm', n:1, sum:1 }],
+          d.lines.map((l, i) => [String(i + 1), l.desc, l.acc + ' ' + l.accName, pm(l.amount)]), 5, PAGED)
         + pTotals(d.net, [['มูลค่าก่อนภาษี', pm(d.base)], ['ภาษีซื้อ', pm(d.vat)], ['รวมทั้งสิ้น', pm(d.total)],
           ['หัก ภาษีหัก ณ ที่จ่าย' + (d.whtRate ? ' ' + d.whtRate + '%' : ''), pm(d.wht)], ['จ่ายสุทธิ', pm(d.net), true]])
         + pEntry(d.entryNo)
@@ -204,8 +210,8 @@ const DOC_PRINT = {
         + '<div class="p-meta">' + pInfo([['เลขที่', d.no], ['วันที่จัดทำ', thDate(d.date)], ['กำหนดจ่าย', thDate(d.payDate)], ['สถานะ', st]])
         + pInfo([['จำนวนราย', d.items.length + ' ราย'], ['หมายเหตุ', d.note || '']]) + '</div>'
         + pTable([{ t:'ลำดับ', w:'11mm', c:1 }, { t:'ตั้งหนี้', w:'27mm' }, { t:'ผู้ขาย' }, { t:'ครบกำหนด', w:'24mm', c:1 },
-          { t:'ยอดจ่าย', w:'27mm', n:1 }, { t:'หัก ณ ที่จ่าย', w:'22mm', n:1 }, { t:'จ่ายสุทธิ', w:'27mm', n:1 }],
-          d.items.map((i, k) => [String(k + 1), i.billNo, i.partnerName, thDateNum(i.due), pm(i.amount), pm(i.wht), pm(i.net)]), 8)
+          { t:'ยอดจ่าย', w:'27mm', n:1, sum:1 }, { t:'หัก ณ ที่จ่าย', w:'22mm', n:1, sum:1 }, { t:'จ่ายสุทธิ', w:'27mm', n:1, sum:1 }],
+          d.items.map((i, k) => [String(k + 1), i.billNo, i.partnerName, thDateNum(i.due), pm(i.amount), pm(i.wht), pm(i.net)]), 8, PAGED)
         + pTotals(d.net, [['ยอดตั้งหนี้ที่จะจ่าย', pm(d.total)], ['หักภาษี ณ ที่จ่าย (ประมาณ)', pm(d.wht)], ['เงินที่ต้องเตรียม', pm(d.net), true]])
         + pSign(['ผู้จัดทำ', 'ผู้ตรวจสอบ', 'ผู้อนุมัติจ่าย']), d.no, d.status === 'cancelled' ? 'ยกเลิก' : '');
     },
@@ -222,9 +228,9 @@ const DOC_PRINT = {
         + pInfo([['เลขที่', e.no], ['วันที่', thDate(e.date)], ['อ้างอิง', e.srcId || ''],
           ['สถานะ', e.status === 'reversed' ? 'กลับรายการแล้ว (' + e.reversedBy + ')' : 'ลงบัญชีแล้ว']]) + '</div>'
         + pTable([{ t:'ลำดับ', w:'11mm', c:1 }, { t:'รหัสบัญชี', w:'24mm', c:1 }, { t:'ชื่อบัญชี' }, { t:'คำอธิบาย', w:'40mm' },
-          { t:'เดบิต', w:'29mm', n:1 }, { t:'เครดิต', w:'29mm', n:1 }],
+          { t:'เดบิต', w:'29mm', n:1, sum:1 }, { t:'เครดิต', w:'29mm', n:1, sum:1 }],
           e.lines.map((l) => [String(l.n), l.acc, acc(l.acc).name + (l.partner ? ' (' + l.partner + ')' : ''), l.memo || '',
-            l.dr ? pm(l.dr) : '', l.cr ? pm(l.cr) : '']).concat([['', '', 'รวม', '', pm(e.total), pm(e.total)]]), 6)
+            l.dr ? pm(l.dr) : '', l.cr ? pm(l.cr) : '']), 6, { paged: true, total: ['', '', 'รวม', '', pm(e.total), pm(e.total)] })
         + pSign(['ผู้จัดทำ', 'ผู้ตรวจสอบ', 'ผู้อนุมัติ']), e.no, e.status === 'reversed' ? 'กลับรายการ' : '');
     },
   },
@@ -266,7 +272,7 @@ function tradePrint(d, copy, kind) {
     + '<div class="p-meta">' + pParty(T[2], d.snap)
     + pInfo([['เลขที่', d.no], ['วันที่', thDate(d.date)], ['ยืนราคาถึง', d.validUntil ? thDate(d.validUntil) : ''],
       ['อ้างอิง', d.fromDoc || '']]) + '</div>'
-    + pTable(LINE_COLS, lineRows(d.lines), 8)
+    + pTable(LINE_COLS, lineRows(d.lines), 8, PAGED)
     + pTotals(d.total, vatSums(d))
     + (d.note ? '<div class="p-note">เงื่อนไข: ' + esc(d.note) + '</div>' : '')
     + pSign(T[3]), d.no, st === 'cancelled' || st === 'rejected' ? 'ยกเลิก' : '');
@@ -339,16 +345,134 @@ function renderPrint() {
   const copies = def.copies
     ? (PRINT.copies === 'all' ? def.copies : [def.copies[Number(PRINT.copies)]])
     : [null];
-  const pages = copies.map((c) => def.build(d, c)).join('');
+  /* เอกสารที่พิมพ์ใช้ปี พ.ศ. เสมอ ไม่ว่าจอจะตั้งเป็น ค.ศ. หรือไม่ */
+  YEAR_ERA.lockBE++;
+  let pages;
+  try { pages = copies.map((c) => def.build(d, c)).join(''); } finally { YEAR_ERA.lockBE--; }
   el.innerHTML = '<div class="pr-bar"><b>' + esc(def.title) + ' ' + esc(PRINT.no) + '</b>'
     + '<span class="dim">ตัวอย่างก่อนพิมพ์ · กระดาษ A4 · ' + copies.length + ' หน้า</span><span class="grow"></span>'
     + (def.copies ? '<select id="prCopies" aria-label="ฉบับที่จะพิมพ์">'
-        + '<option value="all"' + (PRINT.copies === 'all' ? ' selected' : '') + '>พิมพ์ทุกฉบับ (' + def.copies.length + ' หน้า)</option>'
+        + '<option value="all"' + (PRINT.copies === 'all' ? ' selected' : '') + '>พิมพ์ทุกฉบับ (' + def.copies.length + ' ฉบับ)</option>'
         + def.copies.map((c, i) => '<option value="' + i + '"' + (PRINT.copies === String(i) ? ' selected' : '') + '>'
           + esc(c.replace(/\s*\(.*\)$/, '')) + ' อย่างเดียว</option>').join('') + '</select>' : '')
     + btn('printgo', 'พิมพ์ / บันทึกเป็น PDF', 'primary') + btn('printclose', 'ปิด') + '</div>'
     + '<div class="pr-pages">' + pages + '</div>';
   el.classList.add('show');
+  paginatePrint(el.querySelector('.pr-pages'));
+  const n = el.querySelectorAll('.sheet').length;
+  el.querySelector('.pr-bar .dim').textContent = 'ตัวอย่างก่อนพิมพ์ · กระดาษ A4 · ' + n + ' หน้า';
+  /* ฟอนต์สำหรับพิมพ์โหลดครั้งแรกตอนเปิดตัวอย่าง ถ้าวัดก่อนฟอนต์มา ความสูงบรรทัดจะผิด — วาดใหม่อีกครั้งเมื่อฟอนต์พร้อม */
+  if (document.fonts && document.fonts.status !== 'loaded' && !PRINT.fontWait) {
+    PRINT.fontWait = true;
+    document.fonts.ready.then(function () {
+      PRINT.fontWait = false;
+      if (el.classList.contains('show') && PRINT.kind) renderPrint();
+    });
+  }
+}
+
+/* ---------- แบ่งหน้า ----------
+   วัดความสูงจริงหลังวาด ถ้าเกินหนึ่งแผ่น A4 แยกบรรทัดของตารางหลักไปหน้าถัดไป
+   ทุกหน้ามีหัวเอกสารซ้ำ · หน้าที่ต่อมีบรรทัด "ยอดยกมา" · หน้าที่ยังไม่จบมี "ยอดยกไป"
+   ยอดรวม ตัวอักษร และช่องลงนามอยู่หน้าสุดท้ายเท่านั้น · ท้ายกระดาษบอก หน้า X/Y */
+function outerH(el) {
+  const cs = getComputedStyle(el);
+  return el.getBoundingClientRect().height + (parseFloat(cs.marginTop) || 0) + (parseFloat(cs.marginBottom) || 0);
+}
+function paginatePrint(root) {
+  if (!root) return;
+  const probe = document.createElement('div');
+  probe.style.cssText = 'position:absolute; visibility:hidden; height:297mm; width:1px';
+  root.appendChild(probe);
+  const A4 = probe.getBoundingClientRect().height;
+  probe.remove();
+  [...root.querySelectorAll('.sheet')].forEach(function (sheet) {
+    if (sheet.getBoundingClientRect().height <= A4 + 1) return;
+    const kids = [...sheet.children];
+    const table = kids.find((k) => k.tagName === 'TABLE' && k.classList.contains('p-items'));
+    if (!table) return;
+    const wm = kids.find((k) => k.classList.contains('wm'));
+    const foot = kids.find((k) => k.classList.contains('p-foot'));
+    const ti = kids.indexOf(table);
+    const before = kids.slice(0, ti).filter((k) => k !== wm);
+    const after = kids.slice(ti + 1).filter((k) => k !== foot);
+    const body = table.tBodies[0];
+    body.querySelectorAll('tr.p-fill').forEach((r) => r.remove());
+    const rows = [...body.rows].filter((r) => !r.classList.contains('p-totrow'));
+    const totRows = [...body.rows].filter((r) => r.classList.contains('p-totrow'));
+    const ths = [...table.tHead.rows[0].cells];
+    const sumIdx = ths.map((th, i) => (th.hasAttribute('data-sum') ? i : -1)).filter((i) => i >= 0);
+    let labelIdx = ths.findIndex((th) => !th.style.width);
+    if (labelIdx < 0 || sumIdx.indexOf(labelIdx) >= 0) labelIdx = 0;
+    const cs = getComputedStyle(sheet);
+    const pad = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
+    const hBefore = before.reduce((s, k) => s + outerH(k), 0);
+    const hHead = table.tHead.getBoundingClientRect().height;
+    const hFoot = foot ? outerH(foot) : 0;
+    const hAfter = after.reduce((s, k) => s + outerH(k), 0) + totRows.reduce((s, r) => s + r.getBoundingClientRect().height, 0);
+    const rh = rows.map((r) => r.getBoundingClientRect().height);
+    const carryH = Math.max(Math.min.apply(null, rh.concat([40])), 20);
+    const cap = A4 - pad - hFoot - hBefore - hHead - 8;
+    const capOf = (pi) => cap - (pi > 0 ? carryH : 0);
+    const pagesIdx = [];
+    let cur = [], used = 0;
+    rows.forEach(function (r, i) {
+      if (cur.length && used + rh[i] > capOf(pagesIdx.length) - carryH) { pagesIdx.push(cur); cur = []; used = 0; }
+      cur.push(i); used += rh[i];
+    });
+    /* หน้าสุดท้ายต้องมีที่ให้ยอดรวมและช่องลงนาม ไม่พอก็ย้ายบรรทัดท้ายไปหน้าใหม่ */
+    for (let guard = 0; guard < 60 && cur.length && used + hAfter > capOf(pagesIdx.length); guard++) {
+      const spill = [];
+      while (cur.length && used + hAfter > capOf(pagesIdx.length)) { const i = cur.pop(); used -= rh[i]; spill.unshift(i); }
+      if (cur.length) pagesIdx.push(cur);
+      else { pagesIdx.push(spill.splice(0, 1)); }
+      cur = spill; used = spill.reduce((s, i) => s + rh[i], 0);
+    }
+    pagesIdx.push(cur);
+    const pagesUse = pagesIdx.filter((p, k) => p.length || k === pagesIdx.length - 1);
+    if (pagesUse.length < 2) return;
+    const N = pagesUse.length;
+    const sums = sumIdx.map(() => 0);
+    const carryRow = function (label) {
+      const tr = document.createElement('tr');
+      tr.className = 'p-carry';
+      ths.forEach(function (th, i) {
+        const td = document.createElement('td');
+        const k = sumIdx.indexOf(i);
+        if (k >= 0) { td.className = 'num'; td.textContent = fmt(sums[k]); }
+        else if (i === labelIdx) { td.textContent = label; td.style.textAlign = 'right'; }
+        tr.appendChild(td);
+      });
+      return tr;
+    };
+    const frag = document.createDocumentFragment();
+    pagesUse.forEach(function (idxs, p) {
+      const last = p === N - 1;
+      const sh = sheet.cloneNode(false);
+      if (wm) sh.appendChild(wm.cloneNode(true));
+      before.forEach((k) => sh.appendChild(last ? k : k.cloneNode(true)));
+      const t = table.cloneNode(false);
+      t.appendChild(table.tHead.cloneNode(true));
+      const tb = document.createElement('tbody');
+      if (p > 0) tb.appendChild(carryRow('ยอดยกมา'));
+      idxs.forEach(function (i) {
+        sumIdx.forEach((c, k) => { sums[k] += M(rows[i].cells[c].textContent || ''); });
+        tb.appendChild(rows[i]);
+      });
+      if (!last) tb.appendChild(carryRow('ยอดยกไป'));
+      else totRows.forEach((r) => tb.appendChild(r));
+      t.appendChild(tb);
+      sh.appendChild(t);
+      if (last) after.forEach((k) => sh.appendChild(k));
+      if (foot) {
+        const f = last ? foot : foot.cloneNode(true);
+        f.insertAdjacentHTML('beforeend', '<span class="p-page">หน้า ' + (p + 1) + '/' + N + '</span>');
+        sh.appendChild(f);
+      }
+      frag.appendChild(sh);
+    });
+    sheet.replaceWith(frag);
+  });
 }
 function closePrint() {
   const el = document.getElementById('printArea');

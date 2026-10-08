@@ -1576,6 +1576,57 @@ const overflowInfo = (page) => page.evaluate(() => {
   await page.click('#peek [data-act^="peekgo:drill:"]');
   ok('ปุ่มเปิดบัญชีแยกประเภทเต็ม พาไปหน้าแยกประเภทและปิดแผง', await page.evaluate(() => STATE.screen === 'ledger' && !document.getElementById('peek').classList.contains('show')));
 
+  console.log('\n[26] ปี พ.ศ./ค.ศ. บนจอ และเอกสารหลายหน้ายกยอดไป–ยกมา');
+  await page.evaluate(() => { STATE.screen = 'settings'; render(); });
+  await page.click('#main [data-act="era:ce"]');
+  const era = await page.evaluate(() => {
+    STATE.screen = 'invoices'; STATE.period = '2026-07'; render();
+    const d = DB.docs.invoice.find((x) => periodOf(x.date) === '2026-07');
+    const row = [...document.querySelectorAll('#main tbody tr')].find((tr) => tr.textContent.indexOf(d.no) >= 0);
+    printDoc('invoice', d.no);
+    const pr = document.querySelector('#printArea .sheet').textContent;
+    closePrint();
+    return { saved: localStorage.getItem('financii.era'), period: document.getElementById('periodSel').selectedOptions[0].textContent,
+      row: row.textContent, printBE: pr.indexOf('2569') >= 0 && pr.indexOf(' 2026') < 0 };
+  });
+  ok('★ เลือกแสดงปี ค.ศ. แล้ววันที่บนจอเป็น ค.ศ. ทั้งงวดบัญชีและรายการ', era.saved === 'ce' && era.period.indexOf('2026') >= 0
+    && /\/2026/.test(era.row), era.period);
+  ok('★ เอกสารที่พิมพ์ยังเป็นปี พ.ศ. เสมอ แม้จอจะแสดง ค.ศ.', era.printBE);
+  await page.evaluate(() => setEra('be'));
+  ok('สลับกลับเป็น พ.ศ. ได้', await page.evaluate(() => document.getElementById('periodSel').selectedOptions[0].textContent.indexOf('2569') >= 0));
+
+  await page.evaluate(() => {
+    const lines = []; for (let i = 0; i < 70; i++) lines.push({ acc: '5358', dr: M(String(100 + i) + '.25'), cr: 0, memo: 'ปรับปรุงรายการที่ ' + (i + 1) });
+    lines.push({ acc: '1113', dr: 0, cr: lines.reduce((s, l) => s + l.dr, 0) });
+    const e = post({ type: 'general', date: '2026-07-30', desc: 'ทดสอบใบสำคัญยาวหลายหน้า', lines });
+    save(); printDoc('entry', e.no); window.__longEntry = e.no;
+  });
+  await page.waitForTimeout(1200);
+  const pg = await page.evaluate(() => {
+    const e = DB.entries.find((x) => x.no === window.__longEntry);
+    const probe = document.createElement('div'); probe.style.cssText = 'position:absolute;height:297mm'; document.body.appendChild(probe);
+    const A4 = probe.getBoundingClientRect().height; probe.remove();
+    const sheets = [...document.querySelectorAll('#printArea .sheet')];
+    let cumDr = 0, okCarry = true;
+    sheets.forEach(function (s, i) {
+      const carryIn = s.querySelector('tr.p-carry:first-child');
+      if (i > 0 && (!carryIn || M(carryIn.cells[4].textContent) !== cumDr)) okCarry = false;
+      [...s.querySelectorAll('table.p-items tbody tr:not(.p-carry):not(.p-totrow)')].forEach((tr) => { cumDr += M(tr.cells[4].textContent); });
+      const carryOut = i < sheets.length - 1 ? s.querySelector('tr.p-carry:last-child') : null;
+      if (carryOut && M(carryOut.cells[4].textContent) !== cumDr) okCarry = false;
+    });
+    const last = sheets[sheets.length - 1];
+    const res = { n: sheets.length, over: sheets.some((s) => s.getBoundingClientRect().height > A4 + 1), okCarry, cumDr, total: e.total,
+      totLast: !!last.querySelector('tr.p-totrow') && sheets.slice(0, -1).every((s) => !s.querySelector('tr.p-totrow') && !s.querySelector('.p-sign')),
+      pages: sheets.map((s) => (s.querySelector('.p-page') || {}).textContent).join(','), head: sheets.every((s) => !!s.querySelector('.p-head')) };
+    closePrint();
+    return res;
+  });
+  ok('★ ใบสำคัญ 71 บรรทัดแบ่งเป็นหลายหน้า ไม่มีหน้าไหนล้นกระดาษ A4 และทุกหน้ามีหัวเอกสาร', pg.n > 1 && !pg.over && pg.head, pg.n + ' หน้า');
+  ok('★ ยอดยกไปของแต่ละหน้าเท่ายอดสะสมพอดี และหน้าถัดไปยกมาเท่ากัน ผลรวมสุดท้ายเท่ายอดใบสำคัญ', pg.okCarry && pg.cumDr === pg.total,
+    'เดบิตรวม ' + pg.cumDr + ' = ' + pg.total);
+  ok('บรรทัดรวมและช่องลงนามอยู่หน้าสุดท้ายเท่านั้น ท้ายกระดาษบอกหน้า X/Y', pg.totLast && /หน้า 1\/\d+/.test(pg.pages), pg.pages);
+
   ok('ไม่มีข้อผิดพลาดในคอนโซลเลย', errors.length === 0, errors.slice(0, 3).join(' | '));
 
   await page.setViewportSize({ width: 1440, height: 950 });
