@@ -807,11 +807,11 @@ const overflowInfo = (page) => page.evaluate(() => {
     navGroups().find((g) => g.g === 'เอกสารขาย').items.map((i) => i[1]));
   const buyMenu = await page.evaluate(() =>
     navGroups().find((g) => g.g === 'เอกสารซื้อ').items.map((i) => i[1]));
-  ok('★ เมนูเอกสารขายเรียงตามวงจรจริง เสนอราคา → สั่งขาย → ใบกำกับ → ใบเสร็จ',
-    salesMenu.join('|') === 'ใบเสนอราคา|ใบสั่งขาย|ใบกำกับภาษี|ใบเสร็จรับเงิน|ใบลดหนี้|ใบเพิ่มหนี้',
+  ok('★ เมนูเอกสารขายเรียงตามวงจรจริง เสนอราคา → สั่งขาย → ใบกำกับ → วางบิล → ใบเสร็จ',
+    salesMenu.join('|') === 'ใบเสนอราคา|ใบสั่งขาย|ใบกำกับภาษี|ใบวางบิล|ใบเสร็จรับเงิน|ใบลดหนี้|ใบเพิ่มหนี้',
     salesMenu.join(' → '));
-  ok('เมนูเอกสารซื้อเริ่มจากใบสั่งซื้อ',
-    buyMenu.join('|') === 'ใบสั่งซื้อ|ตั้งหนี้ผู้ขาย|ใบสำคัญจ่าย', buyMenu.join(' → '));
+  ok('เมนูเอกสารซื้อเรียงตามวงจรจริง สั่งซื้อ → รับสินค้า → ตั้งหนี้ → จ่าย',
+    buyMenu.join('|') === 'ใบสั่งซื้อ|ใบรับสินค้า|ตั้งหนี้ผู้ขาย|ใบสำคัญจ่าย', buyMenu.join(' → '));
 
   /* ทุกหน้าจอในเมนูต้องเปิดได้จริง ไม่ใช่มีชื่ออยู่ในเมนูเฉย ๆ */
   const screensOk = await page.evaluate(() => {
@@ -973,6 +973,229 @@ const overflowInfo = (page) => page.evaluate(() => {
   ok('★ ผู้ขายที่เพิ่งเพิ่มเลือกได้ในหน้าตั้งหนี้ทันที', inList);
   await page.click('[data-act="modal:close"]');
   await page.waitForTimeout(200);
+
+  console.log('\n[19] เอกสารชุดใหม่ที่ฝ่ายบัญชีขอ — ทุกแถบมีปุ่มสร้างเอกสาร');
+  await page.setViewportSize({ width: 1440, height: 950 });
+  await page.evaluate(() => {
+    buildSeed(); STATE.period = '2026-07'; STATE.screen = 'dashboard'; STATE.sel = null; STATE.filter = '';
+    save(); render();
+  });
+  await page.waitForTimeout(150);
+  const submit = async () => { await page.click('[data-act="modal:submit"]'); await closed(page); };
+  const openNew = async (screen, act) => {
+    await page.evaluate((x) => { STATE.screen = x; STATE.sel = null; STATE.filter = ''; render(); }, screen);
+    await page.click('#main .card-h [data-act="' + act + '"]');
+    await page.waitForSelector('#modal.show');
+  };
+
+  const menus = await page.evaluate(() => {
+    const g = (n) => (navGroups().find((x) => x.g === n) || { items: [] }).items.map((i) => i[1]).join('|');
+    return { exp: g('ค่าใช้จ่าย'), acct: g('บัญชี') };
+  });
+  ok('★ แถบค่าใช้จ่าย: ค่าใช้จ่าย → หัก ณ ที่จ่าย → เตรียมจ่ายเงิน',
+    menus.exp === 'ค่าใช้จ่าย|หัก ณ ที่จ่าย|เตรียมจ่ายเงิน', menus.exp);
+  ok('★ แถบบัญชีมีสมุดรายวันครบ 5 เล่ม ทั่วไป ซื้อ ขาย จ่าย รับ',
+    menus.acct.indexOf('สมุดรายวันทั่วไป|สมุดรายวันซื้อ|สมุดรายวันขาย|สมุดรายวันจ่าย|สมุดรายวันรับ') === 0, menus.acct);
+
+  const needBtn = { receipts:'new:receipt', creditnotes:'new:creditnote', debitnotes:'new:debitnote',
+    billingnotes:'new:billingnote', goodsreceipts:'new:goodsreceipt', expenses:'new:expense',
+    whtcert:'new:whtcert', paymentprep:'new:paymentbatch', jgeneral:'jv:general', jpurchase:'jv:purchase',
+    jsales:'jv:sales', jpayment:'jv:payment', jreceipt:'jv:receipt' };
+  const missing = await page.evaluate((m) => Object.keys(m).filter(function (sc) {
+    STATE.screen = sc; STATE.sel = null; render();
+    return !document.querySelector('#main .card-h [data-act="' + m[sc] + '"]');
+  }), needBtn);
+  ok('★ ทุกแถบที่ขอมีปุ่มสร้างเอกสาร', missing.length === 0,
+    missing.length ? 'ขาด ' + missing.join(', ') : Object.keys(needBtn).length + ' แถบ');
+
+  /* ใบเสร็จ ใบลดหนี้ ใบเพิ่มหนี้ — สร้างจากหน้ารายการ เลือกใบกำกับอ้างอิงในฟอร์ม */
+  const rcCount = await page.evaluate(() => DB.docs.receipt.length);
+  await openNew('receipts', 'new:receipt');
+  const rcInv = await page.$eval('[name="invoiceNo"]', (e) => e.value);
+  await submit();
+  const rcRes = await page.evaluate((no) => ({ n: DB.docs.receipt.length, rc: DB.docs.receipt[0],
+    out: invOutstanding(DB.docs.invoice.find((d) => d.no === no)) }), rcInv);
+  ok('★ ออกใบเสร็จรับเงินจากหน้ารายการได้ โดยเลือกใบกำกับที่ค้าง',
+    rcRes.n === rcCount + 1 && rcRes.rc.invoiceNo === rcInv, rcRes.rc.no + ' อ้าง ' + rcInv);
+  ok('ไม่กรอกยอด = รับเต็มยอดคงค้าง', rcRes.out === 0);
+
+  await openNew('creditnotes', 'new:creditnote');
+  const cnInv = await page.$eval('[name="invoiceNo"]', (e) => e.value);
+  await page.fill('[name="base"]', '1000');
+  await submit();
+  const cn = await page.evaluate(() => DB.docs.creditNote[0]);
+  ok('★ ออกใบลดหนี้จากหน้ารายการได้', cn.invoiceNo === cnInv && cn.base === 10000000, cn.no + ' อ้าง ' + cnInv);
+
+  await openNew('debitnotes', 'new:debitnote');
+  const dnInv = await page.$eval('[name="invoiceNo"]', (e) => e.value);
+  await page.fill('[name="base"]', '2500');
+  await submit();
+  const dn = await page.evaluate(() => DB.docs.debitNote[0]);
+  ok('★ ออกใบเพิ่มหนี้จากหน้ารายการได้', dn.invoiceNo === dnInv && dn.base === 25000000, dn.no + ' อ้าง ' + dnInv);
+
+  /* ใบวางบิล */
+  const target = await page.evaluate(() => {
+    const live = (b) => ['issued', 'partially_paid'].indexOf(billingNoteStatus(b)) >= 0;
+    const taken = new Set();
+    DB.docs.billingNote.filter(live).forEach((b) => b.invoices.forEach((i) => taken.add(i.no)));
+    return DB.partners.filter((p) => p.kind === 'customer').map((p) => ({ code: p.code,
+      n: DB.docs.invoice.filter((d) => d.partnerCode === p.code && d.status !== 'void'
+        && invOutstanding(d) > 0 && !taken.has(d.no)).length }))
+      .filter((x) => x.n > 0).sort((a, b) => b.n - a.n)[0];
+  });
+  const entriesBeforeBn = await page.evaluate(() => DB.entries.length);
+  await openNew('billingnotes', 'new:billingnote');
+  await page.selectOption('[name="bnPartner"]', target.code);
+  await page.waitForTimeout(100);
+  const boxes = await page.$$eval('[name="bnInv"]:not([disabled])', (els) => els.length);
+  ok('เลือกลูกค้าแล้วรายการใบกำกับในฟอร์มเปลี่ยนตาม', boxes === target.n, boxes + ' ใบ');
+  await submit();
+  const bn = await page.evaluate(() => DB.docs.billingNote[0]);
+  ok('★ ออกใบวางบิลรวมหลายใบกำกับของลูกค้ารายเดียวได้',
+    bn.partnerCode === target.code && bn.invoices.length === target.n, bn.no + ' · ' + bn.invoices.length + ' ใบ');
+  ok('ใบวางบิลไม่ลงบัญชี', (await page.evaluate(() => DB.entries.length)) === entriesBeforeBn);
+  await page.click('[data-act="bn:receive:' + bn.no + '"]');
+  await page.waitForSelector('#modal.show');
+  await submit();
+  const bnAfter = await page.evaluate((no) => ({
+    st: billingNoteStatus(DB.docs.billingNote.find((b) => b.no === no)),
+    rcs: DB.docs.receipt.filter((r) => r.billingNoteNo === no).length }), bn.no);
+  ok('★ รับชำระตามใบวางบิลครั้งเดียว ออกใบเสร็จให้ครบทุกใบกำกับ',
+    bnAfter.st === 'paid' && bnAfter.rcs === target.n, bnAfter.rcs + ' ใบเสร็จ · ' + bnAfter.st);
+
+  /* ใบรับสินค้า → ตั้งหนี้ */
+  const cbBefore = await page.evaluate(() => DB.items.find((i) => i.code === 'CB-16').qty);
+  await openNew('goodsreceipts', 'new:goodsreceipt');
+  await page.selectOption('[name="partner"]', 'VEN-0004');
+  await page.selectOption('[name="l0_item"]', 'CB-16');
+  const costFilled = await page.$eval('[name="l0_price"]', (e) => e.value);
+  await page.fill('[name="l0_qty"]', '100');
+  await page.fill('[name="vendorDoNo"]', 'DO-UI-0001');
+  await submit();
+  const grn = await page.evaluate(() => DB.docs.goodsReceipt[0]);
+  const cbAvg = await page.evaluate(() => fmt(DB.items.find((i) => i.code === 'CB-16').avgCost));
+  ok('★ ออกใบรับสินค้าแล้วสต๊อกเพิ่มทันที',
+    (await page.evaluate(() => DB.items.find((i) => i.code === 'CB-16').qty)) === cbBefore + 100, grn.no);
+  ok('ฟอร์มรับสินค้าเติมต้นทุนเฉลี่ยให้ ไม่ใช่ราคาขาย', costFilled === cbAvg, costFilled);
+  await page.click('[data-act="grn:bill:' + grn.no + '"]');
+  await page.waitForSelector('#modal.show');
+  await page.fill('[name="vendorNo"]', 'TPS-UI-GR-01');
+  await submit();
+  const grnRes = await page.evaluate((no) => ({
+    g: DB.docs.goodsReceipt.find((x) => x.no === no), bill: DB.docs.bill[0],
+    qty: DB.items.find((i) => i.code === 'CB-16').qty,
+    grni: reconciliationChecks('2026-07-31').checks.find((c) => c.code === 'GRNI_SUBLEDGER').ok }), grn.no);
+  ok('★ ตั้งหนี้จากใบรับสินค้า: ปิดใบรับสินค้า สต๊อกไม่เพิ่มซ้ำ ยอดพักรับสินค้าตรง',
+    grnRes.g.status === 'closed' && grnRes.bill.grnNo === grn.no && grnRes.qty === cbBefore + 100 && grnRes.grni,
+    grnRes.bill.no + ' รวม ' + fmtT(grnRes.bill.total));
+
+  /* ค่าใช้จ่าย + หัก ณ ที่จ่าย 3% → 50 ทวิ อัตโนมัติ (ตามหมายเหตุในใบขอ) */
+  await openNew('expenses', 'new:expense');
+  await page.selectOption('[name="expPartner"]', 'VEN-0012');
+  ok('เลือกผู้รับเงินแล้วเติมประเภทหัก ณ ที่จ่ายจากทะเบียนให้',
+    (await page.$eval('[name="wht"]', (e) => e.value)) === 'WHT_RENT');
+  await page.selectOption('[name="wht"]', 'WHT_SERVICE');
+  await page.fill('[name="taxInvoiceNo"]', 'TNP-UI-0001');
+  await page.fill('[name="e0_desc"]', 'ค่าซ่อมเครื่องปรับอากาศ');
+  await page.selectOption('[name="e0_acc"]', '5325');
+  await page.fill('[name="e0_price"]', '10000');
+  const expSum = await page.$eval('#expSum', (e) => e.textContent);
+  ok('ฟอร์มสรุปยอดให้ระหว่างกรอก หัก 3% ของ 10,000 = 300', expSum.indexOf('300.00') >= 0 && expSum.indexOf('10,400.00') >= 0, expSum);
+  await submit();
+  const ex = await page.evaluate(() => {
+    const e = DB.docs.expense[0];
+    return { e, cert: DB.docs.whtCert.find((c) => c.no === e.certNo) || null };
+  });
+  ok('★ ค่าใช้จ่ายมีหัก ณ ที่จ่าย 3% → แถบหัก ณ ที่จ่ายสร้างหนังสือรับรองให้เองอัตโนมัติ',
+    ex.e.wht === 3000000 && !!ex.cert && ex.cert.expenseNo === ex.e.no && ex.cert.rate === '3',
+    ex.e.no + ' → ' + (ex.cert ? ex.cert.no : 'ไม่มี'));
+  const certListed = await page.evaluate((c) => {
+    STATE.screen = 'whtcert'; STATE.sel = null; STATE.filter = ''; render();
+    const h = document.getElementById('main').innerHTML;
+    return h.indexOf(c.no) >= 0 && h.indexOf(c.expenseNo) >= 0;
+  }, ex.cert);
+  ok('หนังสือรับรองขึ้นในแถบหัก ณ ที่จ่าย พร้อมเลขที่ค่าใช้จ่ายต้นทาง', certListed);
+
+  await openNew('expenses', 'new:expense');
+  await page.selectOption('[name="expPartner"]', 'VEN-0025');
+  await page.fill('[name="e0_desc"]', 'กระดาษถ่ายเอกสาร');
+  await page.selectOption('[name="e0_acc"]', '5324');
+  await page.fill('[name="e0_price"]', '2000');
+  await page.click('[data-act="modal:submit"]');
+  await page.waitForTimeout(300);
+  ok('มีภาษีซื้อแต่ไม่กรอกเลขใบกำกับ ระบบไม่ยอมบันทึก', await page.evaluate(() =>
+    document.getElementById('modal').classList.contains('show')
+    && document.getElementById('toast').className.indexOf('err') >= 0));
+  await page.click('[data-act="modal:close"]');
+
+  await openNew('whtcert', 'new:whtcert');
+  ok('ปุ่มในแถบหัก ณ ที่จ่ายเปิดฟอร์มออกหนังสือรับรอง',
+    (await page.$eval('.modal-h h3', (e) => e.textContent)).indexOf('หนังสือรับรอง') >= 0);
+  await page.selectOption('[name="expPartner"]', 'VEN-0015');
+  await page.fill('[name="taxInvoiceNo"]', 'MDP-UI-0001');
+  await page.fill('[name="e0_desc"]', 'ค่าจัดทำป้ายโฆษณาหน้าร้าน');
+  await page.selectOption('[name="e0_acc"]', '5220');
+  await page.fill('[name="e0_price"]', '20000');
+  await submit();
+  const wc = await page.evaluate(() => ({ c: DB.docs.whtCert[0], screen: STATE.screen, sel: STATE.sel }));
+  ok('★ สร้างจากแถบหัก ณ ที่จ่าย: ออก 50 ทวิ พร้อมบันทึกการจ่ายเงินให้ในครั้งเดียว',
+    !!wc.c.expenseNo && wc.c.rate === '2' && wc.screen === 'whtcert' && wc.sel === wc.c.no, wc.c.no + ' ← ' + wc.c.expenseNo);
+
+  /* เตรียมจ่ายเงิน: จัดทำ → อนุมัติ → จ่าย */
+  await openNew('paymentprep', 'new:paymentbatch');
+  if (!(await page.$$eval('[name="pbBill"]:checked', (els) => els.length))) await page.click('[name="pbBill"]');
+  await submit();
+  const pb = await page.evaluate(() => DB.docs.paymentBatch[0]);
+  ok('จัดทำใบเตรียมจ่ายแล้วรออนุมัติ', pb.status === 'pending_approval', pb.no + ' · ' + pb.items.length + ' ราย');
+  await page.click('[data-act="pb:approve:' + pb.no + '"]');
+  await page.waitForTimeout(200);
+  ok('อนุมัติใบเตรียมจ่ายได้', (await page.evaluate((no) => DB.docs.paymentBatch.find((b) => b.no === no).status, pb.no)) === 'approved');
+  await page.click('[data-act="pb:pay:' + pb.no + '"]');
+  await page.waitForSelector('#modal.show');
+  await submit();
+  const pbRes = await page.evaluate((no) => {
+    const b = DB.docs.paymentBatch.find((x) => x.no === no);
+    return { st: b.status, pv: b.paymentNos.length, open: b.items.filter((i) => {
+      const bill = DB.docs.bill.find((x) => x.no === i.billNo); return billOutstanding(bill) > 0; }).length };
+  }, pb.no);
+  ok('★ จ่ายตามใบเตรียมจ่าย: ออกใบสำคัญจ่ายครบทุกราย หนี้ปิดหมด',
+    pbRes.st === 'paid' && pbRes.pv === pb.items.length && pbRes.open === 0, pbRes.pv + ' ใบสำคัญจ่าย');
+
+  /* สมุดรายวันรับ — บันทึกด้วยมือ */
+  await openNew('jreceipt', 'jv:receipt');
+  ok('สมุดรายวันรับเติมบัญชีธนาคารฝั่งเดบิตให้', (await page.$eval('[name="j0_acc"]', (e) => e.value))
+    === (await page.evaluate(() => accBySub('bank'))));
+  await page.fill('[name="desc"]', 'ดอกเบี้ยรับเงินฝากประจำ');
+  await page.fill('[name="j0_dr"]', '1500');
+  await page.selectOption('[name="j1_acc"]', '4210');
+  await page.fill('[name="j1_cr"]', '1500');
+  ok('ยอดรวมเดบิต/เครดิตขึ้นให้ดูระหว่างกรอก', (await page.$eval('#jvTot', (e) => e.textContent)).indexOf('สมดุล') >= 0);
+  await submit();
+  const jv = await page.evaluate(() => {
+    const e = DB.entries[DB.entries.length - 1];
+    return { e, screen: STATE.screen, listed: document.getElementById('main').innerHTML.indexOf(e.no) >= 0 };
+  });
+  ok('★ บันทึกใบสำคัญรับในสมุดรายวันรับได้ และขึ้นในเล่มทันที',
+    jv.e.type === 'receipt' && jv.e.src === 'manual' && jv.screen === 'jreceipt' && jv.listed, jv.e.no);
+  await openNew('jgeneral', 'jv:general');
+  const ctlOffered = await page.$$eval('[name="j0_acc"] option', (os) => os.some((o) => o.value === '1131' || o.value === '2141'));
+  ok('บัญชีคุม (ลูกหนี้ ภาษีขาย) ไม่อยู่ในรายการให้เลือก', !ctlOffered);
+  await page.click('[data-act="modal:close"]');
+  ok('★ ลงบัญชีคุมด้วยมือไม่ได้แม้เรียกตรง ๆ', (await page.evaluate(() => {
+    try {
+      postJournalVoucher({ book:'general', date:'2026-07-31', desc:'ทดสอบ',
+        lines:[{ acc:'1131', dr:'100' }, { acc:'4111', cr:'100' }] });
+      return 'posted';
+    } catch (e) { return e.code; }
+  })) === 'CONTROL_ACCOUNT_MANUAL');
+
+  const fin = await page.evaluate(() => {
+    const rec = reconciliationChecks('2026-07-31');
+    return { tb: trialBalance('2026-01-01', '2026-12-31').balanced, all: rec.allPassed,
+      failed: rec.checks.filter((c) => !c.ok).map((c) => c.label) };
+  });
+  ok('★ งบทดลองสมดุลและยอดคุมทุกตัวตรง หลังใช้เอกสารใหม่ครบทุกแถบ', fin.tb && fin.all,
+    fin.failed.join(', ') || 'ผ่านทุกข้อ');
 
   ok('ไม่มีข้อผิดพลาดในคอนโซลเลย', errors.length === 0, errors.slice(0, 3).join(' | '));
 

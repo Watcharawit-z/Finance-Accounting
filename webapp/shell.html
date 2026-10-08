@@ -1,3 +1,4 @@
+<meta charset="utf-8">
 <title>Financii</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -174,6 +175,11 @@ td.num.bad{color:var(--neg)} td.num.good{color:var(--good)}
 tbody tr:last-child td{border-bottom:none}
 tfoot td{padding:9px 12px; border-top:1.5px solid var(--rule); border-bottom:none; font-weight:600}
 .row-link{cursor:pointer}
+/* สมุดรายวันแบบที่พิมพ์ในสมุดจริง: หัวใบสำคัญหนึ่งบรรทัด ตามด้วยบัญชีที่เดบิตและเครดิต */
+tr.je-h td{border-top:1px solid var(--rule); font-weight:500}
+tr.je-l td{border-bottom:none; padding-top:3px; padding-bottom:3px; color:var(--ink-2)}
+tr.je-l td.acc-dr{padding-inline-start:22px}
+tr.je-l td.acc-cr{padding-inline-start:52px}
 .row-link:hover td{background:var(--sunken)}
 .empty{padding:44px 16px; text-align:center; color:var(--muted); font-size:14px}
 .st{display:inline-flex; align-items:center; gap:6px; font-size:12.5px; white-space:nowrap}
@@ -263,6 +269,13 @@ table.fs thead th{background:transparent}
   border:1px solid var(--rule); border-radius:4px; background:var(--panel); color:var(--ink);
 }
 .lines input.r{text-align:right; font-variant-numeric:tabular-nums}
+.lines input[type=checkbox]{width:17px; min-width:0; height:17px; padding:0; accent-color:var(--accent); cursor:pointer}
+.lines td.num{text-align:right; font-variant-numeric:tabular-nums}
+.pick-row{cursor:pointer}
+.jv-tot{display:flex; gap:18px; justify-content:flex-end; padding:8px 16px 0; font-size:13px; color:var(--muted)}
+.jv-tot b{color:var(--ink); font-variant-numeric:tabular-nums}
+.jv-tot .bad{color:var(--neg)}
+.jv-tot .good{color:var(--good)}
 
 /* ---------- กราฟ ---------- */
 .dash-2{display:grid; grid-template-columns:1fr 1fr; gap:18px; align-items:start}

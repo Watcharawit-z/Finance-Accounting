@@ -81,9 +81,20 @@ const COA = [
   ['5120','ต้นทุนการให้บริการ','expense','cost_of_service',1],
   ['5140','ผลขาดทุนจากสินค้าเสื่อมสภาพ','expense','inventory_writeoff',1],
   ['5200','ค่าใช้จ่ายในการขาย','expense','selling_expense',1],
+  ['5220','ค่าโฆษณาและส่งเสริมการขาย','expense','selling_expense',1],
+  ['5230','ค่าขนส่งออก','expense','selling_expense',1],
   ['5311','เงินเดือนและค่าจ้าง','expense','admin_expense',1],
   ['5315','เงินสมทบประกันสังคม–ส่วนนายจ้าง','expense','sso_expense',1],
   ['5316','เงินสมทบกองทุนสำรองฯ–ส่วนนายจ้าง','expense','pvd_expense',1],
+  /* หมวดค่าใช้จ่ายสำนักงานตาม docs/10 — ให้หน้าบันทึกค่าใช้จ่ายเลือกลงบัญชีได้ตรงชนิด */
+  ['5321','ค่าเช่าสำนักงาน','expense','admin_expense',1],
+  ['5322','ค่าสาธารณูปโภค (ไฟฟ้า ประปา)','expense','admin_expense',1],
+  ['5323','ค่าโทรศัพท์และอินเทอร์เน็ต','expense','admin_expense',1],
+  ['5324','ค่าวัสดุสิ้นเปลืองสำนักงาน','expense','admin_expense',1],
+  ['5325','ค่าซ่อมแซมและบำรุงรักษา','expense','admin_expense',1],
+  ['5327','ค่าน้ำมันเชื้อเพลิงและยานพาหนะ','expense','admin_expense',1],
+  ['5334','ค่าธรรมเนียมวิชาชีพอื่น','expense','admin_expense',1],
+  ['5358','ค่าใช้จ่ายเบ็ดเตล็ด','expense','admin_expense',1],
   ['5341','ค่าเสื่อมราคา','expense','depreciation',1],
   ['5342','ค่าตัดจำหน่าย','expense','amortization',1],
   ['5351','หนี้สงสัยจะสูญ','expense','bad_debt',1],
@@ -564,4 +575,45 @@ function generateTransactions() {
     { id:2, date:'2026-07-08', desc:'FEE - REMITTANCE', ref:'FEE690708', debit:M('350'), credit:0, matched:false, suggest:'ค่าธรรมเนียมโอนเงิน — ยังไม่มีรายการในระบบ' },
     { id:3, date:'2026-07-15', desc:'TRANSFER FROM 6890', ref:'TR690715', debit:0, credit:M('240000'), matched:false, suggest:'ไม่แน่ใจ — มีใบแจ้งหนี้ยอดใกล้เคียง 3 ใบ' },
   ];
+
+  julySamples();
+}
+
+/* ---------- ตัวอย่างเอกสารชุดใหม่ในงวดที่เปิดอยู่ ----------
+   ให้ทุกแถบที่เพิ่มเข้ามามีของจริงให้ดู ไม่ใช่หน้าว่าง
+   ทำหลังรายการทั้งเดือนเสร็จแล้ว ต้นทุนขายของใบกำกับเดิมจึงไม่ขยับ */
+function julySamples() {
+  // ใบวางบิล — รวบใบกำกับที่ค้างของลูกค้ารายที่ค้างหลายใบที่สุด
+  const open = DB.docs.invoice.filter((d) => !d.broughtForward && periodOf(d.date) === '2026-07' && invOutstanding(d) > 0);
+  const byCust = {};
+  open.forEach((d) => { (byCust[d.partnerCode] = byCust[d.partnerCode] || []).push(d.no); });
+  const cust = Object.keys(byCust).sort((a, b) => byCust[b].length - byCust[a].length)[0];
+  if (cust) {
+    issueBillingNote({ partnerCode: cust, date: '2026-07-25', dueDate: '2026-08-05',
+      invoiceNos: byCust[cust].slice(0, 3), note: 'นัดรับเช็คทุกวันที่ 5 ของเดือน' });
+  }
+
+  // ใบสั่งซื้อ → ใบรับสินค้า → ตั้งหนี้ ครบวงจรหนึ่งชุด และอีกชุดที่ยังรอใบกำกับจากผู้ขาย
+  const sw = DB.items.find((i) => i.code === 'SW-220');
+  const gr1 = issueGoodsReceipt({ partnerCode: 'VEN-0004', date: '2026-07-10', vendorDoNo: 'TPS-DO-6907-118',
+    lines: [{ itemCode: sw.code, desc: sw.name, qty: 400, price: unM(sw.avgCost) }] });
+  billGoodsReceipt(gr1.no, { date: '2026-07-16', vendorNo: 'TPS-69-7716' });
+  const mc = DB.items.find((i) => i.code === 'MC-450');
+  const po = issueTradeDoc('purchaseOrder', { partnerCode: 'VEN-0001', date: '2026-07-14',
+    lines: [{ desc: mc.name, qty: 6, price: unM(mc.avgCost), itemCode: mc.code }], note: 'ส่งของภายใน 7 วัน' });
+  receiveGoodsFromPo(po.no, { date: '2026-07-21', vendorDoNo: 'ASI-DO-6907-033' });
+
+  // ค่าใช้จ่ายจ่ายทันที — ใบที่หัก ณ ที่จ่าย 3% ได้หนังสือรับรอง 50 ทวิ อัตโนมัติ
+  recordExpense({ partnerCode: 'VEN-0025', date: '2026-07-24', taxInvoiceNo: 'OFM-6907-551',
+    lines: [{ desc: 'กระดาษและหมึกพิมพ์สำนักงาน', qty: 1, price: '8500', acc: '5324' }] });
+  recordExpense({ partnerCode: 'VEN-0012', date: '2026-07-28', taxInvoiceNo: 'TNP-SV-6907-09',
+    lines: [{ desc: 'ค่าซ่อมแซมระบบไฟฟ้าอาคารสำนักงาน', qty: 1, price: '25000', acc: '5325' }],
+    whtCode: 'WHT_SERVICE', channel: 'manual' });
+
+  // ใบเตรียมจ่าย — รวบเจ้าหนี้ที่ครบกำหนดต้นเดือนหน้าไว้รออนุมัติ
+  const due = DB.docs.bill.filter((b) => !b.broughtForward && billOutstanding(b) > 0 && b.due <= '2026-08-10')
+    .sort((a, b) => (a.due < b.due ? -1 : 1)).slice(0, 4).map((b) => b.no);
+  if (due.length) {
+    createPaymentBatch({ date: '2026-07-29', payDate: '2026-08-05', billNos: due, note: 'รอบจ่ายวันที่ 5 สิงหาคม' });
+  }
 }

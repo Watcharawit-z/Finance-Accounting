@@ -11,7 +11,10 @@ const ctx = new Function(src + '\nreturn {DB,buildSeed,trialBalance,balanceSheet
   'importPeriodMovement,listImports,reverseImport,endOfMonth,' +
   'savePartner,saveItem,saveEmployee,saveAsset,nextRegCode,TAX_DEPRECIATION,' +
   'DBD_SUBTYPE,BS_LINES,PL_LINES,balBySub,' +
-  'TRADE_DOCS,invOutstanding,outstandingAsOf,unM};')();
+  'TRADE_DOCS,invOutstanding,outstandingAsOf,unM,' +
+  'issueBillingNote,cancelBillingNote,receiveBillingNote,billingNoteStatus,' +
+  'issueGoodsReceipt,receiveGoodsFromPo,billGoodsReceipt,recordExpense,billOutstanding,' +
+  'createPaymentBatch,approvePaymentBatch,payPaymentBatch,postJournalVoucher,journalOf};')();
 
 let pass = 0, fail = 0;
 function ok(label, cond, extra) {
@@ -450,6 +453,199 @@ ok('แต่แก้ชื่อทรัพย์สินเดิมได�
      accumBook:ctx.unM(oldAsset.accumBook), accumTax:ctx.unM(oldAsset.accumTax) }).created);
 ok('งบทดลองยังสมดุลหลังเพิ่มทะเบียนทั้งหมด',
    ctx.trialBalance('2026-01-01', '2026-12-31').balanced);
+
+console.log('\n=== 7.11 เอกสารชุดใหม่ที่ฝ่ายบัญชีขอ ===');
+{
+  const J = '2026-07-30';
+  const tbOk = () => ctx.trialBalance('2026-01-01', '2026-12-31').balanced;
+  const recOk = () => ctx.reconciliationChecks('2026-07-31').allPassed;
+
+  /* --- ใบวางบิล --- */
+  const live = (b) => ['issued', 'partially_paid'].indexOf(ctx.billingNoteStatus(b)) >= 0;
+  const taken = new Set();
+  D.docs.billingNote.filter(live).forEach((b) => b.invoices.forEach((i) => taken.add(i.no)));
+  const openInv = D.docs.invoice.filter((d) => d.status !== 'void' && ctx.invOutstanding(d) > 0
+    && !taken.has(d.no) && d.date <= J && d.date >= '2026-07-01');
+  const cust = openInv[0].partnerCode;
+  const mine = openInv.filter((d) => d.partnerCode === cust).map((d) => d.no);
+  const other = openInv.find((d) => d.partnerCode !== cust);
+  const entriesBefore = D.entries.length;
+  throws('ใบวางบิลออกให้ผู้ขายไม่ได้',
+    () => ctx.issueBillingNote({ partnerCode:'VEN-0001', date:J, invoiceNos:mine }), 'PARTNER_WRONG_SIDE');
+  throws('ใบวางบิลต้องมีใบกำกับอย่างน้อย 1 ใบ',
+    () => ctx.issueBillingNote({ partnerCode:cust, date:J, invoiceNos:[] }), 'BILLING_NO_INVOICE');
+  if (other) {
+    throws('รวมใบกำกับของลูกค้าคนละรายในใบวางบิลเดียวไม่ได้',
+      () => ctx.issueBillingNote({ partnerCode:cust, date:J, invoiceNos:mine.concat([other.no]) }), 'BILLING_PARTNER_MISMATCH');
+  }
+  throws('วันนัดชำระก่อนวันวางบิลไม่ได้',
+    () => ctx.issueBillingNote({ partnerCode:cust, date:J, dueDate:'2026-07-01', invoiceNos:mine }), 'BILLING_DUE_BEFORE_DATE');
+  const bn = ctx.issueBillingNote({ partnerCode:cust, date:J, dueDate:'2026-08-05', invoiceNos:mine });
+  ok('ออกใบวางบิลได้ ยอดเท่ากับคงค้างของใบกำกับรวมกัน',
+    bn.total === mine.reduce((s, no) => s + ctx.invOutstanding(D.docs.invoice.find((d) => d.no === no)), 0),
+    bn.no + ' · ' + mine.length + ' ใบ · ' + ctx.fmt(bn.total));
+  ok('★ ใบวางบิลไม่สร้างรายการบัญชี', D.entries.length === entriesBefore);
+  throws('ใบกำกับที่อยู่ในใบวางบิลที่ยังเปิดอยู่ วางซ้ำไม่ได้',
+    () => ctx.issueBillingNote({ partnerCode:cust, date:J, invoiceNos:[mine[0]] }), 'BILLING_INVOICE_TAKEN');
+
+  /* ★ ใบกำกับใบสุดท้ายลงบัญชีไม่ได้ ใบก่อนหน้าที่ออกใบเสร็จไปแล้วต้องถูกยกเลิกตามทั้งหมด
+     ทำให้ใบสุดท้ายพังด้วยการถอดรหัสลูกค้าออก — บัญชีลูกหนี้จะไม่ยอมลงรายการที่ไม่มีลูกหนี้ */
+  const rcBefore = D.docs.receipt.length, jeBefore = D.entries.length;
+  const seqBefore = JSON.stringify(D.seq);
+  const lastNo = mine[mine.length - 1];
+  D.docs.invoice.find((d) => d.no === lastNo).partnerCode = null;
+  throws('ใบกำกับใบหนึ่งลงบัญชีไม่ได้ รับชำระทั้งใบวางบิลจึงล้ม',
+    () => ctx.receiveBillingNote(bn.no, { date:J, method:'cheque' }), 'PARTNER_REQUIRED');
+  ok('★ ล้มกลางทางแล้วไม่มีใบเสร็จ ใบสำคัญ หรือเลขที่เอกสารค้างแม้แต่ใบเดียว',
+    mine.length > 1 && D.docs.receipt.length === rcBefore && D.entries.length === jeBefore
+    && JSON.stringify(D.seq) === seqBefore
+    && ctx.billingNoteStatus(D.docs.billingNote.find((b) => b.no === bn.no)) === 'issued');
+  D.docs.invoice.find((d) => d.no === lastNo).partnerCode = cust;
+  const made = ctx.receiveBillingNote(bn.no, { date:J, method:'cheque' });
+  ok('★ รับชำระตามใบวางบิล ออกใบเสร็จครบทุกใบกำกับในคราวเดียว',
+    made.length === mine.length && ctx.billingNoteStatus(D.docs.billingNote.find((b) => b.no === bn.no)) === 'paid',
+    made.map((r) => r.no).join(', '));
+  throws('ใบวางบิลที่เก็บเงินครบแล้วยกเลิกไม่ได้', () => ctx.cancelBillingNote(bn.no, 'ทดสอบ'), 'BILLING_ALREADY_PAID');
+
+  /* --- ใบรับสินค้า → ตั้งหนี้ --- */
+  const it = D.items.find((i) => i.code === 'WR-25');
+  const qty0 = it.qty, val0 = it.value;
+  const grni0 = -ctx.balBySub(['grni'], '2026-12-31');
+  throws('ใบรับสินค้าใช้กับสินค้าที่มีสต๊อกเท่านั้น',
+    () => ctx.issueGoodsReceipt({ partnerCode:'VEN-0004', date:J,
+      lines:[{ desc:'ค่าบริการขนส่ง', qty:1, price:'500' }] }), 'GRN_NOT_STOCK');
+  const g = ctx.issueGoodsReceipt({ partnerCode:'VEN-0004', date:'2026-07-20', vendorDoNo:'DO-T-1',
+    lines:[{ itemCode:'WR-25', desc:it.name, qty:50, price:'2400' }] });
+  ok('★ รับสินค้า: สต๊อกเพิ่ม และพักรับสินค้าเพิ่มเท่ามูลค่าที่รับ',
+    it.qty === qty0 + 50 && it.value === val0 + g.total
+    && -ctx.balBySub(['grni'], '2026-12-31') === grni0 + g.total, g.no + ' ' + ctx.fmt(g.total));
+  ok('ยอดพักรับสินค้าตรงกับใบรับสินค้าที่รอตั้งหนี้', recOk());
+  D.periods.find((p) => p.code === '2026-05').status = 'closed';
+  const grSeq = D.seq['goodsReceipt|2026-05'];
+  throws('ใบรับสินค้าลงวันที่ในงวดที่ปิดแล้วไม่ได้',
+    () => ctx.issueGoodsReceipt({ partnerCode:'VEN-0004', date:'2026-05-20',
+      lines:[{ itemCode:'WR-25', qty:1, price:'2400' }] }), 'PERIOD_CLOSED');
+  ok('ถูกปฏิเสธก่อนจองเลขที่ ทะเบียนจึงไม่มีเลขขาดช่วง', D.seq['goodsReceipt|2026-05'] === grSeq);
+  D.periods.find((p) => p.code === '2026-05').status = 'open';
+  throws('ตั้งหนี้ลงวันที่ก่อนรับของไม่ได้',
+    () => ctx.billGoodsReceipt(g.no, { date:'2026-07-19', vendorNo:'TPS-T-1' }), 'GRN_BILL_BEFORE_RECEIPT');
+  const vat0 = D.taxTx.filter((t) => t.kind === 'vat_input').length;
+  const b = ctx.billGoodsReceipt(g.no, { date:'2026-07-25', vendorNo:'TPS-T-1' });
+  ok('★ ตั้งหนี้จากใบรับสินค้า: ไม่เพิ่มสต๊อกซ้ำ และล้างพักรับสินค้าออกพอดี',
+    it.qty === qty0 + 50 && -ctx.balBySub(['grni'], '2026-12-31') === grni0 && b.grnNo === g.no,
+    b.no + ' รวม ' + ctx.fmt(b.total));
+  ok('ภาษีซื้อเกิดตอนตั้งหนี้ ไม่ใช่ตอนรับของ',
+    D.taxTx.filter((t) => t.kind === 'vat_input').length === vat0 + 1 && b.vat > 0);
+  throws('ใบรับสินค้าเดิมตั้งหนี้ซ้ำไม่ได้',
+    () => ctx.billGoodsReceipt(g.no, { date:'2026-07-25', vendorNo:'TPS-T-2' }), 'GRN_ALREADY_BILLED');
+  const poSvc = ctx.issueTradeDoc('purchaseOrder', { partnerCode:'VEN-0004', date:J,
+    lines:[{ desc:'ค่าติดตั้ง', qty:1, price:'3000' }] });
+  throws('ใบสั่งซื้อที่มีค่าบริการรับเข้าคลังไม่ได้',
+    () => ctx.receiveGoodsFromPo(poSvc.no, { date:J }), 'GRN_PO_HAS_NON_STOCK');
+  const poStock = ctx.issueTradeDoc('purchaseOrder', { partnerCode:'VEN-0004', date:J,
+    lines:[{ desc:it.name, qty:10, price:'2400', itemCode:'WR-25' }] });
+  const g2 = ctx.receiveGoodsFromPo(poStock.no, { date:J });
+  ok('รับสินค้าตามใบสั่งซื้อ ใบสั่งซื้อปิดและชี้ไปที่ใบรับสินค้า',
+    poStock.status === 'closed' && poStock.convertedTo === g2.no && g2.poNo === poStock.no);
+
+  /* --- ค่าใช้จ่าย + หัก ณ ที่จ่าย --- */
+  const cert0 = D.docs.whtCert.length;
+  const ex = ctx.recordExpense({ partnerCode:'VEN-0012', date:J, taxInvoiceNo:'TNP-T-0001',
+    lines:[{ desc:'ค่าซ่อมแซมห้องประชุม', qty:1, price:'25000', acc:'5325' }],
+    whtCode:'WHT_SERVICE', channel:'manual' });
+  const cert = D.docs.whtCert.find((c) => c.no === ex.certNo);
+  ok('ค่าใช้จ่าย 25,000 + VAT หัก 3% = 750 จ่ายสุทธิ 26,000',
+    ex.base === ctx.M('25000') && ex.vat === ctx.M('1750') && ex.wht === ctx.M('750') && ex.net === ctx.M('26000'));
+  ok('★ หัก ณ ที่จ่ายในค่าใช้จ่าย → ออกหนังสือรับรอง 50 ทวิ ให้อัตโนมัติ และผูกเลขที่กัน',
+    D.docs.whtCert.length === cert0 + 1 && cert && cert.expenseNo === ex.no && cert.wht === ex.wht
+    && cert.base === ex.base && cert.form === 'ภ.ง.ด.53', ex.no + ' → ' + ex.certNo);
+  ok('ภาษีที่หักเข้าแบบ ภ.ง.ด.53 ของงวดนั้น',
+    D.taxTx.some((t) => t.kind === 'wht' && t.docNo === ex.no && t.form === 'PND53' && t.channel === 'manual' && t.tax === ex.wht));
+  const je = D.entries.find((e) => e.no === ex.entryNo);
+  ok('ค่าใช้จ่ายลงสมุดรายวันจ่าย', ctx.journalOf(je) === 'payment' && je.lines.some((l) => l.acc === '5325'));
+  const ew = ctx.recordExpense({ partnerCode:'VEN-0012', date:J, taxInvoiceNo:'TNP-T-0002',
+    lines:[{ desc:'ค่าซ่อมแซมหลังคา', qty:1, price:'40000', acc:'5325' }],
+    whtCode:'WHT_SERVICE', channel:'e_wht' });
+  ok('นำส่งผ่าน e-Withholding Tax ไม่ออก 50 ทวิ ซ้ำ และใช้อัตรา 1%', ew.certNo === null && ew.whtRate === '1');
+  throws('มีภาษีซื้อที่จะขอคืนแต่ไม่มีเลขใบกำกับ',
+    () => ctx.recordExpense({ partnerCode:'VEN-0025', date:J,
+      lines:[{ desc:'วัสดุสำนักงาน', qty:1, price:'2000', acc:'5324' }] }), 'TAX_INVOICE_NO_REQUIRED');
+  throws('เลขใบกำกับซ้ำกับที่ตั้งหนี้ไว้แล้ว',
+    () => ctx.recordExpense({ partnerCode:'VEN-0004', date:J, taxInvoiceNo:'TPS-T-1',
+      lines:[{ desc:'ซ้ำ', qty:1, price:'2000', acc:'5324' }] }), 'DUPLICATE_VENDOR_INVOICE');
+  throws('ลงบัญชีคุมเป็นค่าใช้จ่ายไม่ได้',
+    () => ctx.recordExpense({ partnerCode:'VEN-0025', date:J, taxInvoiceNo:'X-1',
+      lines:[{ desc:'ผิดบัญชี', qty:1, price:'2000', acc:'1131' }] }), 'EXPENSE_ACCOUNT_INVALID');
+  throws('ออก 50 ทวิ ยอดต่ำกว่า 1,000 บาทไม่ได้ (ไม่ต้องหัก)',
+    () => ctx.recordExpense({ partnerCode:'VEN-0012', date:J, requireWht:true, whtCode:'WHT_SERVICE',
+      lines:[{ desc:'ค่าบริการเล็กน้อย', qty:1, price:'800', acc:'5325', taxCode:'EXEMPT' }] }), 'WHT_BELOW_THRESHOLD');
+  throws('ออก 50 ทวิ ต้องเลือกประเภทเงินได้',
+    () => ctx.recordExpense({ partnerCode:'VEN-0012', date:J, requireWht:true,
+      lines:[{ desc:'ค่าบริการ', qty:1, price:'5000', acc:'5325', taxCode:'EXEMPT' }] }), 'WHT_REQUIRED');
+
+  /* --- เตรียมจ่ายเงิน --- */
+  const inBatch = new Set();
+  D.docs.paymentBatch.filter((x) => x.status === 'pending_approval' || x.status === 'approved')
+    .forEach((x) => x.items.forEach((i) => inBatch.add(i.billNo)));
+  const pick = D.docs.bill.filter((x) => ctx.billOutstanding(x) > 0 && !inBatch.has(x.no) && !x.broughtForward)
+    .sort((a, c) => (a.whtCode ? -1 : 0) - (c.whtCode ? -1 : 0)).slice(0, 3).map((x) => x.no);
+  const pb = ctx.createPaymentBatch({ date:J, payDate:'2026-07-31', billNos:pick });
+  ok('จัดทำใบเตรียมจ่ายได้ สถานะรออนุมัติ', pb.status === 'pending_approval' && pb.items.length === pick.length,
+    pb.no + ' · ' + pick.length + ' ราย · สุทธิ ' + ctx.fmt(pb.net));
+  throws('รายการตั้งหนี้เดียวกันอยู่ในใบเตรียมจ่ายสองใบไม่ได้',
+    () => ctx.createPaymentBatch({ date:J, billNos:[pick[0]] }), 'PAYMENT_BATCH_TAKEN');
+  throws('ยังไม่อนุมัติ จ่ายไม่ได้', () => ctx.payPaymentBatch(pb.no, {}), 'PAYMENT_BATCH_NOT_APPROVED');
+  ctx.approvePaymentBatch(pb.no);
+  const pv0 = D.docs.payment.length, cert1 = D.docs.whtCert.length;
+  const lastBill = pick[pick.length - 1];
+  const lastVendor = D.docs.bill.find((x) => x.no === lastBill).partnerCode;
+  D.docs.bill.find((x) => x.no === lastBill).partnerCode = 'VEN-ไม่มีจริง';
+  throws('ผู้ขายรายสุดท้ายจ่ายไม่ได้ จ่ายทั้งใบเตรียมจ่ายจึงล้ม', () => ctx.payPaymentBatch(pb.no, {}), 'PARTNER_NOT_FOUND');
+  ok('★ จ่ายล้มกลางทาง ไม่มีใบสำคัญจ่ายหรือ 50 ทวิ ค้างแม้แต่ใบเดียว',
+    pick.length > 1 && D.docs.payment.length === pv0 && D.docs.whtCert.length === cert1
+    && D.docs.paymentBatch.find((x) => x.no === pb.no).status === 'approved');
+  D.docs.bill.find((x) => x.no === lastBill).partnerCode = lastVendor;
+  const pvs = ctx.payPaymentBatch(pb.no, {});
+  const pbNow = D.docs.paymentBatch.find((x) => x.no === pb.no);
+  ok('★ จ่ายตามใบเตรียมจ่าย: ใบสำคัญจ่ายครบทุกราย หนี้ปิด',
+    pvs.length === pick.length && pbNow.status === 'paid'
+    && pick.every((no) => ctx.billOutstanding(D.docs.bill.find((x) => x.no === no)) === 0));
+  ok('ภาษีหัก ณ ที่จ่ายที่ประมาณไว้ตอนจัดทำ ตรงกับที่หักจริงตอนจ่าย',
+    pvs.reduce((s, p) => s + p.wht, 0) === pb.wht, ctx.fmt(pb.wht));
+  throws('ใบเตรียมจ่ายที่จ่ายแล้วจ่ายซ้ำไม่ได้', () => ctx.payPaymentBatch(pb.no, {}), 'PAYMENT_BATCH_CLOSED');
+
+  /* --- สมุดรายวัน 5 เล่ม --- */
+  throws('บัญชีคุมลงด้วยมือไม่ได้',
+    () => ctx.postJournalVoucher({ book:'general', date:J, desc:'ทดสอบ',
+      lines:[{ acc:'2141', dr:'100' }, { acc:'4111', cr:'100' }] }), 'CONTROL_ACCOUNT_MANUAL');
+  throws('สมุดรายวันรับต้องมีเงินเข้า',
+    () => ctx.postJournalVoucher({ book:'receipt', date:J, desc:'ทดสอบ',
+      lines:[{ acc:'1143', dr:'100' }, { acc:'4260', cr:'100' }] }), 'JOURNAL_RECEIPT_NEEDS_CASH');
+  throws('สมุดรายวันทั่วไปไม่รับรายการที่มีเงินเข้าออก',
+    () => ctx.postJournalVoucher({ book:'general', date:J, desc:'ทดสอบ',
+      lines:[{ acc:'1113', dr:'100' }, { acc:'4260', cr:'100' }] }), 'JOURNAL_GENERAL_HAS_CASH');
+  throws('สมุดรายวันขายรับเฉพาะขายเชื่อ',
+    () => ctx.postJournalVoucher({ book:'sales', date:J, desc:'ทดสอบ',
+      lines:[{ acc:'1111', dr:'100' }, { acc:'4111', cr:'100' }] }), 'JOURNAL_CREDIT_ONLY');
+  throws('ไม่มีคำอธิบายรายการไม่ได้',
+    () => ctx.postJournalVoucher({ book:'general', date:J, desc:' ',
+      lines:[{ acc:'5325', dr:'100' }, { acc:'2131', cr:'100' }] }), 'DESC_REQUIRED');
+  const tr = ctx.postJournalVoucher({ book:'general', date:J, desc:'โอนเงินระหว่างบัญชีธนาคารของบริษัท',
+    lines:[{ acc:'1114', dr:'50000' }, { acc:'1113', cr:'50000' }] });
+  ok('โอนเงินระหว่างบัญชีของบริษัทเองลงเล่มทั่วไปได้', tr.type === 'general' && tr.no.indexOf('JV') === 0, tr.no);
+  const pj = ctx.postJournalVoucher({ book:'purchase', date:J, desc:'ตั้งค่าไฟฟ้าค้างจ่ายเดือนกรกฎาคม', ref:'MEA-6907',
+    lines:[{ acc:'5322', dr:'18500' }, { acc:'2131', cr:'18500' }] });
+  ok('ตั้งค้างจ่ายลงสมุดรายวันซื้อ พร้อมเลขอ้างอิง', ctx.journalOf(pj) === 'purchase' && pj.srcId === 'MEA-6907' && pj.src === 'manual', pj.no);
+  const pyv = ctx.postJournalVoucher({ book:'payment', date:J, desc:'ค่าธรรมเนียมโอนเงินต่างประเทศ',
+    lines:[{ acc:'5410', dr:'350' }, { acc:'1113', cr:'350' }] });
+  ok('ใบสำคัญจ่ายลงสมุดรายวันจ่าย', ctx.journalOf(pyv) === 'payment', pyv.no);
+  ok('ใบสำคัญประเภทอื่น (ปรับปรุง ค่าเสื่อม เงินเดือน) อยู่ในเล่มทั่วไป',
+    ['adjustment', 'payroll', 'asset', 'inventory', 'opening'].every((t) => ctx.journalOf({ type:t }) === 'general'));
+
+  ok('★ งบทดลองสมดุลหลังใช้เอกสารใหม่ครบทุกแบบ', tbOk());
+  ok('★ ยอดคุมทุกตัวยังตรง (ลูกหนี้ เจ้าหนี้ พักรับสินค้า ภาษีซื้อ ภาษีขาย)', recOk(),
+    ctx.reconciliationChecks('2026-07-31').checks.filter((c) => !c.ok).map((c) => c.label).join(', '));
+}
 
 console.log('\n=== 8. ปิดงวด ===');
 const chk = ctx.closeChecklist('2026-06');

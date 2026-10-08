@@ -30,13 +30,20 @@ function submitAction(fn) {
 }
 
 /* ---------- ออกใบกำกับภาษี ---------- */
-function lineEditor(n) {
-  let h = '<div class="sub-h">รายการสินค้าหรือบริการ</div><div class="scroll"><table class="lines"><thead><tr>'
-    + '<th>สินค้า/บริการ</th><th>คำอธิบายบนใบกำกับ</th><th class="r">จำนวน</th><th class="r">ราคาต่อหน่วย</th><th>ภาษี</th></tr></thead><tbody>';
+/** ตารางรายการ — mode 'cost' ใช้กับใบรับสินค้า: เลือกได้เฉพาะสินค้ามีสต๊อก และเติมราคาทุนเฉลี่ยแทนราคาขาย */
+function lineEditor(n, mode) {
+  const cost = mode === 'cost';
+  const opts = cost
+    ? [['', '— เลือกสินค้า —']].concat(DB.items.filter((i) => i.type === 'stock').map((i) => [i.code, i.code + ' · ' + i.name]))
+    : optItems();
+  let h = '<div class="sub-h">' + (cost ? 'สินค้าที่รับเข้าคลัง' : 'รายการสินค้าหรือบริการ')
+    + '</div><div class="scroll"><table class="lines"><thead><tr>'
+    + '<th>' + (cost ? 'สินค้า' : 'สินค้า/บริการ') + '</th><th>' + (cost ? 'คำอธิบาย' : 'คำอธิบายบนใบกำกับ')
+    + '</th><th class="r">จำนวน</th><th class="r">' + (cost ? 'ต้นทุนต่อหน่วย (ก่อนภาษี)' : 'ราคาต่อหน่วย') + '</th><th>ภาษี</th></tr></thead><tbody>';
   for (let i = 0; i < n; i++) {
     h += '<tr>'
-      + '<td><select name="l' + i + '_item" class="itemsel" data-i="' + i + '">'
-        + optItems().map((o) => '<option value="' + esc(o[0]) + '">' + esc(o[1]) + '</option>').join('') + '</select></td>'
+      + '<td><select name="l' + i + '_item" class="itemsel" data-i="' + i + '"' + (cost ? ' data-cost="1"' : '') + '>'
+        + opts.map((o) => '<option value="' + esc(o[0]) + '">' + esc(o[1]) + '</option>').join('') + '</select></td>'
       + '<td><input name="l' + i + '_desc" placeholder="พิมพ์เองได้"></td>'
       + '<td><input name="l' + i + '_qty" class="r" value="' + (i === 0 ? '1' : '') + '"></td>'
       + '<td><input name="l' + i + '_price" class="r"></td>'
@@ -92,15 +99,35 @@ function modalInvoice() {
   });
 }
 
+/* ---------- ตัวเลือกเอกสารอ้างอิง — ใช้ตอนกดสร้างจากหน้ารายการ ไม่ได้เข้ามาจากหน้าใบกำกับ ---------- */
+const optInvoices = (keep) => DB.docs.invoice.filter((d) => d.status !== 'void' && keep(d))
+  .map((d) => [d.no, d.no + ' · ' + d.partnerName + ' · คงค้าง ' + fmt(invOutstanding(d))]);
+const optOpenBills = () => DB.docs.bill.filter((b) => billOutstanding(b) > 0)
+  .map((b) => [b.no, b.no + ' · ' + b.partnerName + ' · คงค้าง ' + fmt(billOutstanding(b))]);
+const checkedValues = (name) =>
+  Array.from(document.querySelectorAll('[name="' + name + '"]:checked')).map((e) => e.value);
+
+/** ไม่มีเอกสารให้อ้างก็บอกตรง ๆ ดีกว่าเปิดฟอร์มเปล่าที่กดบันทึกไม่ได้ */
+function needRefs(opts, msg, hint) {
+  if (opts.length) return true;
+  toast(msg, 'err', hint);
+  return false;
+}
+
 function modalReceive(no) {
-  const inv = DB.docs.invoice.find((d) => d.no === no);
-  if (!inv) return;
-  const out = invOutstanding(inv);
+  const inv = no ? DB.docs.invoice.find((d) => d.no === no) : null;
+  if (no && !inv) return;
+  const refs = inv ? [] : optInvoices((d) => invOutstanding(d) > 0);
+  if (!inv && !needRefs(refs, 'ไม่มีใบกำกับภาษีที่ค้างชำระ', 'ออกใบกำกับภาษีก่อน แล้วจึงรับชำระ')) return;
+  const out = inv ? invOutstanding(inv) : 0;
   modal({
-    title:'รับชำระเงินจากใบกำกับ ' + no,
-    sub: inv.partnerName + ' · คงเหลือ ' + fmt(out) + ' บาท',
+    title: inv ? 'รับชำระเงินจากใบกำกับ ' + no : 'ออกใบเสร็จรับเงิน',
+    sub: inv ? inv.partnerName + ' · คงเหลือ ' + fmt(out) + ' บาท'
+      : 'เลือกใบกำกับภาษีที่ลูกค้าชำระ ใบเสร็จต้องอ้างใบกำกับเสมอ',
     body:'<div class="flds">'
-      + field({ name:'amount', label:'จำนวนเงินที่รับ (ก่อนหักภาษี ณ ที่จ่าย)', value: fmt(out) })
+      + (inv ? '' : field({ name:'invoiceNo', label:'อ้างใบกำกับภาษี', type:'select', wide:true, options: refs }))
+      + field({ name:'amount', label:'จำนวนเงินที่รับ (ก่อนหักภาษี ณ ที่จ่าย)', value: inv ? fmt(out) : '',
+          placeholder: inv ? '' : 'เว้นว่าง = รับเต็มยอดคงค้าง' })
       + field({ name:'date', label:'วันที่รับชำระ', type:'date', value: defaultDate() })
       + field({ name:'method', label:'วิธีรับชำระ', type:'select', value:'transfer',
           options:[['transfer','โอนเงินเข้าบัญชี'],['cheque','เช็ค'],['cash','เงินสด']] })
@@ -110,7 +137,7 @@ function modalReceive(no) {
     submitLabel:'รับชำระและลงบัญชี',
     onSubmit: function () {
       submitAction(function () {
-        const r = receivePayment({ invoiceNo: no, amount: val('amount'), date: val('date'),
+        const r = receivePayment({ invoiceNo: no || val('invoiceNo'), amount: val('amount'), date: val('date'),
           method: val('method'), whtCode: val('wht') || null });
         toast('บันทึกใบเสร็จ ' + r.no + ' แล้ว', 'ok',
           'รับสุทธิ ' + fmt(r.net) + ' บาท' + (r.wht ? ' (ถูกหักไว้ ' + fmt(r.wht) + ')' : ''));
@@ -121,14 +148,20 @@ function modalReceive(no) {
 }
 
 function modalCreditNote(no) {
-  const inv = DB.docs.invoice.find((d) => d.no === no);
-  if (!inv) return;
+  const inv = no ? DB.docs.invoice.find((d) => d.no === no) : null;
+  if (no && !inv) return;
+  const refs = inv ? [] : DB.docs.invoice
+    .filter((d) => d.status !== 'void' && invOutstanding(d) > 0 && d.base - d.credited > 0)
+    .map((d) => [d.no, d.no + ' · ' + d.partnerName + ' · ลดได้อีก ' + fmt(d.base - d.credited)]);
+  if (!inv && !needRefs(refs, 'ไม่มีใบกำกับภาษีที่ออกใบลดหนี้ได้', 'ใบลดหนี้ต้องอ้างใบกำกับที่ยังมียอดค้าง (มาตรา 86/10)')) return;
   modal({
-    title:'ออกใบลดหนี้อ้างใบกำกับ ' + no,
-    sub:'ออกได้เฉพาะเหตุที่มาตรา 86/10 กำหนดเท่านั้น',
+    title: inv ? 'ออกใบลดหนี้อ้างใบกำกับ ' + no : 'ออกใบลดหนี้',
+    sub:'ออกได้เฉพาะเหตุที่มาตรา 86/10 กำหนดเท่านั้น และต้องอ้างใบกำกับเดิมเสมอ',
     body:'<div class="flds">'
+      + (inv ? '' : field({ name:'invoiceNo', label:'อ้างใบกำกับภาษีเดิม', type:'select', wide:true, options: refs }))
       + field({ name:'base', label:'มูลค่าที่ลด (ก่อนภาษี)', value:'0',
-          hint:'ลดได้ไม่เกินมูลค่าคงเหลือของใบกำกับเดิม ' + fmt(inv.base - inv.credited) + ' บาท' })
+          hint: inv ? 'ลดได้ไม่เกินมูลค่าคงเหลือของใบกำกับเดิม ' + fmt(inv.base - inv.credited) + ' บาท'
+            : 'ลดได้ไม่เกินยอด "ลดได้อีก" ของใบกำกับที่เลือก' })
       + field({ name:'date', label:'วันที่ออกใบลดหนี้', type:'date', value: defaultDate() })
       + field({ name:'reason', label:'เหตุแห่งการลดหนี้', type:'select', wide:true,
           options: Object.keys(CN_REASONS).map((k) => [k, CN_REASONS[k]]) })
@@ -136,7 +169,7 @@ function modalCreditNote(no) {
     submitLabel:'ออกใบลดหนี้',
     onSubmit: function () {
       submitAction(function () {
-        const c = issueCreditNote({ invoiceNo: no, base: val('base'), date: val('date'), reason: val('reason') });
+        const c = issueCreditNote({ invoiceNo: no || val('invoiceNo'), base: val('base'), date: val('date'), reason: val('reason') });
         toast('ออกใบลดหนี้ ' + c.no + ' แล้ว', 'ok', 'ลดภาษีขาย ' + fmt(c.vat) + ' บาทในงวดนี้');
         return c;
       });
@@ -342,14 +375,18 @@ function modalUndoImport(no) {
 }
 
 function modalDebitNote(no) {
-  const inv = DB.docs.invoice.find((d) => d.no === no);
-  if (!inv) return;
+  const inv = no ? DB.docs.invoice.find((d) => d.no === no) : null;
+  if (no && !inv) return;
+  const refs = inv ? [] : DB.docs.invoice.filter((d) => d.status !== 'void')
+    .map((d) => [d.no, d.no + ' · ' + d.partnerName + ' · ก่อนภาษี ' + fmt(d.base)]);
+  if (!inv && !needRefs(refs, 'ยังไม่มีใบกำกับภาษีให้อ้าง', 'ใบเพิ่มหนี้ต้องอ้างใบกำกับเดิมเสมอ (มาตรา 86/9)')) return;
   modal({
-    title:'ออกใบเพิ่มหนี้อ้างใบกำกับ ' + no,
-    sub:'ใช้เมื่อเรียกเก็บเงินต่ำกว่าที่ควร ออกได้เฉพาะเหตุตามมาตรา 86/9',
+    title: inv ? 'ออกใบเพิ่มหนี้อ้างใบกำกับ ' + no : 'ออกใบเพิ่มหนี้',
+    sub:'ใช้เมื่อเรียกเก็บเงินต่ำกว่าที่ควร ออกได้เฉพาะเหตุตามมาตรา 86/9 และต้องอ้างใบกำกับเดิม',
     body:'<div class="flds">'
+      + (inv ? '' : field({ name:'invoiceNo', label:'อ้างใบกำกับภาษีเดิม', type:'select', wide:true, options: refs }))
       + field({ name:'base', label:'มูลค่าที่เพิ่ม (ก่อนภาษี)', value:'0',
-          hint:'ยอดเดิมของใบกำกับก่อนภาษีคือ ' + fmt(inv.base) + ' บาท' })
+          hint: inv ? 'ยอดเดิมของใบกำกับก่อนภาษีคือ ' + fmt(inv.base) + ' บาท' : 'มูลค่าที่เรียกเก็บเพิ่ม ไม่รวมภาษี' })
       + field({ name:'date', label:'วันที่ออกใบเพิ่มหนี้', type:'date', value: defaultDate() })
       + field({ name:'reason', label:'เหตุแห่งการเพิ่มหนี้', type:'select', wide:true,
           options: Object.keys(DN_REASONS).map((k) => [k, DN_REASONS[k]]) })
@@ -358,7 +395,7 @@ function modalDebitNote(no) {
     note:'อย่าออกใบกำกับภาษีใบใหม่ทับ เพราะรายได้และภาษีขายจะถูกนับซ้ำสองรอบ',
     onSubmit: function () {
       submitAction(function () {
-        const c = issueDebitNote({ invoiceNo: no, base: val('base'), date: val('date'), reason: val('reason') });
+        const c = issueDebitNote({ invoiceNo: no || val('invoiceNo'), base: val('base'), date: val('date'), reason: val('reason') });
         toast('ออกใบเพิ่มหนี้ ' + c.no + ' แล้ว', 'ok', 'เพิ่มภาษีขาย ' + fmt(c.vat) + ' บาทในงวดนี้');
         return c;
       });
@@ -493,17 +530,23 @@ function modalBill() {
 }
 
 function modalPayBill(no) {
-  const b = DB.docs.bill.find((x) => x.no === no);
-  if (!b) return;
-  const out = b.total - b.paid;
+  const b = no ? DB.docs.bill.find((x) => x.no === no) : null;
+  if (no && !b) return;
+  const refs = b ? [] : optOpenBills();
+  if (!b && !needRefs(refs, 'ไม่มีเจ้าหนี้ค้างจ่าย', 'บันทึกตั้งหนี้ผู้ขายก่อน แล้วจึงจ่ายชำระ')) return;
+  const out = b ? b.total - b.paid : 0;
   modal({
-    title:'จ่ายชำระ ' + no,
-    sub: b.partnerName + ' · คงเหลือ ' + fmt(out) + ' บาท',
+    title: b ? 'จ่ายชำระ ' + no : 'จ่ายชำระเจ้าหนี้',
+    sub: b ? b.partnerName + ' · คงเหลือ ' + fmt(out) + ' บาท'
+      : 'เลือกรายการตั้งหนี้ที่จะจ่าย · จ่ายหลายรายพร้อมกันใช้เมนูเตรียมจ่ายเงิน',
     body:'<div class="flds">'
-      + field({ name:'amount', label:'จำนวนเงินที่จ่าย (ก่อนหักภาษี ณ ที่จ่าย)', value: fmt(out) })
+      + (b ? '' : field({ name:'billNo', label:'อ้างรายการตั้งหนี้', type:'select', wide:true, options: refs }))
+      + field({ name:'amount', label:'จำนวนเงินที่จ่าย (ก่อนหักภาษี ณ ที่จ่าย)', value: b ? fmt(out) : '',
+          placeholder: b ? '' : 'เว้นว่าง = จ่ายเต็มยอดคงค้าง' })
       + field({ name:'date', label:'วันที่จ่าย', type:'date', value: defaultDate() })
       + field({ name:'wht', label:'ประเภทเงินได้ที่ต้องหักภาษี', type:'select',
-          value: b.whtCode || '', options: optWht() })
+          value: b ? b.whtCode || '' : '', options: optWht(b ? null : '— ตามที่ตั้งไว้ในรายการตั้งหนี้ —'),
+          hint: b ? '' : 'ไม่เลือก = ใช้ประเภทที่บันทึกไว้ตอนตั้งหนี้' })
       + field({ name:'channel', label:'ช่องทางนำส่งภาษี', type:'select', value:'manual', wide:true,
           options:[['manual','หักและนำส่งเอง — ระบบจะออกหนังสือรับรอง 50 ทวิ ให้'],
                    ['e_wht','e-Withholding Tax — ธนาคารนำส่งและออกหลักฐานให้']],
@@ -512,7 +555,7 @@ function modalPayBill(no) {
     submitLabel:'จ่ายและลงบัญชี',
     onSubmit: function () {
       submitAction(function () {
-        const p = payBill({ billNo: no, amount: val('amount'), date: val('date'),
+        const p = payBill({ billNo: no || val('billNo'), amount: val('amount'), date: val('date'),
           whtCode: val('wht') || null, channel: val('channel') });
         toast('บันทึกใบสำคัญจ่าย ' + p.no + ' แล้ว', 'ok',
           'จ่ายสุทธิ ' + fmt(p.net) + ' บาท' + (p.certNo ? ' · ออก 50 ทวิ เลขที่ ' + p.certNo : ''));
@@ -520,6 +563,424 @@ function modalPayBill(no) {
       });
     },
   });
+}
+
+/* ===================================================================
+   ใบวางบิล
+   =================================================================== */
+/** ใบกำกับของลูกค้ารายนี้ที่ยังค้าง — ใบที่อยู่ในใบวางบิลอื่นที่ยังเปิดอยู่ติ๊กไม่ได้ */
+function bnInvoiceRows(partnerCode) {
+  const list = DB.docs.invoice.filter((d) => d.partnerCode === partnerCode && d.status !== 'void' && invOutstanding(d) > 0)
+    .slice().sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  if (!list.length) return '<div class="empty">ลูกค้ารายนี้ไม่มีใบกำกับที่ค้างชำระ</div>';
+  const takenBy = (no) => {
+    const b = DB.docs.billingNote.find((x) => x.invoices.some((i) => i.no === no)
+      && ['issued', 'partially_paid'].indexOf(billingNoteStatus(x)) >= 0);
+    return b ? b.no : null;
+  };
+  return '<div class="scroll"><table class="lines"><thead><tr><th></th><th>ใบกำกับภาษี</th><th>วันที่</th>'
+    + '<th>ครบกำหนด</th><th class="r">คงค้าง</th><th>หมายเหตุ</th></tr></thead><tbody>'
+    + list.map(function (d) {
+      const t = takenBy(d.no);
+      return '<tr><td><input type="checkbox" name="bnInv" value="' + esc(d.no) + '"' + (t ? ' disabled' : ' checked') + '></td>'
+        + '<td class="mono">' + esc(d.no) + '</td><td>' + thDateNum(d.date) + '</td><td>' + thDateNum(d.due) + '</td>'
+        + '<td class="num">' + fmt(invOutstanding(d)) + '</td>'
+        + '<td class="dim">' + (t ? 'อยู่ในใบวางบิล ' + esc(t) + ' แล้ว' : d.due < TODAY ? 'เลยกำหนดแล้ว' : '') + '</td></tr>';
+    }).join('')
+    + '</tbody></table></div>';
+}
+
+function modalBillingNote() {
+  const custs = optCustomers();
+  if (!needRefs(custs, 'ยังไม่มีลูกค้าในทะเบียน', 'เพิ่มลูกค้าที่เมนูผู้ติดต่อก่อน')) return;
+  const hasOpen = (code) => DB.docs.invoice.some((d) => d.partnerCode === code && d.status !== 'void' && invOutstanding(d) > 0);
+  const first = (custs.find((c) => hasOpen(c[0])) || custs[0])[0];
+  const d = defaultDate();
+  modal({
+    title:'ออกใบวางบิล',
+    sub:'เลือกลูกค้า แล้วติ๊กใบกำกับที่จะวางบิลเก็บเงิน — ใบวางบิลไม่มีผลทางบัญชี',
+    body:'<div class="flds">'
+      + field({ name:'bnPartner', label:'ลูกค้า', type:'select', value: first, options: custs })
+      + field({ name:'date', label:'วันที่วางบิล', type:'date', value: d })
+      + field({ name:'dueDate', label:'วันนัดชำระ / นัดรับเช็ค', type:'date', value: addDays(d, 7) })
+      + field({ name:'note', label:'หมายเหตุ', wide:true, placeholder:'เช่น นัดรับเช็คทุกวันที่ 5 ของเดือน' })
+      + '</div><div class="sub-h">ใบกำกับที่ค้างชำระ</div><div id="bnInvoices">' + bnInvoiceRows(first) + '</div>',
+    submitLabel:'ออกใบวางบิล',
+    onSubmit: function () {
+      submitAction(function () {
+        const bn = issueBillingNote({ partnerCode: val('bnPartner'), date: val('date'), dueDate: val('dueDate'),
+          invoiceNos: checkedValues('bnInv'), note: val('note') });
+        STATE.screen = 'billingnotes'; STATE.sel = bn.no;
+        toast('ออกใบวางบิล ' + bn.no + ' แล้ว', 'ok', bn.invoices.length + ' ใบกำกับ รวม ' + fmt(bn.total) + ' บาท');
+        return bn;
+      });
+    },
+  });
+}
+
+function modalReceiveBillingNote(no) {
+  const bn = DB.docs.billingNote.find((x) => x.no === no);
+  if (!bn) return;
+  const open = bn.invoices.filter((r) => {
+    const inv = DB.docs.invoice.find((d) => d.no === r.no);
+    return inv && invOutstanding(inv) > 0;
+  });
+  modal({
+    title:'รับชำระตามใบวางบิล ' + no,
+    sub: bn.partnerName + ' · ค้าง ' + fmt(billingNoteOutstanding(bn)) + ' บาท · ' + open.length + ' ใบกำกับ',
+    body:'<div class="flds">'
+      + field({ name:'date', label:'วันที่รับชำระ', type:'date', value: defaultDate() })
+      + field({ name:'method', label:'วิธีรับชำระ', type:'select', value:'cheque',
+          options:[['cheque','เช็ค'],['transfer','โอนเงินเข้าบัญชี'],['cash','เงินสด']] })
+      + field({ name:'wht', label:'ลูกค้าหักภาษี ณ ที่จ่ายหรือไม่', type:'select', wide:true,
+          options: optWht('ไม่ได้ถูกหัก'), hint:'ใช้อัตราเดียวกันกับทุกใบกำกับในใบวางบิลนี้' })
+      + '</div>'
+      + '<div class="note">ระบบจะออกใบเสร็จรับเงินให้ทุกใบกำกับที่ยังค้าง (' + open.map((r) => esc(r.no)).join(', ')
+      + ') ในคราวเดียว ถ้าใบใดลงบัญชีไม่ได้ จะไม่ออกให้เลยสักใบ</div>',
+    submitLabel:'รับชำระทั้งหมดและลงบัญชี',
+    onSubmit: function () {
+      submitAction(function () {
+        const made = receiveBillingNote(no, { date: val('date'), method: val('method'), whtCode: val('wht') || null });
+        toast('ออกใบเสร็จ ' + made.length + ' ใบแล้ว', 'ok',
+          made.map((r) => r.no).join(', ') + ' · รับสุทธิ ' + fmt(made.reduce((s, r) => s + r.net, 0)) + ' บาท');
+        return made;
+      });
+    },
+  });
+}
+
+/** ยกเลิกเอกสาร — เหตุผลเข้าร่องรอยการตรวจสอบ */
+function modalReason(o) {
+  modal({
+    title: o.title, sub: o.sub,
+    body:'<div class="flds">' + field({ name:'reason', label:'เหตุผล', wide:true, placeholder: o.placeholder || '' }) + '</div>',
+    submitLabel: o.submitLabel,
+    onSubmit: function () {
+      submitAction(function () {
+        const r = o.run(val('reason').trim());
+        toast(o.done, 'ok');
+        return r;
+      });
+    },
+  });
+}
+
+/* ===================================================================
+   ใบรับสินค้า
+   =================================================================== */
+function modalGoodsReceipt() {
+  const vends = optVendors();
+  if (!needRefs(vends, 'ยังไม่มีผู้ขายในทะเบียน', 'เพิ่มผู้ขายที่เมนูผู้ติดต่อก่อน')) return;
+  modal({
+    title:'ออกใบรับสินค้า',
+    sub:'รับของเข้าคลังก่อนใบกำกับภาษีจากผู้ขายจะมาถึง — ยอดพักไว้ที่บัญชีพักรับสินค้าจนกว่าจะตั้งหนี้',
+    body:'<div class="flds">'
+      + field({ name:'partner', label:'ผู้ขาย', type:'select', options: vends })
+      + field({ name:'date', label:'วันที่รับสินค้า', type:'date', value: defaultDate() })
+      + field({ name:'vendorDoNo', label:'เลขที่ใบส่งของของผู้ขาย', placeholder:'เช่น DO-6907-118' })
+      + field({ name:'note', label:'หมายเหตุ', placeholder:'สภาพสินค้า ผู้ตรวจรับ ฯลฯ' })
+      + '</div>' + lineEditor(4, 'cost'),
+    submitLabel:'รับเข้าคลังและลงบัญชี',
+    note:'ภาษีซื้อยังไม่เกิดในขั้นนี้ ต้องรอใบกำกับภาษีแล้วกดตั้งหนี้',
+    onSubmit: function () {
+      submitAction(function () {
+        const g = issueGoodsReceipt({ partnerCode: val('partner'), date: val('date'),
+          vendorDoNo: val('vendorDoNo'), note: val('note'), lines: collectLines(4) });
+        STATE.screen = 'goodsreceipts'; STATE.sel = g.no;
+        toast('ออกใบรับสินค้า ' + g.no + ' แล้ว', 'ok', 'มูลค่ารับเข้าคลัง ' + fmt(g.total) + ' บาท');
+        return g;
+      });
+    },
+  });
+}
+
+function modalReceiveFromPo(poNo) {
+  const po = DB.docs.purchaseOrder.find((x) => x.no === poNo);
+  if (!po) return;
+  modal({
+    title:'รับสินค้าตามใบสั่งซื้อ ' + poNo,
+    sub: po.partnerName + ' · ' + po.lines.length + ' รายการ · มูลค่าก่อนภาษี ' + fmt(po.base) + ' บาท',
+    body:'<div class="flds">'
+      + field({ name:'date', label:'วันที่รับสินค้า', type:'date', value: defaultDate() })
+      + field({ name:'vendorDoNo', label:'เลขที่ใบส่งของของผู้ขาย', placeholder:'ดูจากใบส่งของที่มากับสินค้า' })
+      + '</div>'
+      + tbl({ cols:[{t:'รายการ'},{t:'จำนวน',a:'r'},{t:'ราคาต่อหน่วย',a:'r'},{t:'มูลค่า',a:'r'}],
+          rows: po.lines.map((l) => [l.desc, {n:M(String(l.qty))}, {n:l.price}, {n:l.amount}]) }),
+    submitLabel:'รับเข้าคลังและลงบัญชี',
+    note:'ใบสั่งซื้อจะปิดและชี้ไปที่ใบรับสินค้าใบนี้',
+    onSubmit: function () {
+      submitAction(function () {
+        const g = receiveGoodsFromPo(poNo, { date: val('date'), vendorDoNo: val('vendorDoNo') });
+        STATE.screen = 'goodsreceipts'; STATE.sel = g.no; STATE.period = periodOf(g.date);
+        toast('รับสินค้าเข้าคลังแล้ว ' + g.no, 'ok', 'ใบสั่งซื้อ ' + poNo + ' ปิดรายการแล้ว');
+        return g;
+      });
+    },
+  });
+}
+
+function modalBillFromGrn(no) {
+  const g = DB.docs.goodsReceipt.find((x) => x.no === no);
+  if (!g) return;
+  modal({
+    title:'ตั้งหนี้จากใบรับสินค้า ' + no,
+    sub: g.partnerName + ' · มูลค่ารับเข้าคลัง ' + fmt(g.total) + ' บาท — ระบบล้างบัญชีพักรับสินค้าและบันทึกภาษีซื้อให้',
+    body:'<div class="flds">'
+      + field({ name:'vendorNo', label:'เลขที่ใบกำกับภาษีของผู้ขาย', placeholder:'ดูจากใบกำกับที่ผู้ขายส่งมา' })
+      + field({ name:'date', label:'วันที่ตามใบกำกับ', type:'date', value: defaultDate(),
+          hint:'ต้องไม่ก่อนวันที่รับสินค้า ' + thDateNum(g.date) })
+      + field({ name:'tax', label:'ภาษีมูลค่าเพิ่ม', type:'select', value: g.lines[0].taxCode || 'VAT7', options: optVat })
+      + field({ name:'claim', label:'สิทธิภาษีซื้อ', type:'select', value:'yes',
+          options:[['yes','ขอคืนได้'],['no','ภาษีซื้อต้องห้าม ตามมาตรา 82/5']] })
+      + field({ name:'wht', label:'ภาษีหัก ณ ที่จ่ายตอนจ่ายเงิน', type:'select', wide:true, options: optWht(),
+          hint:'ซื้อสินค้าโดยทั่วไปไม่ต้องหัก' })
+      + '</div>',
+    submitLabel:'ตั้งหนี้และลงบัญชี',
+    onSubmit: function () {
+      submitAction(function () {
+        const b = billGoodsReceipt(no, { vendorNo: val('vendorNo'), date: val('date'), taxCode: val('tax'),
+          nonClaimableVat: val('claim') === 'no', whtCode: val('wht') || null });
+        toast('ตั้งหนี้ ' + b.no + ' จากใบรับสินค้า ' + no + ' แล้ว', 'ok', 'รวมทั้งสิ้น ' + fmt(b.total) + ' บาท');
+        return b;
+      });
+    },
+  });
+}
+
+/* ===================================================================
+   ค่าใช้จ่าย และหนังสือรับรองหัก ณ ที่จ่าย — ฟอร์มเดียวกัน
+   จากแถบหัก ณ ที่จ่าย บังคับเลือกประเภทเงินได้ เพราะ 50 ทวิ ทุกใบต้องผูกกับการจ่ายเงินจริง
+   =================================================================== */
+const EXP_ROWS = 3;
+function expenseLines() {
+  const accs = [['', '— เลือกบัญชี —']].concat(expenseAccounts().map((a) => [a.code, a.code + ' ' + a.name]));
+  let h = '<div class="sub-h">รายการค่าใช้จ่าย</div><div class="scroll"><table class="lines"><thead><tr>'
+    + '<th>รายการ</th><th>บันทึกเข้าบัญชี</th><th class="r">จำนวน</th><th class="r">ราคาต่อหน่วย (ก่อนภาษี)</th><th>ภาษี</th></tr></thead><tbody>';
+  for (let i = 0; i < EXP_ROWS; i++) {
+    h += '<tr><td><input name="e' + i + '_desc" placeholder="' + (i === 0 ? 'เช่น ค่าซ่อมเครื่องปรับอากาศ' : '') + '"></td>'
+      + '<td><select name="e' + i + '_acc">' + accs.map((o) => '<option value="' + esc(o[0]) + '">' + esc(o[1]) + '</option>').join('') + '</select></td>'
+      + '<td><input name="e' + i + '_qty" class="r" value="' + (i === 0 ? '1' : '') + '"></td>'
+      + '<td><input name="e' + i + '_price" class="r"></td>'
+      + '<td><select name="e' + i + '_tax">' + optVat.map((o) => '<option value="' + o[0] + '">' + esc(o[1]) + '</option>').join('') + '</select></td></tr>';
+  }
+  return h + '</tbody></table></div><div class="jv-tot" id="expSum"></div>';
+}
+function collectExpenseLines() {
+  const out = [];
+  for (let i = 0; i < EXP_ROWS; i++) {
+    const desc = val('e' + i + '_desc').trim();
+    const price = val('e' + i + '_price');
+    if (!desc && !price) continue;
+    out.push({ desc, acc: val('e' + i + '_acc'), qty: Number(val('e' + i + '_qty') || 1) || 1,
+      price, taxCode: val('e' + i + '_tax') || 'VAT7' });
+  }
+  return out;
+}
+/** สรุปยอดสด ๆ ระหว่างกรอก — ใช้สูตรเดียวกับตอนลงบัญชี ตัวเลขที่เห็นจึงตรงกับที่จะบันทึก */
+function refreshExpenseSum() {
+  const el = document.getElementById('expSum');
+  if (!el) return;
+  try {
+    const date = val('date') || TODAY;
+    const lines = collectExpenseLines().filter((l) => l.desc && M(l.price) > 0);
+    const v = computeVat(lines, date);
+    const base = v.std + v.zero + v.exempt;
+    let wht = 0;
+    const code = val('wht');
+    if (code && base >= M('1000')) wht = round2(pct(base, resolveRate(code, date, { channel: val('channel') || 'manual' }).rate));
+    el.innerHTML = '<span>ก่อนภาษี <b>' + fmt(base) + '</b></span><span>ภาษีซื้อ <b>' + fmt(v.vat) + '</b></span>'
+      + '<span>หัก ณ ที่จ่าย <b>' + fmt(wht) + '</b></span><span>จ่ายสุทธิ <b>' + fmt(v.total - wht) + '</b></span>';
+  } catch (e) { el.textContent = ''; }
+}
+
+function modalExpense(opts) {
+  const o = opts || {};
+  const vends = DB.partners.filter((p) => p.kind === 'vendor');
+  if (!needRefs(vends, 'ยังไม่มีผู้ขายในทะเบียน', 'เพิ่มผู้รับเงินที่เมนูผู้ติดต่อ → ผู้ขาย ก่อน')) return;
+  const first = (o.requireWht ? vends.find((p) => p.whtCode) : null) || vends[0];
+  const pay = payFromAccounts().map((a) => [a.code, a.code + ' ' + a.name]);
+  let bank = '';
+  try { bank = accBySub('bank'); } catch (e) { bank = pay.length ? pay[0][0] : ''; }
+  modal({
+    title: o.requireWht ? 'ออกหนังสือรับรองการหักภาษี ณ ที่จ่าย (50 ทวิ)' : 'บันทึกค่าใช้จ่าย',
+    sub: o.requireWht
+      ? 'หนังสือรับรองทุกฉบับต้องผูกกับการจ่ายเงินจริง — ระบบบันทึกค่าใช้จ่ายและการจ่ายเงินให้พร้อมกัน'
+      : 'ค่าใช้จ่ายที่จ่ายทันที ถ้ามีหัก ณ ที่จ่าย ระบบออกหนังสือรับรอง 50 ทวิ ให้เองในแถบหัก ณ ที่จ่าย',
+    body:'<div class="flds">'
+      + field({ name:'expPartner', label:'ผู้รับเงิน', type:'select', value: first.code,
+          options: vends.map((p) => [p.code, p.name]) })
+      + field({ name:'date', label:'วันที่จ่าย', type:'date', value: defaultDate() })
+      + field({ name:'payFrom', label:'จ่ายจากบัญชี', type:'select', value: bank, options: pay })
+      + field({ name:'method', label:'วิธีจ่าย', type:'select', value:'transfer',
+          options:[['transfer','โอนเงิน'],['cheque','เช็ค'],['cash','เงินสด']] })
+      + field({ name:'taxInvoiceNo', label:'เลขที่ใบกำกับภาษีของผู้ขาย', placeholder:'เว้นว่างถ้าไม่มีใบกำกับภาษี',
+          hint:'ต้องกรอกถ้าจะขอคืนภาษีซื้อ' })
+      + field({ name:'claim', label:'สิทธิภาษีซื้อ', type:'select', value:'yes',
+          options:[['yes','ขอคืนได้'],['no','ภาษีซื้อต้องห้าม ตามมาตรา 82/5']] })
+      + field({ name:'wht', label:'หักภาษี ณ ที่จ่าย (ประเภทเงินได้)', type:'select',
+          value: first.whtCode || '', options: optWht(o.requireWht ? '— เลือกประเภทเงินได้ —' : null),
+          hint:'เลือกผู้รับเงินแล้วระบบเติมประเภทที่ตั้งไว้ในทะเบียนให้' })
+      + (o.requireWht ? '' : field({ name:'channel', label:'ช่องทางนำส่งภาษี', type:'select', value:'manual',
+          options:[['manual','หักและนำส่งเอง — ออก 50 ทวิ ให้'], ['e_wht','e-Withholding Tax — ธนาคารออกหลักฐานให้']] }))
+      + field({ name:'note', label:'หมายเหตุ', wide:true })
+      + '</div>' + expenseLines(),
+    submitLabel: o.requireWht ? 'จ่ายเงินและออกหนังสือรับรอง' : 'บันทึกและลงบัญชี',
+    note:'จ่ายครั้งหนึ่งต่ำกว่า 1,000 บาท ไม่ต้องหักภาษี ณ ที่จ่าย',
+    onSubmit: function () {
+      submitAction(function () {
+        const e = recordExpense({
+          partnerCode: val('expPartner'), date: val('date'), payFrom: val('payFrom'), method: val('method'),
+          taxInvoiceNo: val('taxInvoiceNo'), nonClaimableVat: val('claim') === 'no',
+          whtCode: val('wht') || null, channel: o.requireWht ? 'manual' : val('channel'),
+          requireWht: !!o.requireWht, note: val('note'), lines: collectExpenseLines(),
+        });
+        if (o.requireWht && e.certNo) { STATE.screen = 'whtcert'; STATE.sel = e.certNo; }
+        else { STATE.screen = 'expenses'; STATE.sel = e.no; }
+        toast('บันทึกค่าใช้จ่าย ' + e.no + ' แล้ว', 'ok', 'จ่ายสุทธิ ' + fmt(e.net) + ' บาท'
+          + (e.certNo ? ' · ออกหนังสือรับรอง 50 ทวิ เลขที่ ' + e.certNo + ' ให้แล้ว' : ''));
+        return e;
+      });
+    },
+  });
+  refreshExpenseSum();
+}
+
+/* ===================================================================
+   เตรียมจ่ายเงิน
+   =================================================================== */
+function modalPaymentBatch() {
+  const inBatch = new Set();
+  DB.docs.paymentBatch.filter(paymentBatchActive).forEach((b) => b.items.forEach((i) => inBatch.add(i.billNo)));
+  const list = DB.docs.bill.filter((b) => billOutstanding(b) > 0 && !inBatch.has(b.no))
+    .slice().sort((a, b) => (a.due < b.due ? -1 : a.due > b.due ? 1 : 0));
+  if (!needRefs(list, 'ไม่มีเจ้าหนี้ค้างจ่ายที่ยังไม่อยู่ในใบเตรียมจ่าย', 'ตั้งหนี้ผู้ขายก่อน หรือดูใบเตรียมจ่ายที่มีอยู่')) return;
+  const d = defaultDate();
+  const payDate = addDays(d, 7);
+  modal({
+    title:'จัดทำใบเตรียมจ่าย',
+    sub:'เลือกรายการตั้งหนี้ที่จะจ่ายรอบนี้ — ระบบติ๊กรายการที่ครบกำหนดภายในวันที่จะจ่ายไว้ให้',
+    body:'<div class="flds">'
+      + field({ name:'date', label:'วันที่จัดทำ', type:'date', value: d })
+      + field({ name:'payDate', label:'วันที่จะจ่าย', type:'date', value: payDate })
+      + field({ name:'note', label:'หมายเหตุ', wide:true, placeholder:'เช่น รอบจ่ายวันที่ 5 ของเดือน' })
+      + '</div>'
+      + '<div class="scroll"><table class="lines"><thead><tr><th></th><th>ตั้งหนี้</th><th>ผู้ขาย</th><th>ครบกำหนด</th>'
+      + '<th class="r">คงค้าง</th><th>หัก ณ ที่จ่าย</th></tr></thead><tbody>'
+      + list.map((b) => '<tr><td><input type="checkbox" name="pbBill" value="' + esc(b.no) + '"' + (b.due <= payDate ? ' checked' : '') + '></td>'
+        + '<td class="mono">' + esc(b.no) + '</td><td>' + esc(b.partnerName) + '</td>'
+        + '<td>' + thDateNum(b.due) + (b.due < TODAY ? ' <span class="st late">เลยกำหนด</span>' : '') + '</td>'
+        + '<td class="num">' + fmt(billOutstanding(b)) + '</td>'
+        + '<td class="dim">' + (b.whtCode ? esc(resolveRate(b.whtCode, TODAY, { channel:'manual' }).label) : '—') + '</td></tr>').join('')
+      + '</tbody></table></div>',
+    submitLabel:'บันทึกและส่งอนุมัติ',
+    note:'ยังไม่ลงบัญชี ตัวเลขเข้าบัญชีตอนกดจ่ายหลังอนุมัติแล้ว',
+    onSubmit: function () {
+      submitAction(function () {
+        const b = createPaymentBatch({ date: val('date'), payDate: val('payDate'), note: val('note'),
+          billNos: checkedValues('pbBill') });
+        STATE.screen = 'paymentprep'; STATE.sel = b.no;
+        toast('จัดทำใบเตรียมจ่าย ' + b.no + ' แล้ว', 'ok', b.items.length + ' ราย · เงินที่ต้องเตรียม ' + fmt(b.net) + ' บาท · รออนุมัติ');
+        return b;
+      });
+    },
+  });
+}
+
+function modalPayBatch(no) {
+  const b = DB.docs.paymentBatch.find((x) => x.no === no);
+  if (!b) return;
+  const banks = payFromAccounts().map((a) => [a.code, a.code + ' ' + a.name]);
+  let bank = '';
+  try { bank = accBySub('bank'); } catch (e) { bank = banks.length ? banks[0][0] : ''; }
+  modal({
+    title:'จ่ายตามใบเตรียมจ่าย ' + no,
+    sub: b.items.length + ' ราย · เงินที่ต้องเตรียม ' + fmt(b.net) + ' บาท · อนุมัติแล้ว',
+    body:'<div class="flds">'
+      + field({ name:'date', label:'วันที่จ่าย', type:'date', value: b.payDate })
+      + field({ name:'bankAccount', label:'จ่ายจากบัญชี', type:'select', value: bank, options: banks })
+      + field({ name:'channel', label:'ช่องทางนำส่งภาษี', type:'select', value:'manual', wide:true,
+          options:[['manual','หักและนำส่งเอง — ระบบออกหนังสือรับรอง 50 ทวิ ให้'],
+                   ['e_wht','e-Withholding Tax — ธนาคารนำส่งและออกหลักฐานให้']] })
+      + '</div>'
+      + '<div class="note">ระบบจะออกใบสำคัญจ่ายให้ทุกราย ถ้ารายใดลงบัญชีไม่ได้ จะไม่จ่ายให้เลยสักราย</div>',
+    submitLabel:'จ่ายทั้งหมดและลงบัญชี',
+    onSubmit: function () {
+      submitAction(function () {
+        const made = payPaymentBatch(no, { date: val('date'), channel: val('channel'), bankAccount: val('bankAccount') });
+        const certs = made.filter((p) => p.certNo).length;
+        toast('ออกใบสำคัญจ่าย ' + made.length + ' ใบแล้ว', 'ok',
+          'จ่ายสุทธิ ' + fmt(made.reduce((s, p) => s + p.net, 0)) + ' บาท' + (certs ? ' · ออก 50 ทวิ ' + certs + ' ฉบับ' : ''));
+        return made;
+      });
+    },
+  });
+}
+
+/* ===================================================================
+   บันทึกรายการในสมุดรายวัน (ใบสำคัญ) — แต่ละเล่มมีกติกาของตัวเอง
+   =================================================================== */
+const JV_ROWS = 6;
+function refreshJvTotals() {
+  const el = document.getElementById('jvTot');
+  if (!el) return;
+  let dr = 0, cr = 0;
+  for (let i = 0; i < JV_ROWS; i++) { dr += M(val('j' + i + '_dr')); cr += M(val('j' + i + '_cr')); }
+  const diff = dr - cr;
+  el.innerHTML = '<span>เดบิตรวม <b>' + fmt(dr) + '</b></span><span>เครดิตรวม <b>' + fmt(cr) + '</b></span>'
+    + (dr === 0 && cr === 0 ? '' : diff === 0 ? '<span class="good">สมดุล</span>'
+      : '<span class="bad">ต่างกัน ' + fmt(Math.abs(diff)) + '</span>');
+}
+
+function modalJournalVoucher(book) {
+  const cfg = JOURNAL_BOOKS[book];
+  if (!cfg) return;
+  const accs = [['', '— เลือกบัญชี —']].concat(DB.accounts
+    .filter((a) => a.postable && !CONTROL_SUBS[a.subType]).map((a) => [a.code, a.code + ' ' + a.name]));
+  let bank = '';
+  try { bank = accBySub('bank'); } catch (e) { bank = ''; }
+  /* เติมบัญชีธนาคารให้ในบรรทัดที่เล่มนั้นต้องมี — รับ: เดบิตธนาคาร · จ่าย: เครดิตธนาคาร */
+  const preset = book === 'receipt' ? { 0: bank } : book === 'payment' ? { 1: bank } : {};
+  const SUB = {
+    general: 'รายการปรับปรุง ตั้งค้างจ่าย ค่าเสื่อม หรือโอนเงินระหว่างบัญชีของบริษัทเอง — รายการที่มีเงินเข้าออกให้ใช้เล่มรับหรือเล่มจ่าย',
+    purchase: 'ซื้อเงินเชื่อที่ไม่มีเอกสารซื้อรองรับ เช่น ตั้งค่าใช้จ่ายค้างจ่าย — ถ้ามีใบกำกับภาษีให้บันทึกตั้งหนี้ผู้ขายแทน',
+    sales: 'ขายเงินเชื่อที่ไม่ผ่านใบกำกับภาษี เช่น รายได้ค้างรับ — การขายที่ออกใบกำกับให้ทำที่เมนูเอกสารขาย',
+    payment: 'เงินออกที่ไม่มีเอกสารอื่นรองรับ เช่น ค่าธรรมเนียมธนาคาร — จ่ายเจ้าหนี้ใช้ใบสำคัญจ่ายหรือเตรียมจ่ายเงิน',
+    receipt: 'เงินเข้าที่ไม่มีเอกสารขายรองรับ เช่น ดอกเบี้ยรับ เงินกู้ยืม — รับชำระจากลูกค้าใช้ใบเสร็จรับเงิน',
+  };
+  let rows = '';
+  for (let i = 0; i < JV_ROWS; i++) {
+    rows += '<tr><td><select name="j' + i + '_acc">'
+      + accs.map((o) => '<option value="' + esc(o[0]) + '"' + (preset[i] === o[0] ? ' selected' : '') + '>' + esc(o[1]) + '</option>').join('')
+      + '</select></td><td><input name="j' + i + '_memo"></td>'
+      + '<td><input name="j' + i + '_dr" class="r jvamt"></td><td><input name="j' + i + '_cr" class="r jvamt"></td></tr>';
+  }
+  modal({
+    title:'สร้าง' + cfg.voucher + ' — ' + cfg.label,
+    sub: SUB[book],
+    body:'<div class="flds">'
+      + field({ name:'date', label:'วันที่', type:'date', value: defaultDate() })
+      + field({ name:'ref', label:'เลขที่เอกสารอ้างอิง (ถ้ามี)', placeholder:'เช่น เลขที่ใบเสร็จของธนาคาร' })
+      + field({ name:'desc', label:'คำอธิบายรายการ', wide:true, placeholder:'ผู้สอบบัญชีอ่านแล้วต้องเข้าใจว่าเป็นรายการอะไร' })
+      + '</div><div class="scroll"><table class="lines"><thead><tr><th>บัญชี</th><th>คำอธิบายบรรทัด</th>'
+      + '<th class="r">เดบิต</th><th class="r">เครดิต</th></tr></thead><tbody>' + rows + '</tbody></table></div>'
+      + '<div class="jv-tot" id="jvTot"></div>',
+    submitLabel:'ลงบัญชีและออกเลขที่',
+    note:'บัญชีคุมไม่อยู่ในรายการให้เลือก เพราะต้องเกิดจากเอกสารเท่านั้น',
+    onSubmit: function () {
+      submitAction(function () {
+        const lines = [];
+        for (let i = 0; i < JV_ROWS; i++) {
+          lines.push({ acc: val('j' + i + '_acc'), memo: val('j' + i + '_memo'),
+            dr: val('j' + i + '_dr'), cr: val('j' + i + '_cr') });
+        }
+        const je = postJournalVoucher({ book, date: val('date'), desc: val('desc'), ref: val('ref'), lines });
+        STATE.screen = BOOK_SCREEN[book]; STATE.sel = je.no; STATE.period = periodOf(je.date);
+        toast('ลง' + cfg.label + 'แล้ว เลขที่ ' + je.no, 'ok', 'ยอด ' + fmt(je.total) + ' บาท');
+        return je;
+      });
+    },
+  });
+  refreshJvTotals();
 }
 
 /* ---------- อื่น ๆ ---------- */
@@ -653,7 +1114,8 @@ function dispatch(act) {
   if (head === 'new') {
     /* เอกสารก่อนลงบัญชีไม่ผูกกับงวด ออกได้แม้งวดปัจจุบันปิดแล้ว
        ส่วนใบที่ลงบัญชีจริงต้องอยู่ในงวดที่ยังเปิด */
-    const postsToLedger = arg === 'invoice' || arg === 'bill';
+    const postsToLedger = ['invoice', 'bill', 'receipt', 'creditnote', 'debitnote', 'payment',
+      'goodsreceipt', 'expense', 'whtcert'].indexOf(arg) >= 0;
     if (postsToLedger && !periodIsOpen()) {
       toast('งวด ' + thPeriod(STATE.period) + ' ปิดแล้ว', 'err', 'เลือกงวดที่ยังเปิดอยู่ก่อน'); return;
     }
@@ -662,6 +1124,60 @@ function dispatch(act) {
     if (arg === 'quotation') modalTradeDoc('quotation');
     if (arg === 'salesorder') modalTradeDoc('salesOrder');
     if (arg === 'purchaseorder') modalTradeDoc('purchaseOrder');
+    if (arg === 'receipt') modalReceive(null);
+    if (arg === 'creditnote') modalCreditNote(null);
+    if (arg === 'debitnote') modalDebitNote(null);
+    if (arg === 'payment') modalPayBill(null);
+    if (arg === 'billingnote') modalBillingNote();
+    if (arg === 'goodsreceipt') modalGoodsReceipt();
+    if (arg === 'expense') modalExpense();
+    if (arg === 'whtcert') modalExpense({ requireWht: true });
+    if (arg === 'paymentbatch') modalPaymentBatch();
+    return;
+  }
+  if (head === 'jv') {
+    if (!periodIsOpen()) {
+      toast('งวด ' + thPeriod(STATE.period) + ' ปิดแล้ว', 'err', 'เลือกงวดที่ยังเปิดอยู่ก่อน'); return;
+    }
+    modalJournalVoucher(arg);
+    return;
+  }
+  /* เปิดเอกสารปลายทางจากอีกหน้าหนึ่ง — เลื่อนงวดตามวันที่ของเอกสารให้ด้วย ไม่งั้นหาไม่เจอ */
+  if (head === 'open') {
+    const [screen, no] = rest;
+    const coll = { expenses:'expense', whtcert:'whtCert', bills:'bill', goodsreceipts:'goodsReceipt' }[screen];
+    const doc = coll ? (DB.docs[coll] || []).find((d) => d.no === no) : null;
+    if (doc && DB.periods.some((p) => p.code === periodOf(doc.date))) STATE.period = periodOf(doc.date);
+    STATE.screen = screen; STATE.sel = no; STATE.filter = '';
+    render();
+    return;
+  }
+  if (head === 'bn') {
+    const [what, no] = rest;
+    if (what === 'receive') modalReceiveBillingNote(no);
+    if (what === 'cancel') modalReason({ title:'ยกเลิกใบวางบิล ' + no,
+      sub:'ใบกำกับในใบวางบิลนี้จะกลับไปวางบิลใหม่ได้ ใบเสร็จที่ออกไปแล้วไม่ถูกแตะ',
+      placeholder:'เช่น ลูกค้าขอเปลี่ยนวันนัดชำระ', submitLabel:'ยกเลิกใบวางบิล',
+      done:'ยกเลิกใบวางบิล ' + no + ' แล้ว', run: (r) => cancelBillingNote(no, r) });
+    return;
+  }
+  if (head === 'grn') {
+    const [what, no] = rest;
+    if (what === 'po') modalReceiveFromPo(no);
+    if (what === 'bill') modalBillFromGrn(no);
+    return;
+  }
+  if (head === 'pb') {
+    const [what, no] = rest;
+    if (what === 'approve') runAction(function () {
+      const b = approvePaymentBatch(no);
+      toast('อนุมัติใบเตรียมจ่าย ' + no + ' แล้ว', 'ok', 'กดจ่ายตามใบเตรียมจ่ายได้เลย · เงินที่ต้องเตรียม ' + fmt(b.net) + ' บาท');
+    });
+    if (what === 'pay') modalPayBatch(no);
+    if (what === 'cancel') modalReason({ title:'ยกเลิกใบเตรียมจ่าย ' + no,
+      sub:'รายการตั้งหนี้ในใบนี้จะกลับไปจัดชุดใหม่ได้', placeholder:'เช่น เลื่อนรอบจ่าย',
+      submitLabel:'ยกเลิกใบเตรียมจ่าย', done:'ยกเลิกใบเตรียมจ่าย ' + no + ' แล้ว',
+      run: (r) => cancelPaymentBatch(no, r) });
     return;
   }
   if (head === 'pay')     { modalReceive(arg); return; }
@@ -756,6 +1272,9 @@ function bindEvents() {
   });
 
   document.addEventListener('input', function (ev) {
+    const n = ev.target.name || '';
+    if (/^j\d+_(dr|cr)$/.test(n)) { refreshJvTotals(); return; }
+    if (/^e\d+_(qty|price)$/.test(n)) { refreshExpenseSum(); return; }
     if (ev.target.id !== 'q') return;
     STATE.filter = ev.target.value;
     render();
@@ -837,9 +1356,27 @@ function bindEvents() {
       const price = document.querySelector('[name="l' + i + '_price"]');
       const desc  = document.querySelector('[name="l' + i + '_desc"]');
       const qty   = document.querySelector('[name="l' + i + '_qty"]');
-      if (it && price) price.value = it.price ? fmt(it.price) : '';
+      const unit = it ? (t.getAttribute('data-cost') ? it.avgCost : it.price) : 0;
+      if (it && price) price.value = unit ? fmt(unit) : '';
       if (it && desc) desc.value = it.name;
       if (it && qty && !qty.value) qty.value = '1';
+      return;
+    }
+    if (t.name === 'bnPartner') {
+      const box = document.getElementById('bnInvoices');
+      if (box) box.innerHTML = bnInvoiceRows(t.value);
+      return;
+    }
+    if (t.name === 'expPartner') {
+      const p = DB.partners.find((x) => x.code === t.value);
+      const w = document.querySelector('[name="wht"]');
+      if (p && w) w.value = p.whtCode || '';
+      refreshExpenseSum();
+      return;
+    }
+    if (/^e\d+_tax$/.test(t.name || '') || ((t.name === 'wht' || t.name === 'channel' || t.name === 'date')
+        && document.getElementById('expSum'))) {
+      refreshExpenseSum();
       return;
     }
     if (t.name === 'expenseSub') {

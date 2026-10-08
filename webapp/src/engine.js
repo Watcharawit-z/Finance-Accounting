@@ -111,9 +111,10 @@ function blankState() {
     entries: [],         // {no,date,type,desc,src,srcId,status,lines:[...],reversedBy,reverseOf,reason}
     taxTx: [],           // {kind,period,date,docNo,docType,partnerName,taxId,branch,base,tax,...}
     docs: {              // เอกสารแยกตามประเภท
-      quotation: [], salesOrder: [], invoice: [], receipt: [],
+      quotation: [], salesOrder: [], invoice: [], billingNote: [], receipt: [],
       creditNote: [], debitNote: [],
-      purchaseOrder: [], bill: [], payment: [], whtCert: [],
+      purchaseOrder: [], goodsReceipt: [], bill: [], payment: [],
+      expense: [], whtCert: [], paymentBatch: [],
       stockMove: [], payRun: [], depreciation: [], filing: [],
     },
     seq: {},             // {'invoice|2026-07': 12}
@@ -253,6 +254,7 @@ function periodFor(date) {
 const SEQ_PREFIX = {
   invoice:'INV', receipt:'RC', creditNote:'CN', debitNote:'DN', quotation:'QT', salesOrder:'SO',
   purchaseOrder:'PO', bill:'AP', payment:'PV', whtCert:'WT', stockCount:'SC',
+  billingNote:'BN', goodsReceipt:'GR', expense:'EX', paymentBatch:'PB',
   je_sales:'SA', je_purchase:'PU', je_receipt:'RV', je_payment:'PY',
   je_general:'JV', je_adjustment:'JV', je_payroll:'PR', je_asset:'AS',
   je_inventory:'IV', je_opening:'OB', je_closing:'CL',
@@ -325,6 +327,17 @@ function post(req) {
   DB.entries.push(entry);
   audit('journal_entry', entry.no, 'post', null, { total: fmt(dr), desc: req.desc });
   return entry;
+}
+
+/**
+ * ★ งานที่สร้างเอกสารหลายใบรวดเดียว ต้องจบแบบทั้งหมดหรือไม่มีเลย
+ *   เช่น รับชำระทั้งใบวางบิล หรือจ่ายทั้งใบเตรียมจ่าย ถ้าใบที่สามล้ม
+ *   ใบที่หนึ่งกับสองต้องไม่ค้างอยู่ในระบบ — จึงถ่ายสำเนาไว้ก่อนแล้วคืนกลับเมื่อพลาด
+ */
+function atomically(fn) {
+  const before = JSON.stringify(DB);
+  try { return fn(); }
+  catch (e) { loadState(JSON.parse(before)); throw e; }
 }
 
 function reverse(entryNo, reason, date) {
@@ -619,6 +632,15 @@ function reconciliationChecks(asOf) {
     control:apControl, sub:apSub, ok:apControl === apSub,
     why: (apControl !== apSub && apSub === 0 && apControl !== 0)
       ? 'ยกยอดรวมเจ้าหนี้มาแล้ว แต่ยังไม่ได้นำใบตั้งหนี้ที่ยังค้างเข้ามาเป็นรายใบ' : null });
+
+  /* ของที่รับเข้าคลังแล้วแต่ผู้ขายยังไม่ส่งใบกำกับมา ค้างอยู่ในบัญชีพักรับสินค้า
+     ยอดบัญชีต้องเท่ากับใบรับสินค้าที่ยังไม่ได้ตั้งหนี้ทุกใบรวมกันพอดี */
+  const grniControl = -balBySub(['grni'], asOf);
+  const grniSub = DB.docs.goodsReceipt.filter((g) => g.status !== 'void' && g.date <= asOf
+      && !(g.billNo && g.billDate <= asOf))
+    .reduce((s, g) => s + g.total, 0);
+  checks.push({ code:'GRNI_SUBLEDGER', label:'ใบรับสินค้าที่รอตั้งหนี้ = บัญชีพักรับสินค้า',
+    control:grniControl, sub:grniSub, ok:grniControl === grniSub });
 
   const glDiff = balanceOf(() => true, asOf);
   checks.push({ code:'GL_BALANCED', label:'เดบิตรวม = เครดิตรวม ทั้งฐานข้อมูล', control:glDiff, sub:0, ok:glDiff === 0 });

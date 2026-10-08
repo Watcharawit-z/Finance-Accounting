@@ -72,7 +72,8 @@ function statusPill(s) {
     draft:['draft','ฉบับร่าง'], void:['late','ยกเลิก'], posted:['paid','ลงบัญชีแล้ว'],
     reversed:['late','กลับรายการ'], open:['open','เปิดอยู่'], closed:['paid','ปิดแล้ว'],
     approved:['paid','อนุมัติแล้ว'], rejected:['late','ถูกปฏิเสธ'], expired:['late','หมดอายุ'],
-    cancelled:['late','ยกเลิก'],
+    cancelled:['late','ยกเลิก'], received:['open','รับเข้าคลังแล้ว'],
+    pending_approval:['wait','รออนุมัติ'],
   };
   const m = map[s] || ['draft', s];
   return { st: m };
@@ -271,6 +272,9 @@ function navGroups() {
   const quoteOpen = stillOpen('quotation');
   const soOpen = stillOpen('salesOrder');
   const poOpen = stillOpen('purchaseOrder');
+  const bnOpen = DB.docs.billingNote.filter((b) => ['issued', 'partially_paid'].indexOf(billingNoteStatus(b)) >= 0).length;
+  const grnWaiting = DB.docs.goodsReceipt.filter((g) => g.status === 'received').length;
+  const pbWaiting = DB.docs.paymentBatch.filter(paymentBatchActive).length;
   return [
     { g: 'ภาพรวม', items: [
       ['dashboard', 'แดชบอร์ด', todo || null],
@@ -282,14 +286,32 @@ function navGroups() {
       ['quotations', 'ใบเสนอราคา', quoteOpen || null],
       ['salesorders', 'ใบสั่งขาย', soOpen || null],
       ['invoices', 'ใบกำกับภาษี', null],
+      ['billingnotes', 'ใบวางบิล', bnOpen || null],
       ['receipts', 'ใบเสร็จรับเงิน', null],
       ['creditnotes', 'ใบลดหนี้', null],
       ['debitnotes', 'ใบเพิ่มหนี้', null],
     ]},
+    /* ใบสั่งซื้อ → ใบรับสินค้า (ของเข้าคลัง) → ตั้งหนี้ (ใบกำกับมาถึง) → จ่าย */
     { g: 'เอกสารซื้อ', items: [
       ['purchaseorders', 'ใบสั่งซื้อ', poOpen || null],
+      ['goodsreceipts', 'ใบรับสินค้า', grnWaiting || null],
       ['bills', 'ตั้งหนี้ผู้ขาย', null],
       ['payments', 'ใบสำคัญจ่าย', null],
+    ]},
+    /* ค่าใช้จ่ายที่มีหัก ณ ที่จ่าย ออก 50 ทวิ ให้เองในแถบหัก ณ ที่จ่าย — สองแถบนี้ผูกกัน */
+    { g: 'ค่าใช้จ่าย', items: [
+      ['expenses', 'ค่าใช้จ่าย', null],
+      ['whtcert', 'หัก ณ ที่จ่าย', null],
+      ['paymentprep', 'เตรียมจ่ายเงิน', pbWaiting || null],
+    ]},
+    /* สมุดรายวันเฉพาะ 5 เล่ม เรียงตามที่นักบัญชีใช้ บันทึกรายการด้วยมือได้ทุกเล่ม */
+    { g: 'บัญชี', items: [
+      ['jgeneral', 'สมุดรายวันทั่วไป', null],
+      ['jpurchase', 'สมุดรายวันซื้อ', null],
+      ['jsales', 'สมุดรายวันขาย', null],
+      ['jpayment', 'สมุดรายวันจ่าย', null],
+      ['jreceipt', 'สมุดรายวันรับ', null],
+      ['coa', 'ผังบัญชี', null],
     ]},
     { g: 'ผู้ติดต่อ', items: [
       ['customers', 'ลูกค้า', null],
@@ -313,7 +335,6 @@ function navGroups() {
     { g: 'ยื่นแบบภาษี', items: [
       ['pp30', 'แบบ ภ.พ.30', null],
       ['pnd', 'ภ.ง.ด.1 / 3 / 53', null],
-      ['whtcert', 'หนังสือรับรอง 50 ทวิ', null],
       ['taxcal', 'ปฏิทินภาษี', null],
     ]},
     /* รายงานทั้งหมดรวมไว้ที่เดียว แยกหมวดย่อยแบบเดียวกับที่นักบัญชีคุ้นเคย
@@ -329,11 +350,10 @@ function navGroups() {
         ['vatout', 'รายงานภาษีขาย', null],
         ['vatin', 'รายงานภาษีซื้อ', null],
       ]},
-      { s: 'บัญชี', items: [
-        ['journals', 'สมุดรายวัน', null],
+      { s: 'สมุดบัญชี', items: [
+        ['journals', 'สมุดรายวันรวมทุกเล่ม', null],
         ['ledger', 'บัญชีแยกประเภท', null],
         ['tb', 'งบทดลอง', null],
-        ['coa', 'ผังบัญชี', null],
       ]},
       { s: 'งบการเงิน', items: [
         ['bs', 'งบแสดงฐานะการเงิน', null],
