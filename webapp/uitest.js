@@ -1627,6 +1627,91 @@ const overflowInfo = (page) => page.evaluate(() => {
     'เดบิตรวม ' + pg.cumDr + ' = ' + pg.total);
   ok('บรรทัดรวมและช่องลงนามอยู่หน้าสุดท้ายเท่านั้น ท้ายกระดาษบอกหน้า X/Y', pg.totLast && /หน้า 1\/\d+/.test(pg.pages), pg.pages);
 
+  console.log('\n[27] ลบบริษัทที่เพิ่มผิด — สำรองไฟล์ให้ก่อน ย้ายไปถังขยะ กู้คืนได้');
+  const firstCo = await page.evaluate(() => ({ book: SYNC.book, name: DB.company.name, entries: DB.entries.length }));
+  await page.evaluate(() => { save(); return createCompany({ name:'บริษัท เพิ่มผิด จำกัด', taxId:'', address:'ทดสอบ', year:'2026' }); });
+  await page.waitForTimeout(200);
+  const two = await page.evaluate(() => ({ books: SYNC.books.length, active: DB.company.name, book: SYNC.book }));
+  ok('เพิ่มบริษัทที่สองแล้วมีสองเล่ม', two.books >= 2 && two.active === 'บริษัท เพิ่มผิด จำกัด');
+  await page.evaluate(() => { const f = () => {}; post({ type:'general', date: DB.periods[0].start, desc:'รายการในบริษัทที่เพิ่มผิด',
+    lines:[{ acc: accBySub('bank'), dr: M('500') }, { acc: accBySub('other_income'), cr: M('500') }] }); save(); });
+  await page.click('[data-act="company:manage"]');
+  await page.waitForSelector('#main [data-act^="company:delete:"]');
+  ok('★ หน้าตั้งค่ามีรายชื่อบริษัททั้งหมดพร้อมปุ่มลบ', await page.evaluate(() =>
+    document.querySelectorAll('#main [data-act^="company:delete:"]').length >= 2));
+  await page.click('#main [data-act="company:delete:' + two.book + '"]');
+  await page.waitForSelector('#modal.show [name="confirmName"]');
+  const delInfo = await page.$eval('#modal .void-prev', (e) => e.textContent);
+  ok('หน้าต่างลบบอกว่ามีอะไรอยู่ในบริษัทนี้ และจะดาวน์โหลดไฟล์สำรองให้ก่อน', /ใบสำคัญ 1 ใบ/.test(delInfo) && /ไฟล์สำรอง/.test(delInfo), delInfo.slice(0, 80));
+  await page.fill('#modal [name="confirmName"]', 'บริษัท เพิ่มผิด');
+  await page.fill('#modal [name="reason"]', 'เพิ่มซ้ำ ทดสอบระบบ');
+  await page.click('#modal [data-act="modal:submit"]');
+  ok('★ พิมพ์ชื่อไม่ตรง ระบบไม่ลบ', await page.evaluate((b) => SYNC.books.some((x) => x.book === b)
+    && document.getElementById('modal').classList.contains('show'), two.book));
+  await page.fill('#modal [name="confirmName"]', 'บริษัท เพิ่มผิด จำกัด');
+  const [bk] = await Promise.all([page.waitForEvent('download'), page.click('#modal [data-act="modal:submit"]')]);
+  await page.waitForTimeout(300);
+  const bkPath = require('path').join(require('os').tmpdir(), bk.suggestedFilename());
+  await bk.saveAs(bkPath);
+  const bkJson = JSON.parse(require('fs').readFileSync(bkPath, 'utf8'));
+  ok('★ ดาวน์โหลดไฟล์สำรองของบริษัทที่ลบก่อนลบ มีข้อมูลครบทั้งเล่ม', bkJson.format === 'financii-backup/1'
+    && bkJson.DB.company.name === 'บริษัท เพิ่มผิด จำกัด' && bkJson.DB.entries.length === 1 && /^Financii-backup-.*\.json$/.test(bk.suggestedFilename()),
+    bk.suggestedFilename());
+  const afterDel = await page.evaluate((b) => ({ gone: !SYNC.books.some((x) => x.book === b), active: DB.company.name,
+    trash: COMPANY.trash.length, row: document.getElementById('main').textContent.indexOf('ถังขยะ') >= 0 }), two.book);
+  ok('★ บริษัทที่ลบหายจากรายชื่อ ระบบสลับไปบริษัทเดิม และย้ายไปอยู่ในถังขยะ', afterDel.gone && afterDel.active === firstCo.name
+    && afterDel.trash === 1 && afterDel.row, JSON.stringify(afterDel));
+  ok('บริษัทเดิมข้อมูลครบเท่าเดิม', await page.evaluate((n) => DB.entries.length === n, firstCo.entries));
+  const tid = await page.evaluate(() => COMPANY.trash[0].id);
+  await page.click('#main [data-act="company:restore:' + tid + '"]');
+  await page.waitForTimeout(300);
+  const restored = await page.evaluate(() => ({ book: SYNC.books.find((x) => x.name === 'บริษัท เพิ่มผิด จำกัด'), trash: COMPANY.trash.length }));
+  ok('★ กู้คืนจากถังขยะได้ บริษัทกลับมาในรายชื่อ', !!restored.book && restored.trash === 0);
+  await page.evaluate((b) => switchCompany(b), restored.book.book);
+  await page.waitForTimeout(200);
+  ok('เปิดบริษัทที่กู้คืนแล้วรายการบัญชีครบ', await page.evaluate(() => DB.company.name === 'บริษัท เพิ่มผิด จำกัด' && DB.entries.length === 1));
+  await page.evaluate((b) => switchCompany(b), firstCo.book);
+  await page.waitForTimeout(200);
+
+  /* เปิดไฟล์สำรองกลับเป็นบริษัทแยกเล่ม */
+  await page.evaluate(() => { STATE.screen = 'import'; STATE.imp = null; render(); });
+  const nBooks = await page.evaluate(() => SYNC.books.length);
+  await page.setInputFiles('#file', bkPath);
+  await page.waitForTimeout(500);
+  const fromFile = await page.evaluate(() => ({ name: DB.company.name, entries: DB.entries.length, books: SYNC.books.length }));
+  ok('★ ลากไฟล์สำรองเข้าหน้านำเข้าข้อมูล เปิดเป็นบริษัทใหม่แยกเล่ม ไม่ทับบริษัทเดิม', fromFile.name === 'บริษัท เพิ่มผิด จำกัด'
+    && fromFile.entries === 1 && fromFile.books === nBooks + 1, JSON.stringify(fromFile));
+  await page.evaluate((b) => switchCompany(b), firstCo.book);
+  await page.waitForTimeout(200);
+
+  /* ลบให้เหลือบริษัทเดียว แล้วลบไม่ได้ */
+  for (let k = 0; k < 5; k++) {
+    const target = await page.evaluate((keep) => { const b = SYNC.books.find((x) => x.book !== keep); return b ? { book: b.book, name: b.name } : null; }, firstCo.book);
+    if (!target) break;
+    await page.evaluate(() => { STATE.screen = 'settings'; render(); });
+    await page.click('#main [data-act="company:delete:' + target.book + '"]');
+    await page.waitForSelector('#modal.show [name="confirmName"]');
+    await page.fill('#modal [name="confirmName"]', target.name);
+    await page.fill('#modal [name="reason"]', 'ล้างข้อมูลทดสอบ');
+    await Promise.all([page.waitForEvent('download'), page.click('#modal [data-act="modal:submit"]')]);
+    await page.waitForTimeout(250);
+  }
+  const last = await page.evaluate(() => { STATE.screen = 'settings'; render();
+    const b = document.querySelector('#main [data-act^="company:delete:"]');
+    return { books: SYNC.books.length, disabled: b && b.disabled, name: DB.company.name }; });
+  ok('★ เหลือบริษัทเดียวแล้วปุ่มลบใช้ไม่ได้ ระบบต้องมีอย่างน้อย 1 บริษัท', last.books === 1 && last.disabled && last.name === firstCo.name);
+  await page.evaluate(() => refreshTrash().then(render));
+  await page.waitForTimeout(200);
+  const pid = await page.evaluate(() => COMPANY.trash[0] && COMPANY.trash[0].id);
+  const pname = await page.evaluate(() => COMPANY.trash[0] && COMPANY.trash[0].name);
+  await page.click('#main [data-act="company:purge:' + pid + '"]');
+  await page.waitForSelector('#modal.show [name="confirmName"]');
+  await page.fill('#modal [name="confirmName"]', pname);
+  await page.click('#modal [data-act="modal:submit"]');
+  await page.waitForTimeout(250);
+  ok('ลบถาวรจากถังขยะได้เมื่อพิมพ์ชื่อยืนยันถูก', await page.evaluate((id) => !COMPANY.trash.some((x) => x.id === id)
+    && !localStorage.getItem('financii.trash.' + id), pid));
+
   ok('ไม่มีข้อผิดพลาดในคอนโซลเลย', errors.length === 0, errors.slice(0, 3).join(' | '));
 
   await page.setViewportSize({ width: 1440, height: 950 });

@@ -56,6 +56,20 @@ async function init() {
     await c.query('ALTER TABLE financii_state ADD COLUMN IF NOT EXISTS company_tax_id text');
     await c.query('ALTER TABLE financii_state ADD COLUMN IF NOT EXISTS entry_count integer NOT NULL DEFAULT 0');
     /* เก็บฉบับก่อนหน้าไว้ให้ย้อนดูได้ ข้อมูลบัญชีหายไม่ได้ */
+    /* ถังขยะ — บริษัทที่ลบไม่หายไปทันที กู้คืนได้จนกว่าจะสั่งลบถาวร
+       พ.ร.บ.การบัญชีให้เก็บบัญชีไว้ 5 ปี ลบผิดเล่มแล้วหายเลยไม่ได้ */
+    await c.query(`
+      CREATE TABLE IF NOT EXISTS financii_trash (
+        id             bigserial PRIMARY KEY,
+        book           text NOT NULL,
+        version        bigint NOT NULL DEFAULT 0,
+        data           jsonb NOT NULL,
+        company_name   text,
+        company_tax_id text,
+        entry_count    integer NOT NULL DEFAULT 0,
+        reason         text,
+        deleted_at     timestamptz NOT NULL DEFAULT now()
+      )`);
     await c.query(`
       CREATE TABLE IF NOT EXISTS financii_state_history (
         book        text NOT NULL,
@@ -90,20 +104,96 @@ async function listBooks() {
   });
 }
 
-/** ลบได้เฉพาะสมุดที่ยังไม่มีรายการบัญชี — ข้อมูลบัญชีที่ลงแล้วห้ามลบทิ้ง */
-async function removeBook(book) {
-  if (!validBook(book)) { const e = new Error('รหัสสมุดไม่ถูกต้อง'); e.code = 'BAD_BOOK'; throw e; }
+const fail = (code, msg) => Object.assign(new Error(msg), { code });
+
+/** ลบบริษัท — ย้ายทั้งเล่มไปถังขยะในรายการเดียวกัน (ไม่มีจังหวะที่ข้อมูลหายระหว่างทาง)
+    ต้องพิมพ์ชื่อบริษัทมาให้ตรงกับที่เก็บไว้ กันการลบผิดเล่มจากการกดพลาด */
+async function removeBook(book, opts) {
+  const o = opts || {};
+  if (!validBook(book)) throw fail('BAD_BOOK', 'รหัสสมุดไม่ถูกต้อง');
   return withClient(async function (c) {
-    const r = await c.query('SELECT entry_count FROM financii_state WHERE book = $1', [book]);
-    if (!r.rows.length) { const e = new Error('ไม่พบสมุดนี้'); e.code = 'NOT_FOUND'; throw e; }
-    if (Number(r.rows[0].entry_count) > 0) {
-      const e = new Error('สมุดนี้มีรายการบัญชีแล้ว ลบไม่ได้');
-      e.code = 'HAS_ENTRIES';
+    await c.query('BEGIN');
+    try {
+      const r = await c.query(`SELECT version, data, company_name, company_tax_id, entry_count
+                                 FROM financii_state WHERE book = $1 FOR UPDATE`, [book]);
+      if (!r.rows.length) throw fail('NOT_FOUND', 'ไม่พบสมุดนี้');
+      const row = r.rows[0];
+      const name = String(row.company_name || book).trim();
+      if (String(o.confirmName || '').trim() !== name) {
+        throw fail('CONFIRM_MISMATCH', 'ชื่อบริษัทที่พิมพ์ยืนยันไม่ตรงกับ "' + name + '"');
+      }
+      const t = await c.query(`
+        INSERT INTO financii_trash (book, version, data, company_name, company_tax_id, entry_count, reason)
+        VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id, deleted_at`,
+        [book, row.version, row.data, row.company_name, row.company_tax_id, row.entry_count, o.reason || null]);
+      await c.query('DELETE FROM financii_state WHERE book = $1', [book]);
+      await c.query('COMMIT');
+      return { trashId: Number(t.rows[0].id), deletedAt: t.rows[0].deleted_at };
+    } catch (e) {
+      try { await c.query('ROLLBACK'); } catch (_) { /* ปิดไปแล้ว */ }
       throw e;
     }
-    await c.query('DELETE FROM financii_state WHERE book = $1', [book]);
-    await c.query('DELETE FROM financii_state_history WHERE book = $1', [book]);
-    return true;
+  });
+}
+
+async function listTrash() {
+  return withClient(async function (c) {
+    const r = await c.query(`SELECT id, book, company_name, company_tax_id, entry_count, reason, deleted_at
+                               FROM financii_trash ORDER BY deleted_at DESC`);
+    return r.rows.map((x) => ({ id: Number(x.id), book: x.book, name: x.company_name || x.book,
+      taxId: x.company_tax_id || null, entries: Number(x.entry_count || 0), reason: x.reason, deletedAt: x.deleted_at }));
+  });
+}
+
+/** กู้คืน — ใช้รหัสสมุดเดิมถ้ายังว่าง ไม่งั้นตั้งรหัสใหม่ ไม่ทับบริษัทที่มีอยู่ */
+async function restoreTrash(id) {
+  return withClient(async function (c) {
+    await c.query('BEGIN');
+    try {
+      const r = await c.query('SELECT * FROM financii_trash WHERE id = $1 FOR UPDATE', [id]);
+      if (!r.rows.length) throw fail('NOT_FOUND', 'ไม่พบรายการนี้ในถังขยะ');
+      const t = r.rows[0];
+      let key = t.book;
+      const taken = async (k) => (await c.query('SELECT 1 FROM financii_state WHERE book = $1', [k])).rows.length > 0;
+      if (await taken(key)) key = (t.book + '-r' + t.id).slice(0, 64);
+      for (let n = 2; await taken(key); n++) key = (t.book + '-r' + t.id + '-' + n).slice(0, 64);
+      await c.query(`
+        INSERT INTO financii_state (book, version, data, updated_at, company_name, company_tax_id, entry_count)
+        VALUES ($1, $2, $3, now(), $4, $5, $6)`,
+        [key, t.version, t.data, t.company_name, t.company_tax_id, t.entry_count]);
+      await c.query('DELETE FROM financii_trash WHERE id = $1', [id]);
+      await c.query('COMMIT');
+      return { book: key };
+    } catch (e) {
+      try { await c.query('ROLLBACK'); } catch (_) { /* ปิดไปแล้ว */ }
+      throw e;
+    }
+  });
+}
+
+/** ลบถาวร — ต้องพิมพ์ชื่อยืนยันอีกครั้ง ประวัติย้อนหลังลบด้วยถ้าไม่มีบริษัทอื่นใช้รหัสเดียวกัน */
+async function purgeTrash(id, confirmName) {
+  return withClient(async function (c) {
+    await c.query('BEGIN');
+    try {
+      const r = await c.query('SELECT book, company_name FROM financii_trash WHERE id = $1 FOR UPDATE', [id]);
+      if (!r.rows.length) throw fail('NOT_FOUND', 'ไม่พบรายการนี้ในถังขยะ');
+      const name = String(r.rows[0].company_name || r.rows[0].book).trim();
+      if (String(confirmName || '').trim() !== name) {
+        throw fail('CONFIRM_MISMATCH', 'ชื่อบริษัทที่พิมพ์ยืนยันไม่ตรงกับ "' + name + '"');
+      }
+      await c.query('DELETE FROM financii_trash WHERE id = $1', [id]);
+      const live = await c.query('SELECT 1 FROM financii_state WHERE book = $1', [r.rows[0].book]);
+      const other = await c.query('SELECT 1 FROM financii_trash WHERE book = $1', [r.rows[0].book]);
+      if (!live.rows.length && !other.rows.length) {
+        await c.query('DELETE FROM financii_state_history WHERE book = $1', [r.rows[0].book]);
+      }
+      await c.query('COMMIT');
+      return true;
+    } catch (e) {
+      try { await c.query('ROLLBACK'); } catch (_) { /* ปิดไปแล้ว */ }
+      throw e;
+    }
   });
 }
 
@@ -166,5 +256,5 @@ async function healthy() {
   catch (e) { return false; }
 }
 
-module.exports = { enabled, init, read, write, healthy, listBooks, removeBook,
+module.exports = { enabled, init, read, write, healthy, listBooks, removeBook, listTrash, restoreTrash, purgeTrash,
   validBook, DEFAULT_BOOK, BOOK: DEFAULT_BOOK };

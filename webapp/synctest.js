@@ -27,7 +27,7 @@ function startServer(env, port) {
     const { Client } = require('pg');
     const c = new Client({ connectionString: DB_URL });
     await c.connect();
-    await c.query('DROP TABLE IF EXISTS duly_state, duly_state_history, financii_state, financii_state_history');
+    await c.query('DROP TABLE IF EXISTS duly_state, duly_state_history, financii_state, financii_state_history, financii_trash');
     await c.end();
   }
   const PASSCODE = 'ลับสุดยอด-1234';
@@ -218,6 +218,55 @@ function startServer(env, port) {
     "SELECT count(*)::int n, max(version)::int v FROM financii_state_history WHERE book NOT LIKE 'co-%'");
   ok('มีประวัติทุกรุ่นที่เคยบันทึก', hist.rows[0].n >= 3, hist.rows[0].n + ' ฉบับ ล่าสุดรุ่นที่ ' + hist.rows[0].v);
   await c.end();
+
+  console.log('\n[9] ลบบริษัทที่เพิ่มผิด — ย้ายไปถังขยะบนเซิร์ฟเวอร์ กู้คืนได้');
+  const wrong = await fetch(base + '/api/books?book=' + co2.book, { method: 'DELETE', headers: H,
+    body: JSON.stringify({ confirmName: 'บริษัท ผิดชื่อ จำกัด', reason: 'ทดสอบ' }) });
+  ok('★ พิมพ์ชื่อยืนยันไม่ตรง เซิร์ฟเวอร์ไม่ลบ', wrong.status === 409
+    && (await (await fetch(base + '/api/books', { headers: H })).json()).books.length === 2);
+  const delNoPass = await fetch(base + '/api/books?book=' + co2.book, { method: 'DELETE',
+    headers: { 'content-type': 'application/json' }, body: JSON.stringify({ confirmName: 'บริษัท ที่สอง จำกัด' }) });
+  ok('ไม่มีรหัสผ่านลบไม่ได้', delNoPass.status === 401);
+  /* ลบบริษัทที่เปิดอยู่จากหน้าจอ */
+  await A.selectOption('#bookSel', co2.book);
+  await A.waitForTimeout(1200);
+  await A.click('[data-act="company:manage"]');
+  await A.waitForSelector('#main [data-act="company:delete:' + co2.book + '"]');
+  await A.click('#main [data-act="company:delete:' + co2.book + '"]');
+  await A.waitForSelector('#modal.show [name="confirmName"]');
+  await A.fill('#modal [name="confirmName"]', 'บริษัท ที่สอง จำกัด');
+  await A.fill('#modal [name="reason"]', 'เพิ่มผิดบริษัท ทดสอบ');
+  const [dl] = await Promise.all([A.waitForEvent('download'), A.click('#modal [data-act="modal:submit"]')]);
+  await A.waitForTimeout(1500);
+  const afterUi = await A.evaluate(() => ({ book: SYNC.book, name: DB.company.name, books: SYNC.books.length, trash: COMPANY.trash.length }));
+  ok('★ ลบจากหน้าจอแล้วสลับกลับบริษัทแรก รายชื่อเหลือบริษัทเดียว และมีในถังขยะ', afterUi.book === before.book
+    && afterUi.books === 1 && afterUi.trash === 1, JSON.stringify(afterUi));
+  ok('ดาวน์โหลดไฟล์สำรองก่อนลบ', /^Financii-backup-.*\.json$/.test(dl.suggestedFilename()), dl.suggestedFilename());
+  const trashApi = (await (await fetch(base + '/api/trash', { headers: H })).json()).items;
+  ok('ถังขยะบนเซิร์ฟเวอร์เก็บชื่อ เหตุผล และวันที่ลบ', trashApi.length === 1 && trashApi[0].name === 'บริษัท ที่สอง จำกัด'
+    && trashApi[0].reason === 'เพิ่มผิดบริษัท ทดสอบ' && !!trashApi[0].deletedAt);
+  ok('บริษัทแรกบนเซิร์ฟเวอร์ไม่ถูกแตะ', (await (await fetch(base + '/api/state?book=' + before.book, { headers: H })).json())
+    .data.docs.invoice.length === before.invoices);
+  await B.reload();
+  await B.waitForTimeout(1500);
+  ok('เครื่องที่สองไม่เห็นบริษัทที่ลบแล้ว', await B.evaluate(() => SYNC.books.length) === 1);
+  const rest = await (await fetch(base + '/api/trash/restore?id=' + trashApi[0].id, { method: 'POST', headers: H })).json();
+  const restoredState = await (await fetch(base + '/api/state?book=' + rest.book, { headers: H })).json();
+  ok('★ กู้คืนจากถังขยะได้ ข้อมูลครบและรหัสสมุดเดิม', rest.book === co2.book && restoredState.data.company.name === 'บริษัท ที่สอง จำกัด'
+    && (await (await fetch(base + '/api/books', { headers: H })).json()).books.length === 2);
+  await fetch(base + '/api/books?book=' + co2.book, { method: 'DELETE', headers: H,
+    body: JSON.stringify({ confirmName: 'บริษัท ที่สอง จำกัด', reason: 'ลบอีกครั้งเพื่อทดสอบลบถาวร' }) });
+  const t2 = (await (await fetch(base + '/api/trash', { headers: H })).json()).items[0];
+  const badPurge = await fetch(base + '/api/trash?id=' + t2.id, { method: 'DELETE', headers: H, body: JSON.stringify({ confirmName: 'ผิด' }) });
+  const goodPurge = await fetch(base + '/api/trash?id=' + t2.id, { method: 'DELETE', headers: H, body: JSON.stringify({ confirmName: 'บริษัท ที่สอง จำกัด' }) });
+  const cc = new Client({ connectionString: DB_URL });
+  await cc.connect();
+  const histLeft = (await cc.query('SELECT count(*)::int n FROM financii_state_history WHERE book = $1', [co2.book])).rows[0].n;
+  const histMain = (await cc.query('SELECT count(*)::int n FROM financii_state_history WHERE book = $1', [before.book])).rows[0].n;
+  await cc.end();
+  ok('★ ลบถาวรต้องพิมพ์ชื่อถูก แล้วถังขยะและประวัติของบริษัทนั้นหาย ส่วนประวัติบริษัทอื่นยังอยู่',
+    badPurge.status === 409 && goodPurge.status === 200 && histLeft === 0 && histMain > 0
+    && (await (await fetch(base + '/api/trash', { headers: H })).json()).items.length === 0);
 
   ok('ไม่มีข้อผิดพลาดในคอนโซลของทั้งสองเครื่อง', errs.length === 0, errs.slice(0, 2).join(' | '));
 

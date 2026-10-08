@@ -607,6 +607,7 @@ function render() {
     + '<span class="co-meta">' + esc(co.taxId ? 'เลขผู้เสียภาษี ' + co.taxId : 'ยังไม่ได้กรอกเลขผู้เสียภาษี') + '</span>'
     + '</div></div>'
     + '<div class="co-acts"><button class="add-co" data-act="company:new" title="เพิ่มบริษัท">+ บริษัท</button>'
+    + '<button class="add-co" data-act="company:manage" title="ดูบริษัททั้งหมด ลบบริษัทที่เพิ่มผิด กู้คืน และไฟล์สำรอง">จัดการ</button>'
     + (DB.isDemo
         ? '<button class="demo-tag" data-act="go:import" title="ข้อมูลชุดนี้ระบบสร้างขึ้นเพื่อให้ลองใช้">'
           + 'ข้อมูลตัวอย่าง · เริ่มใช้ของจริง</button>'

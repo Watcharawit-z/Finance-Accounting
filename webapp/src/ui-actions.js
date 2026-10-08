@@ -1222,7 +1222,9 @@ function dispatch(act) {
   const arg = rest.join(':');
 
   if (peekDispatch(head, arg, rest)) return;
-  if (head === 'go')      { STATE.screen = arg; STATE.sel = null; STATE.filter = ''; render(); return; }
+  if (head === 'go')      { STATE.screen = arg; STATE.sel = null; STATE.filter = ''; render();
+    if (arg === 'settings') refreshTrash().then(function () { if (STATE.screen === 'settings') render(); });
+    return; }
   if (head === 'cmdk')    { openCmdk(''); return; }
   if (head === 'cmdkgo')  { cmdkRun(Number(arg)); return; }
   if (head === 'pop')     { if (!closePop()) openPop(document.getElementById('newBtn')); return; }
@@ -1258,7 +1260,10 @@ function dispatch(act) {
   if (head === 'view')    { STATE.dashView = arg; render(); return; }
   if (head === 'pick')    { document.getElementById('file').click(); return; }
   if (head === 'blank')   { modalBlank(); return; }
-  if (head === 'company')  { if (arg === 'new') modalNewCompany(); if (arg === 'edit') modalCompany(); return; }
+  if (head === 'company')  {
+    if (arg === 'new') modalNewCompany(); else if (arg === 'edit') modalCompany(); else companyDispatch(arg, rest);
+    return;
+  }
   if (head === 'pass') {
     const code = val('passcode');
     syncUnlock(code).then(function (ok) {
@@ -1795,6 +1800,8 @@ async function handleFile(file) {
     const lower = file.name.toLowerCase();
     if (lower.endsWith('.json')) {
       const pkg = JSON.parse(await file.text());
+      /* ไฟล์สำรองของระบบเอง — เปิดเป็นบริษัทแยกเล่ม ไม่ทับบริษัทที่เปิดอยู่ */
+      if (isBackupFile(pkg)) { STATE.imp = null; await restoreBackupFile(pkg, file.name); return; }
       validatePackage(pkg);
       STATE.imp = { name: file.name, pkg: pkg };
       runImportPackage(pkg);

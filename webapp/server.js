@@ -74,12 +74,26 @@ async function api(req, res, url, query) {
   if (url === '/api/books' && req.method === 'GET') {
     return json(res, 200, { books: await store.listBooks(), active: book });
   }
+  const fail = (e) => json(res, e.code === 'NOT_FOUND' ? 404 : e.code === 'CONFIRM_MISMATCH' ? 409 : e.code ? 400 : 500,
+    { error: { code: e.code || 'FAILED', message: e.message } });
   if (url === '/api/books' && req.method === 'DELETE') {
-    try { await store.removeBook(book); return json(res, 200, { ok: true }); }
-    catch (e) {
-      const code = e.code === 'NOT_FOUND' ? 404 : e.code === 'HAS_ENTRIES' ? 409 : 400;
-      return json(res, code, { error: { code: e.code || 'DELETE_FAILED', message: e.message } });
-    }
+    let body;
+    try { body = await readBody(req, 64 * 1024); } catch (e) { return fail(e); }
+    try { return json(res, 200, Object.assign({ ok: true }, await store.removeBook(book, body || {}))); }
+    catch (e) { return fail(e); }
+  }
+  if (url === '/api/trash' && req.method === 'GET') {
+    return json(res, 200, { items: await store.listTrash() });
+  }
+  if (url === '/api/trash/restore' && req.method === 'POST') {
+    try { return json(res, 200, Object.assign({ ok: true }, await store.restoreTrash(Number(query.get('id'))))); }
+    catch (e) { return fail(e); }
+  }
+  if (url === '/api/trash' && req.method === 'DELETE') {
+    let body;
+    try { body = await readBody(req, 64 * 1024); } catch (e) { return fail(e); }
+    try { await store.purgeTrash(Number(query.get('id')), body && body.confirmName); return json(res, 200, { ok: true }); }
+    catch (e) { return fail(e); }
   }
 
   if (url === '/api/state' && req.method === 'GET') {
