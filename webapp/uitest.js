@@ -448,10 +448,18 @@ const overflowInfo = (page) => page.evaluate(() => {
   await page.evaluate(() => handleFile(window.__xlsx));
   await page.waitForTimeout(300);
   await page.fill('[name="cutoff"]', '2026-07-31');
-  await page.click('[data-act="imp:run"]');
-  await page.waitForTimeout(300);
-  ok('★ ตั้งยอดยกมาวันเดิมซ้ำถูกปฏิเสธ', await page.evaluate(() =>
-    DB.entries.length === 1 && document.getElementById('toast').className.indexOf('err') >= 0));
+  await page.dispatchEvent('[name="cutoff"]', 'change');
+  await page.waitForTimeout(200);
+  /* ยอดยกมามีได้ใบเดียว — ระบบบอกก่อนกด และปุ่มนำเข้าใช้ไม่ได้ ไม่ใช่ปล่อยให้กดแล้วค่อยฟ้อง */
+  const dupOpen = await page.evaluate(() => ({
+    entries: DB.entries.length,
+    stop: [...document.querySelectorAll('#main .card')].some((c) => c.textContent.indexOf('มียอดยกมาที่ใช้งานอยู่แล้ว') >= 0),
+    disabled: !!document.querySelector('[data-act="imp:run"][disabled], [data-act="imp:run"].disabled'),
+  }));
+  await page.click('[data-act="imp:run"]').catch(() => {});
+  await page.waitForTimeout(200);
+  ok('★ ตั้งยอดยกมาซ้ำถูกกันตั้งแต่ก่อนกด ปุ่มนำเข้าใช้ไม่ได้ และไม่มีใบสำคัญเพิ่ม',
+    dupOpen.stop && dupOpen.disabled && (await page.evaluate(() => DB.entries.length)) === 1, JSON.stringify(dupOpen));
 
   /* ---- ไฟล์หน้าตาแบบที่โปรแกรมบัญชีส่งออกมาจริง ต้องไม่ตัน ---- */
   console.log('\n[13.1] ไฟล์งบทดลองหน้าตาแปลก ๆ ต้องนำเข้าได้');
@@ -576,8 +584,33 @@ const overflowInfo = (page) => page.evaluate(() => {
     'สร้างใหม่ ' + fa.creating + ' · ตรงกับผังเดิม ' + fa.matched);
   ok('มีตารางบอกว่าบัญชีใหม่แต่ละตัวจะไปอยู่บรรทัดไหนของงบ',
     (await page.$$('#main select.impmap')).length >= fa.creating);
+  /* เปลี่ยนบรรทัดงบของบัญชีที่อยู่ใน 8 แถวแรก เคยทำให้ทั้งหน้าพังเป็น "ไม่พบบัญชีรหัส +cash" */
+  await page.selectOption('#main select.impmap[data-key="11122.01"]', '+cash');
+  await page.waitForTimeout(250);
+  const afterMap = await page.evaluate(() => ({
+    broken: document.getElementById('main').textContent.indexOf('เปิดหน้านี้ไม่ได้') >= 0,
+    sample: [...document.querySelectorAll('#main .card')].some((c) => c.textContent.indexOf('สร้างใหม่ · ') >= 0),
+  }));
+  ok('★ เปลี่ยนบรรทัดงบของบัญชีใหม่แล้วหน้าจอไม่พัง และตัวอย่างบอกว่าจะสร้างใหม่', !afterMap.broken && afterMap.sample);
+  await page.selectOption('#main select.impmap[data-key="11122.01"]', '+bank');
+  await page.waitForTimeout(250);
 
+  /* ยอดยกมามีได้ใบเดียว — ยกเลิกยอดยกมา ณ 31 ก.ค. ที่ทดสอบไว้ก่อน แล้วค่อยตั้งยอด ณ 31 ธ.ค. จากไฟล์นี้ */
+  await page.evaluate(() => { const e = listImports().find((i) => i.status === 'posted' && i.kind === 'opening');
+    if (e) reverseImport(e.no, 'ทดสอบ: เปลี่ยนไปใช้ยอดยกมาจากไฟล์ FlowAccount'); render(); });
   await page.fill('[name="cutoff"]', '2026-12-31');
+  await page.dispatchEvent('[name="cutoff"]', 'change');
+  await page.waitForTimeout(200);
+  const faChecks = await page.evaluate(() => {
+    const c = impChecks(STATE.imp);
+    return { file: c.file.map((x) => x.level + ':' + x.code), pre: c.pre.map((x) => x.level + ':' + x.code) };
+  });
+  ok('★ ผลรวมทุกบรรทัดตรงกับบรรทัดรวมท้ายไฟล์ (ตัวคุมที่ระบบเดิมคำนวณไว้)', faChecks.file.indexOf('ok:CONTROL_TOTAL') >= 0, faChecks.file.join(' '));
+  ok('★ ไฟล์ที่ ยกมา + เคลื่อนไหว ≠ คงเหลือ ถูกจับได้ ต้องยืนยันก่อนนำเข้า',
+    faChecks.file.indexOf('bad:SET_IDENTITY') >= 0 && (await page.$('#impAck')) !== null);
+  ok('ยังไม่ติ๊กยืนยัน ปุ่มนำเข้าใช้ไม่ได้', await page.evaluate(() => !!document.querySelector('[data-act="imp:run"][disabled], [data-act="imp:run"].disabled')));
+  await page.check('#impAck');
+  await page.waitForTimeout(200);
   await page.click('[data-act="imp:run"]');
   await page.waitForTimeout(600);
   const faAfter = await page.evaluate(() => ({
@@ -670,9 +703,9 @@ const overflowInfo = (page) => page.evaluate(() => {
   await page.evaluate(() => { STATE.screen = 'import'; STATE.imp = null; render(); });
   await page.evaluate(() => handleFile(window.__xlsxFa));
   await page.waitForTimeout(500);
-  const pairsSeen = await page.evaluate(() => STATE.imp.pairs.map((p) => p.label));
+  const pairsSeen = await page.evaluate(() => STATE.imp.sets.map((p) => p.label + ':' + p.role));
   ok('★ ระบบอ่านออกว่าไฟล์มีตัวเลขกี่ชุด และชุดไหนคืออะไร',
-    pairsSeen.join(' · ') === 'ยอดยกมา · ยอดประจำงวด · ยอดสะสม', pairsSeen.join(' · '));
+    pairsSeen.join(' · ') === 'ยอดยกมา:opening · ยอดประจำงวด:movement · ยอดสะสม:closing · รวมทั้งสิ้น:closing', pairsSeen.join(' · '));
   const defPair = await page.evaluate(() => ({ d: STATE.imp.map.debit, c: STATE.imp.map.credit }));
   ok('ค่าเริ่มต้นคือชุดยอดสะสม เพราะเป็นยอดคงเหลือปลายงวด',
     defPair.d === 9 && defPair.c === 10);

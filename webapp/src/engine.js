@@ -304,7 +304,9 @@ function acc(code) {
   return a;
 }
 function accBySub(subType) {
-  const a = DB.accounts.find((x) => x.subType === subType && x.postable);
+  /* บัญชีหลักของประเภทนี้ (isDefault) มาก่อน — เช่นบัญชีลูกหนี้ที่ยกมาจากระบบเดิม เอกสารใหม่ต้องลงต่อบัญชีนั้น */
+  const a = DB.accounts.find((x) => x.subType === subType && x.postable && x.isDefault)
+    || DB.accounts.find((x) => x.subType === subType && x.postable);
   if (!a) {
     throw new DomainError('ACCOUNT_MAPPING_MISSING',
       'ยังไม่ได้ผูกบัญชีสำหรับประเภท "' + subType + '" ในผังบัญชี',
@@ -573,6 +575,29 @@ function reverse(entryNo, reason, date, opts) {
   return rev;
 }
 
+/** ใบสำคัญนี้มาจากการนำเข้าข้อมูลระบบเดิม หรือเป็นใบกลับรายการของการนำเข้า */
+function isImportEntry(e) {
+  if (e.src === 'import') return true;
+  if (e.src !== 'reversal') return false;
+  if (e.importReversal) return true;
+  const o = DB.entries.find((x) => x.no === e.srcId);
+  return !!o && o.src === 'import';
+}
+/** ใบยอดยกมา รวมถึงใบที่กลับรายการยอดยกมา — ทั้งคู่เป็นยอดต้นงวด ไม่ใช่ความเคลื่อนไหวของงวด */
+function isOpeningEntry(e) {
+  if (e.type === 'opening' || e.openingReversal) return true;
+  if (e.src !== 'reversal') return false;
+  const o = DB.entries.find((x) => x.no === e.srcId);
+  return !!o && o.type === 'opening';
+}
+/** ยอดเคลื่อนไหวรวมทั้งเดือนจากระบบเดิม (หรือใบกลับรายการของมัน) */
+function isMovementImport(e) {
+  if (e.src === 'import') return /^movement\|/.test(String(e.srcId || ''));
+  if (e.src !== 'reversal') return false;
+  const o = DB.entries.find((x) => x.no === e.srcId);
+  return !!o && o.src === 'import' && /^movement\|/.test(String(o.srcId || ''));
+}
+
 function audit(entity, id, action, before, after, reason) {
   DB.audit.unshift({
     at: new Date().toISOString(),
@@ -736,7 +761,7 @@ function incomeStatement(from, to) {
 const RETAINED_SUB = ['retained_earnings', 'current_year_earnings', 'dividend', 'opening_balance'];
 function equityStatement(from, to) {
   const before = addDays(from, -1);
-  const isOpen = (e) => e.type === 'opening';
+  const isOpen = isOpeningEntry;
   const notOpen = (e) => !isOpen(e);
   const pnl = (a) => a.type === 'revenue' || a.type === 'expense';
   const bal = (f, upto, start, ef) => (typeof f === 'function' ? balanceOf(f, upto, start, ef) : balBySub(f, upto, start, ef));
@@ -744,8 +769,10 @@ function equityStatement(from, to) {
   const closing = (f) => -bal(f, to);
   const cap = { open: opening(['paid_up_capital']), close: closing(['paid_up_capital']) };
   const res = { open: opening(['legal_reserve']), close: closing(['legal_reserve']) };
-  const ret = { open: opening(RETAINED_SUB) + opening(pnl), close: closing(RETAINED_SUB) + closing(pnl) };
-  const net = -balanceOf(pnl, to, from, notOpen);
+  /* กำไรขาดทุนในใบยอดยกมาที่ลงกลางปี คือกำไรสะสมตั้งแต่ต้นปีถึงวันตัดยอด เป็นกำไรของปีนี้
+     ต้องนับเป็นกำไรสุทธิของงวดให้ตรงกับงบกำไรขาดทุน ไม่ใช่ย้ายไปเป็นยอดต้นงวด (สองงบจะขัดกัน) */
+  const ret = { open: opening(RETAINED_SUB) - bal(pnl, before), close: closing(RETAINED_SUB) + closing(pnl) };
+  const net = -balanceOf(pnl, to, from);
   const dividend = -balBySub(['dividend'], to, from, notOpen);
   const capMove = cap.close - cap.open;
   const resMove = res.close - res.open;
@@ -770,7 +797,7 @@ const FINANCING_SUB = ['long_term_loan','paid_up_capital','legal_reserve','divid
 
 function cashFlow(from, to) {
   const isCash = (code) => CASH_SUB.indexOf(acc(code).subType) >= 0;
-  const opening = balBySub(CASH_SUB, addDays(from, -1));
+  let opening = balBySub(CASH_SUB, addDays(from, -1));
   const closing = balBySub(CASH_SUB, to);
   const buckets = { operating: 0, investing: 0, financing: 0 };
   const detail = { operating: {}, investing: {}, financing: {} };
@@ -781,8 +808,26 @@ function cashFlow(from, to) {
     if (!cashLines.length) return;
     const delta = cashLines.reduce((s, l) => s + l.dr - l.cr, 0);
     if (delta === 0) return;
+    /* เงินสดในใบยอดยกมาคือเงินสดต้นงวด ไม่ใช่เงินที่ได้จากการลงทุน (ใบยอดยกมามีทรัพย์สินถาวรอยู่ด้วยเสมอ) */
+    if (isOpeningEntry(e)) { opening += delta; return; }
 
     const others = e.lines.filter((l) => !isCash(l.acc));
+    /* ยอดเคลื่อนไหวทั้งเดือนจากระบบเดิมรวมทุกอย่างไว้ใบเดียว จำแนกทั้งใบตามบัญชีคู่ไม่ได้
+       ใช้หลักวิธีทางอ้อม: แต่ละบรรทัดที่ไม่ใช่เงินสดเปลี่ยนเงินสดเท่ากับยอดตรงข้ามของมันพอดี
+       ค่าเสื่อมสะสมเป็นรายการที่ไม่ใช่เงินสด อยู่กิจกรรมดำเนินงานคู่กับค่าเสื่อมราคา */
+    if (isMovementImport(e)) {
+      others.forEach(function (l) {
+        const a = acc(l.acc);
+        const v = -(l.dr - l.cr);
+        if (!v) return;
+        const b = (a.subType === 'accum_depreciation' || a.subType === 'accum_amortization') ? 'operating'
+          : INVESTING_SUB.indexOf(a.subType) >= 0 ? 'investing'
+          : FINANCING_SUB.indexOf(a.subType) >= 0 ? 'financing' : 'operating';
+        buckets[b] += v;
+        detail[b][a.name] = (detail[b][a.name] || 0) + v;
+      });
+      return;
+    }
     const subs = others.map((l) => acc(l.acc).subType);
     const bucket = subs.some((x) => INVESTING_SUB.indexOf(x) >= 0) ? 'investing'
                  : subs.some((x) => FINANCING_SUB.indexOf(x) >= 0) ? 'financing'
@@ -900,7 +945,8 @@ function reconciliationChecks(asOf) {
   const start = period + '-01', end = endOfMonth(start);
   /* ไม่รวมใบสำคัญที่ยกยอดมาจากระบบเดิม ทั้งยอดยกมาและยอดเคลื่อนไหวรายเดือน
      เพราะไม่มีเอกสารในทะเบียนภาษีรองรับ ถ้านับด้วยการเทียบจะไม่มีวันตรง */
-  const notFiling = (e) => e.src !== 'filing' && e.src !== 'import' && e.type !== 'opening';
+  /* ใบกลับรายการของการนำเข้าก็ไม่มีเอกสารในทะเบียนภาษีรองรับเช่นกัน ถ้านับด้วย ยกเลิกการนำเข้าแล้วปิดงวดไม่ได้ */
+  const notFiling = (e) => e.src !== 'filing' && !isImportEntry(e) && !isOpeningEntry(e);
 
   const vatOutReport = DB.taxTx.filter((t) => t.kind === 'vat_output' && t.period === period)
     .reduce((s, t) => s + t.tax, 0);

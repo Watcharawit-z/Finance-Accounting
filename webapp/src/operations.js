@@ -888,6 +888,12 @@ function payBill(input) {
 }
 
 /* ---------- ค่าเสื่อมราคาประจำงวด ---------- */
+/** ทรัพย์สินในทะเบียนที่ต้องคิดค่าเสื่อมในงวดนี้ (ยังใช้งาน เริ่มใช้แล้ว ยังตัดไม่หมด ไม่ใช่ที่ดิน) */
+function depreciableAssets(period) {
+  const endDate = endOfMonth(period + '-01');
+  return DB.assets.filter((a) => a.class !== 'LAND' && a.status === 'in_use' && a.inService <= endDate
+    && a.cost - a.accumBook > 0);
+}
 function runDepreciation(period) {
   const already = DB.docs.depreciation.find((d) => d.period === period && d.status !== 'void');
   if (already) {
@@ -1107,11 +1113,24 @@ function closeChecklist(period) {
   const rec = reconciliationChecks(endDate);
   rec.checks.forEach((c) => items.push({
     label: c.label, ok: c.ok,
-    detail: c.ok ? 'ตรงกัน' : 'ต่างกัน ' + fmt(c.control - c.sub) + ' บาท', blocking: true,
+    detail: c.ok ? 'ตรงกัน' : 'ต่างกัน ' + fmt(c.control - c.sub) + ' บาท' + (c.why ? ' — ' + c.why : ''), blocking: true,
   }));
+  /* ค่าเสื่อมบังคับเฉพาะงวดที่มีทรัพย์สินในทะเบียนต้องคิดจริง — บริษัทที่ไม่มีทรัพย์สินต้องปิดงวดได้
+     ส่วนทรัพย์สินที่ยกยอดมาแต่ยังไม่ลงทะเบียน ระบบคิดค่าเสื่อมให้ไม่ได้ ให้บันทึกเองด้วยใบสำคัญทั่วไป */
   const dep = DB.docs.depreciation.find((d) => d.period === period && d.status !== 'void');
-  items.push({ label: 'ตั้งค่าเสื่อมราคาประจำงวด', ok: !!dep,
-    detail: dep ? fmt(dep.bookTotal) + ' บาท' : 'ยังไม่ได้ทำ', blocking: true, action: 'depreciation' });
+  const due = depreciableAssets(period).length;
+  /* ค่าเสื่อมในใบยอดยกมาเป็นยอดสะสมตั้งแต่ต้นปี ไม่ใช่ค่าเสื่อมของงวดนี้ จึงไม่นับ */
+  const depGl = balanceOf((a) => a.subType === 'depreciation' || a.subType === 'amortization', endDate, period + '-01',
+    (e) => !isOpeningEntry(e));
+  const ppeGl = balBySub(['ppe', 'intangible'], endDate);
+  items.push({ label: 'ตั้งค่าเสื่อมราคาประจำงวด',
+    ok: !!dep || !due,
+    detail: dep ? fmt(dep.bookTotal) + ' บาท'
+      : due ? 'ยังไม่ได้ทำ (' + due + ' รายการในทะเบียน)'
+      : depGl ? 'บันทึกด้วยใบสำคัญแล้ว ' + fmt(depGl) + ' บาท'
+      : ppeGl ? 'ไม่มีทรัพย์สินในทะเบียน แต่บัญชีมีทรัพย์สิน ' + fmt(ppeGl) + ' บาท — ลงทะเบียนทรัพย์สินหรือบันทึกค่าเสื่อมด้วยใบสำคัญ'
+      : 'ไม่มีทรัพย์สินที่ต้องคิดค่าเสื่อม',
+    blocking: true, action: 'depreciation' });
   const pay = DB.docs.payRun.find((r) => r.period === period && r.status !== 'void');
   items.push({ label: 'ทำเงินเดือนประจำงวด', ok: !!pay,
     detail: pay ? pay.count + ' คน ' + fmt(pay.net) + ' บาท' : 'ยังไม่ได้ทำ', blocking: false, action: 'payroll' });

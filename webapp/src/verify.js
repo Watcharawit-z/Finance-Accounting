@@ -34,9 +34,13 @@ function verifyAgainstFile(tbRows, overrides, entryNo, skipped) {
     fileNet[code] = (fileNet[code] || 0) + r.debit - r.credit;
     (fileRows[code] = fileRows[code] || []).push((r.code || '') + (r.name ? ' ' + r.name : ''));
   };
-  p.matched.forEach((r) => add(r.target, r));
+  /* ใบยอดยกมาที่ปิดกำไรขาดทุนปีก่อนเข้ากำไรสะสมแล้ว ต้องพับบรรทัดรายได้/ค่าใช้จ่ายในไฟล์แบบเดียวกันก่อนเทียบ */
+  const fold = e.pnlClosed ? e.pnlClosed.into : null;
+  const typeOf = (code, r) => { const a = DB.accounts.find((x) => x.code === code); return a ? a.type : (r && r.type); };
+  const addF = (code, r) => add(fold && /^(revenue|expense)$/.test(typeOf(code, r) || '') ? fold : code, r);
+  p.matched.forEach((r) => addF(r.target, r));
   /* บัญชีที่ยังไม่มีในผัง = ไม่เคยถูกนำเข้า ยอดในใบสำคัญจึงเป็นศูนย์ ต้องขึ้นว่าไม่ตรง */
-  p.creating.forEach((r) => add(String(r.code || '').trim() || r.name, r));
+  p.creating.forEach((r) => addF(String(r.code || '').trim() || r.name, r));
   const entryNet = {};
   e.lines.forEach((l) => { entryNet[l.acc] = (entryNet[l.acc] || 0) + l.dr - l.cr; });
   const [kind, key] = String(e.srcId || '').split('|');
@@ -81,13 +85,18 @@ function importHealth(asOf) {
   else push('ok', 'งบแสดงฐานะการเงินสมดุล', 'สินทรัพย์ = หนี้สิน + ส่วนของผู้ถือหุ้น = ' + fmt(bs.assets) + ' บาท ณ ' + thDate(to));
 
   /* 2. ยอดยกมาที่มีบัญชีรายได้/ค่าใช้จ่าย — งบกำไรขาดทุนของเดือนนั้นจะรวมผลก่อนวันตัดยอดทั้งหมด */
+  imps.filter((e) => String(e.srcId).indexOf('opening|') === 0 && e.pnlClosed).forEach(function (e) {
+    push('ok', 'ยอดยกมา ' + e.no + ' ปิดกำไรขาดทุนปีก่อนเข้ากำไรสะสมแล้ว',
+      fmt(e.pnlClosed.profit) + ' บาท จาก ' + e.pnlClosed.accounts + ' บัญชี — งบกำไรขาดทุนปีนี้จึงเริ่มจากศูนย์');
+  });
   imps.filter((e) => String(e.srcId).indexOf('opening|') === 0).forEach(function (e) {
     const pl = e.lines.filter((l) => { const a = acc(l.acc); return a.type === 'revenue' || a.type === 'expense'; });
     if (!pl.length) return;
     const profit = -pl.reduce((s, l) => s + l.dr - l.cr, 0);
     push('warn', 'ยอดยกมา ' + e.no + ' มีบัญชีรายได้และค่าใช้จ่าย ' + pl.length + ' บัญชี',
-      'กำไร (ขาดทุน) สะสมก่อนวันตัดยอด ' + fmt(profit) + ' บาท ลงไว้วันที่ ' + thDate(e.date)
-        + ' — งบกำไรขาดทุนเดือน' + thPeriod(periodOf(e.date)) + 'จะรวมผลของทุกเดือนก่อนหน้า ส่วนยอดสะสมทั้งปีถูกต้อง',
+      'กำไร (ขาดทุน) ตั้งแต่ต้นปีถึงวันตัดยอด ' + fmt(profit) + ' บาท ลงไว้วันที่ ' + thDate(e.date)
+        + ' — งบกำไรขาดทุนเดือน' + thPeriod(periodOf(e.date)) + 'จะรวมผลของทุกเดือนก่อนหน้า ส่วนยอดสะสมทั้งปีถูกต้อง'
+        + ' (ถ้าเป็นกำไรของปีก่อน ต้องยกเลิกแล้วนำเข้าใหม่ ณ วันแรกของปี ระบบจะปิดเข้ากำไรสะสมให้)',
       'ถ้าต้องการงบกำไรขาดทุนรายเดือนที่ถูกต้อง ให้ยกเลิกการนำเข้านี้ แล้วนำเข้ายอดยกมา ณ ต้นปี + ยอดเคลื่อนไหวเดือนละไฟล์แทน');
   });
 
@@ -147,6 +156,17 @@ function importHealth(asOf) {
     const gType = guess && typeof subTypeType === 'function' ? subTypeType(guess) : null;
     if (a.imported && gType && gType !== a.type) misfiled.push(a.code + ' ' + a.name + ' — ลงไว้เป็น' + TYPE_TH_V[a.type] + ' แต่รหัสตามผังกรมพัฒน์เป็น' + TYPE_TH_V[gType]);
   });
+  /* บรรทัดที่รวมเข้าบัญชีที่มีอยู่เดิม — รหัสเดิมจำไว้ในคำอธิบายบรรทัด ("รหัสเดิม ...") ตรวจประเภทย้อนได้ */
+  imps.forEach((e) => e.lines.forEach(function (l) {
+    const a = acc(l.acc);
+    if (a.imported || e.pnlClosed && e.pnlClosed.into === a.code) return;
+    String(l.memo || '').replace(/^รหัสเดิม\s*/, '').split(/,\s*/).forEach(function (src) {
+      const h = typeof dbdHint === 'function' ? dbdHint(src) : null;
+      if (h && h.strong && h.type && h.type !== a.type) {
+        misfiled.push(src + ' → ' + a.code + ' ' + a.name + ' — รหัสเดิมเป็น' + TYPE_TH_V[h.type] + ' แต่รวมเข้าบัญชี' + TYPE_TH_V[a.type]);
+      }
+    });
+  }));
   if (odd.length) push('warn', 'บัญชีที่ยอดอยู่ผิดด้านปกติ ' + odd.length + ' บัญชี', odd.slice(0, 12).join(' · ') + (odd.length > 12 ? ' และอื่น ๆ' : ''),
     'อาจถูกต้อง (เช่นเงินเบิกเกินบัญชี เงินทดรองที่ต้องคืน) หรือเลือกคอลัมน์เดบิต/เครดิตสลับกัน — เทียบกับงบทดลองของระบบเดิม');
   if (misfiled.length) push('bad', 'บัญชีที่อาจอยู่ผิดหมวด ' + misfiled.length + ' บัญชี', misfiled.slice(0, 12).join(' · '),

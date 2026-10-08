@@ -16,7 +16,8 @@ const ctx = new Function(src + '\nreturn {DB,buildSeed,trialBalance,balanceSheet
   'issueGoodsReceipt,receiveGoodsFromPo,billGoodsReceipt,recordExpense,billOutstanding,' +
   'createPaymentBatch,approvePaymentBatch,payPaymentBatch,postJournalVoucher,journalOf,' +
   'bahtText,equityStatement,saveCompany,companyGaps,verifyAgainstFile,importHealth,importFor,voidDocument,voidPreview,voidCheck,voidRun,runCheck,' +
-  'creditableBase,matchBankTxn,reopenPeriod,repairDuplicateEntryNos,loadState};')();
+  'creditableBase,matchBankTxn,reopenPeriod,repairDuplicateEntryNos,loadState,' +
+  'tbFileChecks,importPreflight,readFileDates,decodeText,satangOf,defaultSet,importPackage,accBySub,acc,matchAccount};')();
 
 let pass = 0, fail = 0;
 function ok(label, cond, extra) {
@@ -1156,6 +1157,10 @@ ok('รายการนำเข้าทั้งสองแบบขึ้�
    ctx.listImports().length === 2
    && ctx.listImports().some((i) => i.kind === 'movement' && i.key === '2026-11'));
 
+/* ยอดยกมา ณ 31 ธ.ค. เป็นยอดสะสมที่รวมเดือน พ.ย. ไว้แล้ว ลงทับยอดเคลื่อนไหว พ.ย. = นับซ้ำ ต้องถูกกันก่อนลงบัญชี */
+throws('★ ยอดยกมาที่ทับยอดเคลื่อนไหวเดือนก่อนหน้าถูกกันตั้งแต่ก่อนลงบัญชี ไม่ปล่อยให้นับซ้ำ',
+  () => ctx.importOpeningBalances(faTb.rows, '2026-12-31', {}), 'IMPORT_OVERLAP');
+ctx.reverseImport(mov.entry.no, 'ทดสอบ: เปลี่ยนไปใช้ยอดยกมาแทน');
 /* ยกเลิกแล้วต้องนำเข้าซ้ำวันเดิมได้ ไม่ถูกกันว่าซ้ำ */
 const again = ctx.importOpeningBalances(faTb.rows, '2026-12-31', {});
 ok('★ ยกเลิกแล้วนำเข้าวันเดิมใหม่ได้ ไม่ติดว่าซ้ำ', !!again.entry.no, again.entry.no);
@@ -1176,7 +1181,11 @@ console.log('\n=== 10.1 ตรวจตัวเลขที่นำเข้�
   const missing = faTb.rows.concat([{ code:'11999', name:'บัญชีที่ไม่ได้นำเข้า', debit: ctx.M('100'), credit: 0 }]);
   const v3 = ctx.verifyAgainstFile(missing, {}, opening.no, []);
   ok('บรรทัดที่มีในไฟล์แต่ไม่เคยนำเข้า ถูกจับได้', v3.bad.some((x) => x.code === '11999' && x.status === 'no_account'));
+  /* ข้อมูลที่นำเข้าไว้ก่อนมีด่านกันนับซ้ำ — จำลองใบยอดเคลื่อนไหวแบบเก่าที่ซ้อนอยู่ ตรวจสุขภาพต้องยังจับได้ */
+  const legacy = ctx.post({ type:'general', date:'2026-11-30', desc:'ยอดเคลื่อนไหวจากระบบเดิม (ข้อมูลรุ่นก่อน)',
+    src:'import', srcId:'movement|2026-11', lines: mov.entry.lines.map((l) => ({ acc:l.acc, dr:l.dr, cr:l.cr, partner:l.partner })) });
   const h = ctx.importHealth('2026-12-31');
+  ctx.reverseImport(legacy.no, 'ทดสอบ: ล้างใบจำลอง');
   ok('★ ตรวจสุขภาพจับได้ว่ายอดยกมา (ยอดสะสม) กับยอดเคลื่อนไหวเดือนก่อนหน้าซ้อนกัน อาจนับซ้ำ',
     h.items.some((x) => x.level === 'bad' && x.title.indexOf('อาจนับซ้ำ') === 0), h.items.filter((x) => x.level !== 'ok').map((x) => x.title).join(' | '));
   ok('ตรวจสุขภาพบอกว่ายอดยกมามีบัญชีรายได้/ค่าใช้จ่าย ทำให้งบกำไรขาดทุนเดือนนั้นรวมยอดก่อนวันตัดยอด',
@@ -1206,6 +1215,248 @@ const CHART = [
 const chDet = ctx.detectColumns(CHART);
 ok('ไฟล์ผังบัญชีถูกจับได้ว่าไม่ใช่งบทดลอง',
    ctx.detectFileKind(CHART, chDet.map, chDet.headerRow) === 'chart');
+
+/* ===================================================================
+   10.2 ผลตรวจสอบเส้นทางนำเข้า — ทุกข้อที่เคยทำให้ตัวเลขผิดโดยไม่มีอะไรเตือน
+   =================================================================== */
+console.log('\n=== 10.2 นำเข้า: เลือกชุดตัวเลขให้ถูก (ยกมา · เคลื่อนไหว · คงเหลือ) ===');
+const fresh = () => ctx.buildBlank({ name: 'บริษัท ทดสอบนำเข้า จำกัด', year: 2026 });
+/* ทำแบบเดียวกับหน้าจอ: อ่านไฟล์ → เดาคอลัมน์ → เลือกชุดตามแบบการนำเข้า → อ่านงบทดลอง → ตรวจไฟล์ */
+function readTb(text, mode) {
+  const rows = ctx.parseCsv(text);
+  const det = ctx.detectColumns(rows);
+  const map = Object.assign({}, det.map);
+  if (mode === 'movement') { const s = ctx.defaultSet(det.sets, 'movement'); map.debit = s ? s.debit : undefined; map.credit = s ? s.credit : undefined; }
+  const tb = map.debit === undefined && map.credit === undefined ? null : ctx.readTrialBalance(rows, map, det.headerRow);
+  const dates = ctx.readFileDates(rows, det.headerRow);
+  const checks = (o) => ctx.tbFileChecks(Object.assign({ rows, headerRow: det.headerRow, map, sets: det.sets, tb,
+    mode: mode || 'opening', dates }, o || {}));
+  return { rows, det, map, tb, dates, checks };
+}
+const assetsAt = (d) => ctx.balanceSheet(d).assets;
+const T = (lines) => ['งบทดลอง', 'ณ วันที่ 30/06/2569'].concat(lines).join('\n');
+
+{
+  fresh();
+  /* Express: ยอดยกมา (คอลัมน์เดียว) | เดบิต | เครดิต | ยอดคงเหลือ (คอลัมน์เดียว) — คู่กลางคือยอดเคลื่อนไหว */
+  const r = readTb(T(['รหัสบัญชี,ชื่อบัญชี,ยอดยกมา,เดบิต,เครดิต,ยอดคงเหลือ',
+    '11111,เงินสด,"20,000.00","10,000.00","5,000.00","25,000.00"',
+    '11122.01,ธนาคาร,"300,000.00","400,000.00","225,000.00","475,000.00"',
+    '21311,เจ้าหนี้การค้า,"-150,000.00","225,000.00","375,000.00","-300,000.00"',
+    '31110,ทุน,"-170,000.00",,"30,000.00","-200,000.00"']));
+  ok('★ หัวตารางแบบ Express: ไม่หยิบคู่เดบิต/เครดิตกลาง (ยอดเคลื่อนไหว) มาเป็นยอดยกมา',
+    r.det.sets.map((x) => x.role).join(',') === 'opening,movement,closing' && r.map.debit === 5 && r.map.credit === undefined,
+    r.det.sets.map((x) => x.label + ':' + x.role).join(' · '));
+  ctx.importOpeningBalances(r.tb.rows, '2026-06-30', {}, { checks: r.checks({ date: '2026-06-30' }) });
+  ok('★ ยอดสินทรัพย์ตรงกับไฟล์ (500,000) ไม่ใช่ยอดเคลื่อนไหว (180,000)', assetsAt('2026-06-30') === ctx.M('500000'), ctx.fmt(assetsAt('2026-06-30')));
+  ok('ยกมา + เคลื่อนไหว = คงเหลือ ครบทุกบัญชี ยืนยันว่าอ่านบทบาทคอลัมน์ถูก',
+    r.checks({ date: '2026-06-30' }).some((c) => c.code === 'SET_IDENTITY' && c.level === 'ok'));
+}
+{
+  fresh();
+  const r = readTb(T(['Account Code,Account Name,Balance b/f Dr,Balance b/f Cr,Debit,Credit,Balance c/f Dr,Balance c/f Cr',
+    '11111,Cash,"20,000.00",,"10,000.00","5,000.00","25,000.00",', '11122.01,Bank,"300,000.00",,"400,000.00","225,000.00","475,000.00",',
+    '21311,Trade payables,,"150,000.00","225,000.00","375,000.00",,"300,000.00"', '31110,Capital,,"170,000.00",,"30,000.00",,"200,000.00"']));
+  ok('★ ภาษาอังกฤษ "Balance b/f" คือยอดยกมา ไม่ใช่ยอดคงเหลือ — เลือก "Balance c/f"',
+    r.map.debit === 6 && r.map.credit === 7, r.det.sets.map((x) => x.label + ':' + x.role).join(' · '));
+  const two = readTb(T(['รหัสบัญชี,ชื่อบัญชี,ยอดยกมา,,ยอดคงเหลือ', ',,เดบิต,เครดิต,',
+    '11111,เงินสด,"20,000.00",,"25,000.00"', '21311,เจ้าหนี้,,"20,000.00","-25,000.00"']));
+  ok('หัวสองชั้น: คู่ "ยอดยกมา" กับคอลัมน์ยอดคงเหลือเดียว → ใช้ยอดคงเหลือ',
+    two.map.debit === 4 && two.map.credit === undefined && two.tb.rows[0].debit === ctx.M('25000'));
+  const amb = readTb(T(['รหัสบัญชี,ชื่อบัญชี,เดบิต,เครดิต,เดบิต,เครดิต',
+    '11111,เงินสด,100,,150,', '31110,ทุน,,100,,150']));
+  ok('★ สองคู่ที่ไม่มีชื่อบอกบทบาท ระบบไม่เดา ให้ผู้ใช้เลือกเอง', amb.det.needsSet && amb.map.debit === undefined);
+  const mv = readTb(T(['รหัสบัญชี,ชื่อบัญชี,ยอดยกมา เดบิต,ยอดยกมา เครดิต,ยอดประจำงวด เดบิต,ยอดประจำงวด เครดิต,ยอดสะสม เดบิต,ยอดสะสม เครดิต',
+    '11111,เงินสด,100,,50,,150,', '31110,ทุน,,100,,50,,150']), 'movement');
+  ok('แบบยอดเคลื่อนไหว เลือกชุดยอดประจำงวดให้เอง', mv.map.debit === 4 && mv.map.credit === 5);
+  const wrong = readTb(T(['รหัสบัญชี,ชื่อบัญชี,ยอดยกมา เดบิต,ยอดยกมา เครดิต,ยอดประจำงวด เดบิต,ยอดประจำงวด เครดิต,ยอดสะสม เดบิต,ยอดสะสม เครดิต',
+    '11111,เงินสด,100,,50,,999,', '31110,ทุน,,100,,50,,999']));
+  ok('★ ยกมา + เคลื่อนไหว ≠ คงเหลือ ต้องยืนยันก่อนนำเข้า', wrong.checks({ date: '2026-06-30' }).some((c) => c.code === 'SET_IDENTITY' && c.level === 'bad'));
+  const cum = mv.checks({ mode: 'movement', period: '2026-06', date: '2026-06-30', map: { code: 0, name: 1, debit: 6, credit: 7 } });
+  ok('★ เลือกชุดยอดสะสมแต่จะลงเป็นยอดเคลื่อนไหว ต้องยืนยันก่อน (นับซ้ำกับเดือนก่อน)', cum.some((c) => c.code === 'SET_ROLE' && c.level === 'bad'));
+}
+
+console.log('\n=== 10.3 นำเข้า: บรรทัดที่ไม่ใช่บัญชี ยอดรวมท้ายไฟล์ และตัวเลขแปลก ๆ ===');
+{
+  fresh();
+  const H = ['งบทดลอง', 'ณ วันที่ 30 มิถุนายน 2569', 'รหัสบัญชี,ชื่อบัญชี,เดบิต,เครดิต'];
+  const LEAF = ['11111,เงินสด,"25,000.00",', '11122.01,ธนาคารกสิกรไทย ออมทรัพย์,"475,000.00",', '12611,อาคาร,"600,000.00",',
+    '18611,ค่าเสื่อมราคาสะสม - อาคาร,,"100,000.00"', '21311,เจ้าหนี้การค้า,,"300,000.00"', '31110,ทุนเรือนหุ้น,,"500,000.00"',
+    '41110,รายได้จากการขาย,,"400,000.00"', '53011,เงินเดือน,"200,000.00",'];
+  const par = readTb(H.concat(['10000,สินทรัพย์,"1,000,000.00",', LEAF[0], LEAF[1], LEAF[2], LEAF[3],
+    '20000,หนี้สิน,,"300,000.00"', LEAF[4], '30000,ส่วนของผู้ถือหุ้น,,"500,000.00"', LEAF[5],
+    '40000,รายได้,,"400,000.00"', LEAF[6], '50000,ค่าใช้จ่าย,"200,000.00",', LEAF[7]]).join('\n'));
+  ok('★ บัญชีหัวข้อที่พิมพ์ยอดรวมของบัญชีย่อยถูกข้าม ไม่นับซ้ำสองเท่า', par.tb.rows.length === 8 && par.tb.parents.length === 5,
+    par.tb.parents.map((r) => r.code).join(','));
+  ctx.importOpeningBalances(par.tb.rows, '2026-06-30', {});
+  ok('★ สินทรัพย์รวม 1,000,000 ตามไฟล์ ไม่ใช่ 2,000,000', assetsAt('2026-06-30') === ctx.M('1000000'), ctx.fmt(assetsAt('2026-06-30')));
+  ok('ภาษีเงินฝากธนาคารที่ชื่อบอกว่าเป็นธนาคาร ไปอยู่บรรทัดเงินสดและเงินฝาก', ctx.acc('11122.01').subType === 'bank');
+
+  const sub = readTb(H.concat([',หมวด 1 สินทรัพย์,,', LEAF[0], LEAF[1], LEAF[2], LEAF[3], ',รวมสินทรัพย์,"1,100,000.00","100,000.00"',
+    ',ยอดยกไป,"1,100,000.00","100,000.00"', ',ยอดยกมา,"1,100,000.00","100,000.00"', LEAF[4], LEAF[5], ',Subtotal,,"800,000.00"',
+    LEAF[6], LEAF[7], ',สินทรัพย์รวม,"1,000,000.00",', ',Grand Total,"1,300,000.00","1,300,000.00"']).join('\n'));
+  ok('★ บรรทัดรวมย่อย ยอดยกไป–ยกมาระหว่างหน้า หัวหมวด ถูกข้ามทั้งหมด', sub.tb.rows.length === 8 && sub.tb.skipped.length === 6,
+    sub.tb.skipped.map((x) => x.name).join(' · '));
+  ok('★ ผลรวมทุกบรรทัดเทียบกับบรรทัดรวมท้ายไฟล์ (Grand Total) ตรงทุกสตางค์', sub.checks({ date: '2026-06-30' }).some((c) => c.code === 'CONTROL_TOTAL' && c.level === 'ok'));
+  const dup = readTb(H.concat(LEAF).concat([LEAF[1], ',รวมทั้งสิ้น,"1,300,000.00","1,300,000.00"']).join('\n'));
+  const dc = dup.checks({ date: '2026-06-30' });
+  ok('★ บัญชีซ้ำในไฟล์ถูกจับได้ทั้งจากรหัสซ้ำและยอดรวมท้ายไฟล์ไม่ตรง',
+    dc.some((c) => c.code === 'DUPLICATE_CODE' && c.level === 'bad') && dc.some((c) => c.code === 'CONTROL_TOTAL' && c.level === 'bad'));
+
+  ok('ขีดแทนศูนย์ทุกแบบ (- – — −) อ่านเป็นศูนย์', ['-', '–', '—', '−'].every((x) => ctx.parseAmount(x) === '0'));
+  ok('ลบท้าย / เครื่องหมายลบยูนิโค้ด / บาท / Cr ท้ายตัวเลข',
+    ctx.parseAmount('1,234.56-') === '-1234.56' && ctx.parseAmount('−500') === '-500'
+    && ctx.parseAmount('1,000.00 บาท') === '1000.00' && ctx.parseAmount('300,000.00 Cr') === '-300000.00'
+    && ctx.parseAmount('300,000.00 Dr') === '300000.00');
+  ok('ทศนิยมแบบยุโรป 1.234,56 = 1234.56 ไม่ใช่ 1.23456', ctx.parseAmount('1.234,56') === '1234.56' && ctx.parseAmount('1,234') === '1234');
+  ok('★ ปัดเป็นสตางค์ตรงจากตัวอักษร ไม่ปัดสองต่อ', ctx.satangOf('1234.56499') === ctx.M('1234.56')
+    && ctx.satangOf('100.005') === ctx.M('100.01') && ctx.satangOf('186180.004') === ctx.M('186180.00')
+    && ctx.satangOf('499999.9999999999') === ctx.M('500000'));
+  const rnd = readTb(H.concat(['11311,ลูกหนี้การค้า,186180.004,', '31110,ทุน,,186180.00']).join('\n'));
+  ok('★ ยอดที่มีทศนิยมเกินสองตำแหน่งปัดเป็นสตางค์ตอนอ่าน และบอกผู้ใช้ว่าบรรทัดไหน',
+    rnd.tb.rows[0].debit === ctx.M('186180') && rnd.tb.rounded.length === 1 && rnd.checks({ date: '2026-06-30' }).some((c) => c.code === 'ROUNDED'));
+  const csv = ctx.parseCsv('หัว\n\n\nรหัสบัญชี,ชื่อบัญชี,เดบิต,เครดิต\n11111,เงินสด,abc,\n');
+  const ln = ctx.readTrialBalance(csv, { code: 0, name: 1, debit: 2, credit: 3 }, 1);
+  ok('เลขแถวที่ข้ามตรงกับแถวจริงในไฟล์ (นับแถวว่างด้วย)', ln.skipped[0].line === 5 && ln.skipped[0].bad, 'แถว ' + ln.skipped[0].line);
+  const tis = Buffer.from([0xa1, 0xd2, 0xc3]);              // "การ" ในรหัส Windows-874
+  ok('ไฟล์ CSV ภาษาไทยแบบ Windows-874 อ่านออก ไม่เป็นตัวเพี้ยน', ctx.decodeText(tis) === 'การ');
+  const one = readTb(T(['บัญชี,เดบิต,เครดิต', '11111 เงินสดในมือ,"25,000.00",', '31110 ทุน,,"25,000.00"']));
+  ok('รหัสกับชื่อบัญชีอยู่ช่องเดียวกัน แยกออกให้', one.tb.rows[0].code === '11111' && one.tb.rows[0].name === 'เงินสดในมือ');
+  const d1 = ctx.readFileDates(ctx.parseCsv('งบทดลอง\nตั้งแต่ 01/01/2569 ถึง 30/06/2569\nรหัส,ชื่อ,เดบิต,เครดิต'), 2);
+  const d2 = ctx.readFileDates(ctx.parseCsv('งบทดลอง\nณ วันที่ 31 ธ.ค. 2568\nรหัส,ชื่อ,เดบิต,เครดิต'), 2);
+  ok('อ่านวันที่ของรายงานจากหัวไฟล์ได้ทั้งแบบตัวเลขและชื่อเดือนไทย',
+    d1 && d1.from === '2026-01-01' && d1.to === '2026-06-30' && d2 && d2.to === '2025-12-31', JSON.stringify([d1, d2]));
+  ok('★ วันตัดยอดไม่ตรงกับวันที่ในไฟล์ ต้องยืนยันก่อน',
+    par.checks({ date: '2026-06-01' }).some((c) => c.code === 'FILE_DATE' && c.level === 'bad')
+    && !par.checks({ date: '2026-06-30' }).some((c) => c.code === 'FILE_DATE'));
+}
+
+console.log('\n=== 10.4 นำเข้า: กันนับซ้ำ และจับคู่บัญชีต้องเป็นประเภทเดียวกัน ===');
+{
+  fresh();
+  const tb = [{ code: '11111', name: 'เงินสด', debit: ctx.M('1000'), credit: 0 }, { code: '31110', name: 'ทุน', debit: 0, credit: ctx.M('1000') }];
+  const mv = [{ code: '11111', name: 'เงินสด', debit: ctx.M('100'), credit: 0 }, { code: '41110', name: 'รายได้', debit: 0, credit: ctx.M('100') }];
+  ctx.importOpeningBalances(tb, '2026-01-01', {});
+  const jan = ctx.importPeriodMovement(mv, '2026-01', {});
+  ok('ยอดยกมาวันที่ 1 ม.ค. (ยอดต้นปี) + ยอดเคลื่อนไหวเดือน ม.ค. ใช้ด้วยกันได้', !!jan.entry.no);
+  throws('★ ยอดยกมาใบที่สองถูกกัน (ยอดคงเหลือจะเป็นสองเท่า)', () => ctx.importOpeningBalances(tb, '2026-06-30', {}), 'IMPORT_OVERLAP');
+  const jun = ctx.importOpeningBalances; void jun;
+  fresh();
+  ctx.importOpeningBalances(tb, '2026-06-30', {});
+  throws('★ ยอดเคลื่อนไหวของเดือนที่อยู่ในยอดยกมาแล้วถูกกัน', () => ctx.importPeriodMovement(mv, '2026-05', {}), 'IMPORT_OVERLAP');
+  throws('ยอดเคลื่อนไหวเดือนเดียวกับวันตัดยอด (ยอดสะสมถึงสิ้นเดือน) ถูกกัน', () => ctx.importPeriodMovement(mv, '2026-06', {}), 'IMPORT_OVERLAP');
+  ok('ยอดเคลื่อนไหวเดือนถัดจากวันตัดยอดลงได้', !!ctx.importPeriodMovement(mv, '2026-07', {}).entry.no);
+
+  fresh();
+  const p = ctx.previewOpening([
+    { code: '27130', name: 'ภาษีเงินได้นิติบุคคล', debit: 0, credit: ctx.M('185000') },
+    { code: '21990', name: 'บัญชีพัก', debit: 0, credit: ctx.M('15000') },
+    { code: '2131', name: 'เจ้าหนี้การค้า', debit: 0, credit: ctx.M('50000') },
+    { code: '11111', name: 'เงินสด', debit: ctx.M('250000'), credit: 0 },
+  ], {});
+  const by = (c) => p.creating.concat(p.matched).concat(p.unmatched).find((r) => r.code === c);
+  ok('★ "27130 ภาษีเงินได้นิติบุคคล" (หนี้สิน) ไม่ถูกรวมเข้าค่าใช้จ่ายภาษีเงินได้ที่ชื่อเหมือนกัน',
+    by('27130').subType === 'cit_payable' && by('27130').type === 'liability');
+  ok('★ "21990 บัญชีพัก" (หนี้สิน) ไม่ถูกรวมเข้าบัญชีพักฝั่งสินทรัพย์', by('21990').type === 'liability' && !by('21990').target);
+  ok('★ "2131 เจ้าหนี้การค้า" ไม่ถูกรวมเข้า 2131 ค่าใช้จ่ายค้างจ่ายของระบบ ให้ผู้ใช้เลือกเองพร้อมเหตุผล',
+    p.unmatched.some((r) => r.code === '2131' && /2131/.test(r.reason || '')));
+  ok('ปลายทางที่ผู้ใช้เลือกเองคนละประเภทกับรหัสเดิม มีคำเตือนกำกับ',
+    !!ctx.previewOpening([{ code: '21990', name: 'บัญชีพัก', debit: 0, credit: 1 }], { '21990': '1111' }).matched[0].typeWarn);
+}
+
+console.log('\n=== 10.5 นำเข้า: ทำเป็นชุดเดียว ยกเลิกแล้วกลับครบ ===');
+{
+  fresh();
+  const before = ctx.DB.accounts.length;
+  ok('รหัสบัญชีหัวข้อของระบบ (1000) ไม่ถูกจับคู่ ให้ผู้ใช้เลือกเองตั้งแต่หน้าตรวจ', ctx.previewOpening([
+    { code: '1000', name: 'หมวดสินทรัพย์', debit: ctx.M('100'), credit: 0 }], {}).unmatched.length === 1);
+  /* ลงบัญชีไม่ผ่านตอนท้าย (งวดปิดแล้ว) หลังสร้างบัญชีใหม่ไปแล้ว — ต้องย้อนทั้งหมด */
+  ctx.DB.periods.find((x) => x.code === '2026-06').status = 'closed';
+  throws('งวดปิดแล้ว นำเข้าไม่ได้', () => ctx.importOpeningBalances([
+    { code: '11111', name: 'เงินสด', debit: ctx.M('200'), credit: 0 },
+    { code: '31110', name: 'ทุน', debit: 0, credit: ctx.M('200') }], '2026-06-30', {}), 'PERIOD_CLOSED');
+  ctx.DB.periods.find((x) => x.code === '2026-06').status = 'open';
+  ok('★ นำเข้าไม่ผ่านแล้วไม่มีบัญชีค้างอยู่ในผัง (ทำเป็นชุดเดียว)', ctx.DB.accounts.length === before, before + ' → ' + ctx.DB.accounts.length);
+
+  /* ยกเลิกแล้วเลือกบรรทัดงบใหม่ ต้องย้ายหมวดตาม */
+  const rows = [{ code: '11319', name: 'ลูกหนี้อื่น', debit: ctx.M('500'), credit: 0 }, { code: '31110', name: 'ทุน', debit: 0, credit: ctx.M('500') }];
+  const first = ctx.importOpeningBalances(rows, '2026-06-30', {});
+  ctx.reverseImport(first.entry.no, 'ทดสอบ: เลือกบรรทัดงบใหม่');
+  ctx.importOpeningBalances(rows, '2026-06-30', { '11319': '+other_current_asset' });
+  ok('★ นำเข้าใหม่หลังยกเลิก บรรทัดงบที่แก้แล้วมีผลจริง', ctx.acc('11319').subType === 'other_current_asset');
+  ok('ค่าเผื่อหนี้สงสัยจะสูญใต้ 1131 แยกเป็นบัญชีปรับมูลค่า ไม่ปนในบัญชีคุมลูกหนี้',
+    ctx.proposeAccount('11319', 'ค่าเผื่อหนี้สงสัยจะสูญ').subType === 'ar_allowance'
+    && ctx.proposeAccount('11313', 'เช็ครับลงวันที่ล่วงหน้า').subType === 'other_receivable');
+  ok('12xxx เป็นสินทรัพย์ไม่หมุนเวียน', ctx.proposeAccount('12810', 'เงินมัดจำระยะยาว').subType === 'other_asset');
+
+  /* ยกเลิกการนำเข้าแล้ว ยอดคุมภาษีของงวดต้องยังตรง ปิดงวดได้ */
+  fresh();
+  const v = ctx.importOpeningBalances([
+    { code: '11111', name: 'เงินสด', debit: ctx.M('10700'), credit: 0 },
+    { code: '27111', name: 'ภาษีขาย', debit: 0, credit: ctx.M('700') },
+    { code: '17113', name: 'ภาษีซื้อ', debit: ctx.M('350'), credit: 0 },
+    { code: '31110', name: 'ทุน', debit: 0, credit: ctx.M('10350') }], '2026-06-30', {});
+  ctx.reverseImport(v.entry.no, 'ทดสอบ: ยกเลิกการนำเข้า');
+  const rc = ctx.reconciliationChecks('2026-06-30').checks;
+  ok('★ ยกเลิกการนำเข้าแล้ว ภาษีขาย/ภาษีซื้อของงวดยังตรงกับทะเบียน (ไม่บล็อกปิดงวด)',
+    rc.find((c) => c.code === 'OUTPUT_VAT').ok && rc.find((c) => c.code === 'INPUT_VAT').ok);
+  ok('★ บริษัทที่ไม่มีทรัพย์สินในทะเบียน ข้อค่าเสื่อมราคาไม่บล็อกการปิดงวด',
+    ctx.closeChecklist('2026-06').items.find((i) => /ค่าเสื่อม/.test(i.label)).ok);
+}
+
+console.log('\n=== 10.6 หลังเริ่มใช้ระบบ: เอกสารใหม่ลงบัญชีเดิม งบกระแสเงินสด งบส่วนของผู้ถือหุ้น ===');
+{
+  fresh();
+  const tb = [
+    { code: '11122.01', name: 'กสิกรไทย ออมทรัพย์', debit: ctx.M('500000'), credit: 0 },
+    { code: '11311', name: 'ลูกหนี้การค้า - ทั่วไป', debit: ctx.M('107000'), credit: 0 },
+    { code: '12611', name: 'อาคาร', debit: ctx.M('600000'), credit: 0 },
+    { code: '21311', name: 'เจ้าหนี้การค้า - ทั่วไป', debit: 0, credit: ctx.M('100000') },
+    { code: '31110', name: 'ทุนเรือนหุ้น', debit: 0, credit: ctx.M('900000') },
+    { code: '41110', name: 'รายได้จากการขาย', debit: 0, credit: ctx.M('407000') },
+    { code: '53011', name: 'เงินเดือน', debit: ctx.M('200000'), credit: 0 },
+  ];
+  const o = ctx.importOpeningBalances(tb, '2026-06-30', {});
+  ok('★ บัญชีคุมที่ยกมาเป็นบัญชีหลักต่อจากนี้ (ลูกหนี้ เจ้าหนี้ ธนาคาร)',
+    ctx.accBySub('trade_receivable') === '11311' && ctx.accBySub('trade_payable') === '21311' && ctx.accBySub('bank') === '11122.01',
+    o.defaults.map((d) => d.sub + '→' + d.code).join(' '));
+  const cf = ctx.cashFlow('2026-01-01', '2026-12-31');
+  ok('★ งบกระแสเงินสด: เงินสดในใบยอดยกมาเป็นเงินสดต้นงวด ไม่ใช่เงินได้จากกิจกรรมลงทุน',
+    cf.opening === ctx.M('500000') && cf.investing === 0 && cf.unexplained === 0, 'ต้นงวด ' + ctx.fmt(cf.opening) + ' ลงทุน ' + ctx.fmt(cf.investing));
+  const is = ctx.incomeStatement('2026-01-01', '2026-12-31'), eq = ctx.equityStatement('2026-01-01', '2026-12-31');
+  ok('★ กำไรสุทธิในงบส่วนของผู้ถือหุ้นเท่ากับงบกำไรขาดทุน', eq.net === is.net && is.net === ctx.M('207000') && eq.matchesBs, ctx.fmt(eq.net) + ' / ' + ctx.fmt(is.net));
+
+  /* งบทดลองสิ้นปีก่อน ลงวันแรกของปีนี้ — กำไรขาดทุนปีก่อนต้องเข้ากำไรสะสม ไม่ใช่กำไรของปีนี้ */
+  fresh();
+  const ye = ctx.importOpeningBalances(tb, '2026-01-01', {}, { fileDate: '2025-12-31' });
+  ok('★ งบทดลองสิ้นปีก่อนที่ลงวันที่ 1 ม.ค. ปิดกำไรปีก่อนเข้ากำไรสะสม งบกำไรขาดทุนปีนี้เป็นศูนย์',
+    ye.pnlClosed && ye.pnlClosed.profit === ctx.M('207000') && ctx.incomeStatement('2026-01-01', '2026-12-31').net === 0
+    && ctx.balanceSheet('2026-01-01').diff === 0, ye.pnlClosed && ctx.fmt(ye.pnlClosed.profit));
+
+  /* แฟ้มจากตัวดึง FlowAccount: ลูกหนี้ยกมาแยกตามลูกค้า ยกเลิกแล้วเอกสารค้างหายตาม นำเข้าใหม่กลับมาครบ */
+  fresh();
+  const pkg = { format: 'financii-import/1', cutoff: '2026-06-30', source: 'ทดสอบ',
+    partners: [{ code: 'C-001', name: 'ลูกค้า ก', kind: 'customer' }, { code: 'C-002', name: 'ลูกค้า ข', kind: 'customer' }],
+    items: [{ code: 'X', name: 'ของเศษหน่วย', avgCost: '880.3333', qty: 12.5 }],
+    trialBalance: [{ code: '1113', name: 'เงินฝากธนาคาร–กระแสรายวัน', debit: '100000', credit: '' },
+      { code: '1131', name: 'ลูกหนี้การค้า–ในประเทศ', debit: '15000', credit: '' },
+      { code: '3120', name: 'ทุนที่ออกและชำระแล้ว', debit: '', credit: '115000' }],
+    openInvoices: [{ no: 'IV-1', date: '2026-06-01', partnerCode: 'C-001', partnerName: 'ลูกค้า ก', base: '9345.79', vat: '654.21', total: '10000' },
+      { no: 'IV-2', date: '2026-06-05', partnerCode: 'C-002', partnerName: 'ลูกค้า ข', base: '4672.90', vat: '327.10', total: '5000' }] };
+  const r = ctx.importPackage(JSON.parse(JSON.stringify(pkg)), {});
+  const arLines = r.opening.entry.lines.filter((l) => l.acc === '1131');
+  ok('★ ลูกหนี้ยกมาแยกบรรทัดตามลูกค้าจากเอกสารค้าง (บัญชีย่อยรายลูกค้าถูกตั้งแต่วันแรก)',
+    arLines.length === 2 && arLines.some((l) => l.partner === 'C-001' && l.dr === ctx.M('10000')) && r.allPassed);
+  ok('มูลค่าสินค้าที่จำนวนมีทศนิยมเป็นจำนวนเต็มสตางค์', Number.isInteger(ctx.DB.items[0].value), String(ctx.DB.items[0].value));
+  const rv = ctx.reverseImport(r.opening.entry.no, 'ทดสอบ: ยกเลิกแฟ้มข้อมูล');
+  ok('★ ยกเลิกการนำเข้าแฟ้มข้อมูล เอกสารค้างยกมาถูกยกเลิกตาม ทะเบียนลูกหนี้ตรงกับบัญชีคุม',
+    rv.voidedDocs === 2 && ctx.reconciliationChecks('2026-06-30').checks.find((c) => c.code === 'AR_SUBLEDGER').ok);
+  const again = ctx.importPackage(JSON.parse(JSON.stringify(pkg)), {});
+  ok('★ นำเข้าแฟ้มเดิมใหม่หลังยกเลิก เอกสารค้างกลับมาครบ ยอดคุมตรง', again.invoices === 2 && again.allPassed);
+  throws('★ ยอดเงินในแฟ้มที่อ่านไม่ออกต้องหยุด ไม่กลายเป็นศูนย์เงียบ ๆ',
+    () => ctx.importPackage(Object.assign(JSON.parse(JSON.stringify(pkg)), { cutoff: '2026-07-31',
+      trialBalance: [{ code: '1113', name: 'x', debit: '1O0', credit: '' }] }), {}), 'BAD_AMOUNT');
+}
 
 console.log('\n════════════════════════════════════════');
 console.log(' ผ่าน ' + pass + ' ข้อ · ไม่ผ่าน ' + fail + ' ข้อ');

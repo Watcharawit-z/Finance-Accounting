@@ -425,9 +425,11 @@ function modalUndoImport(no) {
       + ' · ' + im.lines + ' บัญชี · รวม ' + fmt(im.total) + ' บาท',
     body:'<div class="prose"><p>ระบบจะสร้างใบสำคัญ<b>กลับรายการ</b>คู่กับใบเดิม '
       + 'ไม่ได้ลบใบเดิมทิ้ง ตาม พ.ร.บ.การบัญชี มาตรา 20 '
-      + 'หลังจากนี้ยอดจะกลับไปเหมือนก่อนนำเข้า และนำเข้าไฟล์ใหม่ทับได้เลย</p>'
-      + '<p class="dim">บัญชีที่ระบบสร้างไว้ตอนนำเข้ายังอยู่ในผังบัญชี ยอดเป็นศูนย์ '
-      + 'ไม่ต้องลบ เพราะไฟล์ที่นำเข้าใหม่จะใช้รหัสเดียวกัน</p></div>'
+      + 'ยอดในบัญชีแยกประเภทจะกลับไปเหมือนก่อนนำเข้า และนำเข้าไฟล์ใหม่ได้เลย</p>'
+      + (im.bfDocs ? '<p>เอกสารค้างยกมาที่มากับการนำเข้านี้ <b>' + im.bfDocs + ' ใบ</b> จะถูกยกเลิกตามด้วย '
+          + 'ทะเบียนลูกหนี้/เจ้าหนี้จะได้ตรงกับบัญชีคุม (ถ้ามีใบเสร็จหรือใบสำคัญจ่ายอ้างถึงแล้ว ต้องยกเลิกใบเหล่านั้นก่อน)</p>' : '')
+      + '<p class="dim">บัญชีที่ระบบสร้างไว้ตอนนำเข้า และรายชื่อคู่ค้า สินค้า พนักงาน ยังอยู่ในระบบ '
+      + 'บัญชียอดเป็นศูนย์ ไม่ต้องลบ เพราะไฟล์ที่นำเข้าใหม่จะใช้รหัสเดียวกัน</p></div>'
       + '<div class="flds">'
       + field({ name:'reason', label:'เหตุผล (ผู้สอบบัญชีจะเห็นข้อความนี้)', wide:true,
           value:'นำเข้าผิดชุดตัวเลข ต้องนำเข้าใหม่ให้ถูกต้อง' })
@@ -437,7 +439,8 @@ function modalUndoImport(no) {
       submitAction(function () {
         const rev = reverseImport(no, val('reason'));
         STATE.screen = 'import'; STATE.imp = null;
-        toast('ยกเลิกการนำเข้า ' + no + ' แล้ว', 'ok', 'ใบกลับรายการ ' + rev.no);
+        toast('ยกเลิกการนำเข้า ' + no + ' แล้ว', 'ok', 'ใบกลับรายการ ' + rev.no
+          + (rev.voidedDocs ? ' · ยกเลิกเอกสารค้างยกมา ' + rev.voidedDocs + ' ใบ' : ''));
         return rev;
       });
     },
@@ -1281,10 +1284,12 @@ function dispatch(act) {
       runAction(function () {
         const movement = I.mode === 'movement';
         const period = I.period || STATE.period;
-        const asOf = movement ? endOfMonth(period + '-01') : (val('cutoff') || pStart());
+        const asOf = movement ? endOfMonth(period + '-01') : (val('cutoff') || I.cutoff || pStart());
+        I.cutoff = movement ? I.cutoff : asOf;
+        const opts = { checks: impChecks(I).file, ack: !!I.ack, fileDate: I.dates ? I.dates.to : null };
         const r = movement
-          ? importPeriodMovement(I.tb.rows, period, I.overrides || {})
-          : importOpeningBalances(I.tb.rows, asOf, I.overrides || {});
+          ? importPeriodMovement(I.tb.rows, period, I.overrides || {}, opts)
+          : importOpeningBalances(I.tb.rows, asOf, I.overrides || {}, opts);
         const rec = reconciliationChecks(asOf);
         STATE.impResult = {
           cutoff: asOf, source: 'ไฟล์ ' + I.name, mode: I.mode || 'opening', period: period,
@@ -1518,22 +1523,19 @@ function bindEvents() {
     }
     if (t.id === 'impVerify') { if (STATE.imp) { STATE.imp.verifyNo = t.value; render(); } return; }
     /* วันตัดยอดเปลี่ยน — การ์ดตรวจเทียบต้องเปลี่ยนไปเทียบกับยอดยกมาของวันนั้นด้วย */
-    if (t.name === 'cutoff' && STATE.imp && STATE.imp.rows) { STATE.imp.cutoff = t.value; STATE.imp.verifyNo = null; render(); return; }
+    if (t.name === 'cutoff' && STATE.imp && STATE.imp.rows) { STATE.imp.cutoff = t.value; STATE.imp.verifyNo = null; STATE.imp.ack = false; render(); return; }
+    if (t.id === 'impAck') { if (STATE.imp) { STATE.imp.ack = t.checked; render(); } return; }
     if (t.id === 'impMode') {
       const I = STATE.imp;
       if (I) {
         I.mode = t.value;
-        /* สลับไปแบบยอดเคลื่อนไหว ให้เด้งไปชุด "ยอดประจำงวด" ให้เลย
-           ถ้าปล่อยค้างที่ชุดยอดสะสม ตัวเลขจะถูกนับซ้ำกับเดือนก่อนโดยไม่รู้ตัว */
-        if (I.mode === 'movement') {
-          const mv = (I.pairs || []).find((p) => !/สะสม|คงเหลือ|balance/i.test(p.label)
-            && !/ยกมา|opening/i.test(p.label));
-          if (mv) { I.map.debit = mv.debit; I.map.credit = mv.credit; }
-          if (!I.period) I.period = STATE.period;
-        } else {
-          const bal = (I.pairs || []).find((p) => /สะสม|คงเหลือ|balance/i.test(p.label));
-          if (bal) { I.map.debit = bal.debit; I.map.credit = bal.credit; }
-        }
+        I.ack = false;
+        /* สลับแบบการนำเข้า ให้เด้งไปชุดที่ตรงบทบาท (ยอดประจำงวด / ยอดคงเหลือ) ให้เลย
+           ถ้าปล่อยค้างที่ชุดยอดสะสม ตัวเลขจะถูกนับซ้ำกับเดือนก่อนโดยไม่รู้ตัว
+           บอกบทบาทไม่ได้ ล้างการเลือกไว้ให้ผู้ใช้เลือกเอง ดีกว่าค้างชุดผิดไว้ */
+        const pick = defaultSet(I.sets || [], I.mode);
+        if (pick || (I.sets || []).length > 1) { I.map.debit = pick ? pick.debit : undefined; I.map.credit = pick ? pick.credit : undefined; }
+        if (I.mode === 'movement' && !I.period) I.period = STATE.period;
         refreshImportPreview(); render();
       }
       return;
@@ -1541,15 +1543,17 @@ function bindEvents() {
     if (t.id === 'impPair') {
       const I = STATE.imp;
       if (I) {
-        const pr = (I.pairs || [])[Number(t.value)];
-        if (pr) { I.map.debit = pr.debit; I.map.credit = pr.credit; refreshImportPreview(); }
+        const pr = t.value === '' ? null : (I.sets || [])[Number(t.value)];
+        I.map.debit = pr ? pr.debit : undefined; I.map.credit = pr ? pr.credit : undefined;
+        I.ack = false;
+        refreshImportPreview();
         render();
       }
       return;
     }
     if (t.name === 'impPeriod') {
       const I = STATE.imp;
-      if (I) { I.period = t.value; render(); }
+      if (I) { I.period = t.value; I.ack = false; render(); }
       return;
     }
     if (t.id === 'impHeaderRow') {
@@ -1558,14 +1562,15 @@ function bindEvents() {
         I.headerRow = Number(t.value) || 0;
         const re = detectColumns(I.rows.slice(I.headerRow));
         /* เลือกบรรทัดหัวตารางใหม่ ให้ลองเดาคอลัมน์ใหม่จากบรรทัดนั้นด้วย */
-        if (re.keys >= 2 && re.headerRow === 0) I.map = re.map;
+        if (re.keys >= 2 && re.headerRow === 0) { I.map = re.map; I.sets = re.sets; }
+        I.ack = false;
         refreshImportPreview(); render();
       }
       return;
     }
     if (t.classList.contains('impcol')) {
       const I = STATE.imp;
-      if (I) { I.map[t.getAttribute('data-k')] = t.value === '' ? undefined : Number(t.value); refreshImportPreview(); render(); }
+      if (I) { I.map[t.getAttribute('data-k')] = t.value === '' ? undefined : Number(t.value); I.ack = false; refreshImportPreview(); render(); }
       return;
     }
     if (t.classList.contains('impmap')) {
@@ -1818,18 +1823,27 @@ async function handleFile(file) {
     }
     let rows;
     if (lower.endsWith('.xlsx')) rows = await readXlsx(await file.arrayBuffer());
-    else rows = parseCsv(await file.text());
+    else rows = parseCsv(decodeText(await file.arrayBuffer()));
     if (!rows.length) throw new DomainError('EMPTY_FILE', 'ไฟล์นี้ไม่มีข้อมูล');
 
     /* เดาหัวตารางไม่ได้ ก็ต้องไม่ตัน — พาไปหน้าจับคู่คอลัมน์ด้วยมือแทน
        การบอกให้ผู้ใช้กลับไปแก้ไฟล์เองคือทางตันสำหรับคนที่ไม่ถนัดคอมพิวเตอร์ */
     const det = detectColumns(rows);
     const kind = detectFileKind(rows, det.map, det.headerRow);
+    /* วันที่ในหัวไฟล์ตั้งวันตัดยอดให้ตรงกับงบทดลอง — ค่าเดิม (วันแรกของงวดที่เปิดอยู่) ผิดเกือบทุกครั้ง */
+    const dates = readFileDates(rows, det.headerRow);
+    const cur = (det.sets || []).find((x) => sameSet(x, det.map));
+    const want = dates ? (cur && cur.role === 'opening' ? (dates.from ? addDays(dates.from, -1) : null) : dates.to) : null;
+    const open = (d) => !!d && DB.periods.some((p) => d >= p.start && d <= p.end && p.status === 'open');
     STATE.imp = {
       name: file.name, rows: rows,
       headerRow: det.headerRow >= 0 ? det.headerRow : 0, map: det.map,
-      pairs: det.pairs || [], mode: 'opening', period: null,
-      overrides: {}, cutoff: null, needsMapping: !det.ok && kind === 'trialBalance',
+      sets: det.sets || [], mode: 'opening',
+      period: dates && dates.to && (!dates.from || dates.from.slice(0, 7) === dates.to.slice(0, 7)) && open(dates.to) ? dates.to.slice(0, 7) : null,
+      overrides: {}, dates: dates, ack: false,
+      /* ยอดสิ้นวันที่ 31 ของงวดที่ไม่มีในระบบ ลงวันที่ 1 ของงวดแรกแทนได้ */
+      cutoff: open(want) ? want : (want && open(addDays(want, 1)) && addDays(want, 1).slice(8) === '01' ? addDays(want, 1) : null),
+      needsMapping: !det.ok && !det.needsSet && kind === 'trialBalance',
       kind: kind,
     };
     if (kind === 'trialBalance') refreshImportPreview();
@@ -1851,9 +1865,21 @@ function refreshImportPreview() {
   I.tb = readTrialBalance(I.rows, m, I.headerRow);
 }
 
-function runImportPackage(pkg) {
+function runImportPackage(pkg, ack) {
+  /* มีรายการในระบบนี้ช่วงเดียวกับยอดยกมาอยู่แล้ว (เช่นยังเป็นข้อมูลตัวอย่าง) ต้องถามก่อน ไม่นำเข้าเงียบ ๆ */
+  if (!ack) {
+    const pre = importPreflight('opening', pkg.cutoff, null);
+    const stop = pre.filter((c) => c.level === 'stop');
+    const bad = pre.filter((c) => c.level === 'bad');
+    if (!stop.length && bad.length
+        && !window.confirm(bad.map((c) => c.title + '\n' + c.detail).join('\n\n') + '\n\nยืนยันนำเข้าต่อ?')) {
+      STATE.imp = null; render();
+      return;
+    }
+    ack = bad.length > 0;
+  }
   runAction(function () {
-    const r = importPackage(pkg, {});
+    const r = importPackage(pkg, {}, { ack: !!ack });
     STATE.impResult = r;
     STATE.screen = 'importResult';
     STATE.imp = null;
