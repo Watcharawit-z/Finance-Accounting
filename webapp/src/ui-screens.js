@@ -53,6 +53,8 @@ const PAGE_INFO = {
   salesorders:  { d:'ยืนยันคำสั่งซื้อของลูกค้า แปลงเป็นใบกำกับภาษีเมื่อส่งมอบสินค้าหรือบริการ', je: NOJE('ยังไม่ลงบัญชี') },
   invoices:     { d:'ขายเชื่อ ออกครบตามมาตรา 86/4 ระบบตัดสต๊อกและต้นทุนขายให้เอง',
                   je: [['dr','ลูกหนี้การค้า'], ['cr','รายได้จากการขาย · ภาษีขาย']], book:'สมุดรายวันขาย' },
+  cashsales:    { d:'ขายปลีกหน้าร้าน รับเงินทันที ออกใบกำกับภาษีอย่างย่อ (ม.86/6) ไม่ต้องมีข้อมูลผู้ซื้อ — ตัดสต๊อกและเข้ารายงานภาษีขายให้เอง',
+                  je: [['dr','เงินสด / เงินฝากธนาคาร'], ['cr','รายได้ · ภาษีขาย']], book:'สมุดรายวันรับ' },
   billingnotes: { d:'รวบใบกำกับที่ค้างของลูกค้ารายเดียวไปวางเก็บเงินครั้งเดียว พร้อมวันนัดชำระ', je: NOJE('ไม่ลงบัญชี — ใช้นัดเก็บเงิน') },
   receipts:     { d:'รับชำระหนี้จากลูกค้า ต้องอ้างใบกำกับเสมอ ภาษีที่ลูกค้าหักไว้เก็บเป็นเครดิตภาษีปลายปี',
                   je: [['dr','เงินฝากธนาคาร · ภาษีถูกหัก ณ ที่จ่าย'], ['cr','ลูกหนี้การค้า']], book:'สมุดรายวันรับ' },
@@ -432,7 +434,8 @@ function invoiceDetail(no) {
   const rfs = (DB.docs.customerRefund || []).filter((c) => c.invoiceNo === no);
   return card({
     title: 'ใบกำกับภาษี/ใบส่งของ เลขที่ ' + d.no,
-    sub: 'ออกวันที่ ' + thDate(d.date) + ' · ครบกำหนด ' + thDate(d.due),
+    sub: 'ออกวันที่ ' + thDate(d.date) + ' · ครบกำหนด ' + thDate(d.due)
+      + (d.fromDoc ? ' · จาก' + (d.soNo ? 'ใบสั่งขาย ' : 'ใบเสนอราคา ') + d.fromDoc : ''),
     actions: (out > 0 ? btn('pay:' + d.no, 'รับชำระเงิน', 'primary') : '')
       + (out < 0 ? btn('refund:' + d.no, 'คืนเงินลูกค้า ' + fmt(-out), 'primary') : '')
       + (!isVoid(d) && creditableBase(d) > 0 ? btn('cn:' + d.no, 'ออกใบลดหนี้') : '')
@@ -445,12 +448,12 @@ function invoiceDetail(no) {
       + '<div>เลขประจำตัวผู้เสียภาษี ' + esc(DB.company.taxId) + ' · ' + esc(DB.company.branchName) + '</div></div>'
       + '<div><div class="dim">ผู้ซื้อ (ข้อมูล ณ วันที่ออกเอกสาร)</div><b>' + esc(d.snap.name) + '</b>'
       + '<div>' + esc(d.snap.address) + '</div>'
-      + '<div>เลขประจำตัวผู้เสียภาษี ' + esc(d.snap.taxId) + ' · สาขา ' + esc(d.snap.branch) + '</div></div>'
+      + '<div>' + esc(buyerIdLine(d.snap)) + '</div></div>'
       + '</div>'
       + tbl({
-          cols:[{t:'รายการ'},{t:'จำนวน',a:'r'},{t:'หน่วย'},{t:'ราคาต่อหน่วย',a:'r'},{t:'ภาษี'},{t:'จำนวนเงิน',a:'r'}],
+          cols:[{t:'รายการ'},{t:'จำนวน',a:'r'},{t:'หน่วย'},{t:'ราคาต่อหน่วย',a:'r'},{t:'ภาษี'},{t:'บัญชีรายได้'},{t:'จำนวนเงิน',a:'r'}],
           rows: d.lines.map((l) => [l.desc, {n:M(String(l.qty))}, l.uom || '—', {n:l.price},
-            l.taxCode === 'VAT7' ? 'VAT 7%' : l.taxCode === 'VAT0' ? 'อัตรา 0%' : 'ยกเว้น', {n:l.amount}]),
+            l.taxCode === 'VAT7' ? 'VAT 7%' : l.taxCode === 'VAT0' ? 'อัตรา 0%' : 'ยกเว้น', accLabel(l.acc), {n:l.amount}]),
         })
       + '<div class="totals">'
       + '<div><span>มูลค่าก่อนภาษี</span><b>' + fmt(d.base) + '</b></div>'
@@ -486,14 +489,26 @@ function invoiceDetail(no) {
   });
 }
 
+/** เลขผู้เสียภาษีและสาขาของผู้ซื้อ — บุคคลธรรมดาที่ไม่ได้จด VAT ไม่มีสาขา ไม่ต้องขึ้นว่า "สาขา null" */
+function buyerIdLine(snap) {
+  const s = snap || {};
+  const reg = partnerVatRegistered(s);
+  return (s.taxId ? 'เลขประจำตัวผู้เสียภาษี ' + s.taxId : reg ? 'ยังไม่มีเลขประจำตัวผู้เสียภาษี' : 'บุคคลธรรมดา ไม่ได้จดทะเบียนภาษีมูลค่าเพิ่ม')
+    + (s.branch ? ' · ' + (s.branch === '00000' ? 'สำนักงานใหญ่' : 'สาขาที่ ' + s.branch) : '');
+}
+const accLabel = (code) => { const a = code && DB.accounts.find((x) => x.code === code); return a ? a.code + ' ' + a.name : '—'; };
+
 function scInvoices() {
-  const base = DB.docs.invoice.filter((d) =>
-    periodOf(d.date) === STATE.period && (hit(d.no) || hit(d.partnerName)));
-  const rows = base.filter((d) => chipPass('invoices', d));
+  /* ตัวกรอง "ค้างชำระทุกเดือน" ดูใบที่ยังค้างจากทุกงวด — ใบเก่าที่ยังไม่ได้เก็บเงินต้องไม่หายไปเพราะเปลี่ยนเดือน
+     ตัวกรองอื่นดูเฉพาะงวดที่เลือก (เงื่อนไขงวดอยู่ใน LIST_CHIPS) */
+  const base = DB.docs.invoice.filter((d) => hit(d.no) || hit(d.partnerName));
+  const allOpen = STATE.chip.invoices === 'allopen';
+  const rows = base.filter((d) => chipPass('invoices', d))
+    .sort((a, b) => (allOpen ? (a.due < b.due ? -1 : a.due > b.due ? 1 : 0) : 0));
   const totals = liveOnly(rows).reduce((s, d) => ({ base:s.base + d.base, vat:s.vat + d.vat, total:s.total + d.total }), {base:0,vat:0,total:0});
   return (STATE.sel ? invoiceDetail(STATE.sel) : '')
     + card({
-      title:'ใบกำกับภาษี', sub: thPeriod(STATE.period) + ' · ' + countNote(rows, 'ฉบับ'),
+      title:'ใบกำกับภาษี', sub: (allOpen ? 'ค้างชำระทุกเดือน เรียงตามวันครบกำหนด' : thPeriod(STATE.period)) + ' · ' + countNote(rows, 'ฉบับ'),
       actions: btn('new:invoice', '+ ออกใบกำกับภาษี', periodIsOpen() ? 'primary' : 'disabled'),
       filters: listFilters('invoices', 'ค้นหาเลขที่หรือชื่อลูกค้า', base),
       body: tbl({
@@ -507,6 +522,61 @@ function scInvoices() {
       }),
       foot: 'ระบบจองเลขที่เอกสารตอนลงบัญชีเท่านั้น เลขจึงเรียงต่อเนื่องไม่มีช่องว่าง · ใบที่ยกเลิกยังแสดงอยู่แต่ไม่นับในยอดรวม',
     });
+}
+
+/* ===================================================================
+   ขายเงินสด — ใบกำกับภาษีอย่างย่อ (ม.86/6)
+   =================================================================== */
+function cashSaleDetail(no) {
+  const d = DB.docs.cashSale.find((x) => x.no === no);
+  if (!d) return '';
+  const payAcc = DB.accounts.find((a) => a.code === d.payTo);
+  return card({
+    title:'ใบกำกับภาษีอย่างย่อ เลขที่ ' + d.no,
+    sub:'ขายเงินสดวันที่ ' + thDate(d.date) + ' · ' + (d.buyerName || 'ลูกค้าทั่วไป')
+      + ' · ' + (d.vatInclusive ? 'ราคารวมภาษีแล้ว' : 'ราคายังไม่รวมภาษี'),
+    actions: printBtn('cashSale', d.no) + btn('entry:' + d.entryNo, 'ดูใบสำคัญ') + voidBtn('cashSale', d) + btn('sel:', 'ปิด'),
+    body: voidBanner(d)
+      + tbl({
+          cols:[{t:'รายการ'},{t:'จำนวน',a:'r'},{t:'ราคาต่อหน่วย',a:'r'},{t:'ภาษี'},{t:'บัญชีรายได้'},{t:'ก่อนภาษี',a:'r'},
+            {t: d.vatInclusive ? 'รวมภาษี' : 'จำนวนเงิน', a:'r'}],
+          rows: d.lines.map((l) => [l.desc, {n:M(String(l.qty))}, {n:l.price},
+            l.taxCode === 'VAT7' ? 'VAT 7%' : l.taxCode === 'VAT0' ? 'อัตรา 0%' : 'ยกเว้น', accLabel(l.acc), {n:l.amount}, {n:l.gross}]),
+        })
+      + '<div class="totals">'
+      + '<div><span>มูลค่าก่อนภาษี</span><b>' + fmt(d.base) + '</b></div>'
+      + '<div><span>ภาษีมูลค่าเพิ่ม</span><b>' + fmt(d.vat) + '</b></div>'
+      + '<div class="gt"><span>รับเงินทั้งสิ้น</span><b>' + fmt(d.total) + '</b></div>'
+      + '<div><span>รับเข้าบัญชี</span><b>' + esc(payAcc ? payAcc.code + ' ' + payAcc.name : d.payTo) + '</b></div>'
+      + '</div>',
+    foot: isVoid(d) ? 'ยกเลิกแล้ว — รายงานภาษีขายแสดงใบนี้ว่า "ยกเลิก" ยอดเป็นศูนย์ และคืนสินค้าเข้าคลังแล้ว'
+      : 'ใบกำกับอย่างย่อใช้ขอคืนภาษีซื้อไม่ได้ ถ้าลูกค้าขอใบกำกับเต็มรูป ให้ยกเลิกใบนี้แล้วออกใบกำกับเต็มรูปแทน'
+        + ' · ยกเลิกได้ถ้ายังไม่ยื่น ภ.พ.30 ของเดือนนั้น',
+  });
+}
+
+function scCashSales() {
+  const base = DB.docs.cashSale.filter((d) => periodOf(d.date) === STATE.period
+    && (hit(d.no) || hit(d.partnerName) || hit(d.buyerName || '')));
+  const rows = base.filter((d) => chipPass('cashsales', d));
+  const t = liveOnly(rows).reduce((s, d) => ({ base:s.base + d.base, vat:s.vat + d.vat, total:s.total + d.total }), {base:0,vat:0,total:0});
+  return (STATE.sel ? cashSaleDetail(STATE.sel) : '') + card({
+    title:'ขายเงินสด (ใบกำกับภาษีอย่างย่อ)', sub: thPeriod(STATE.period) + ' · ' + countNote(rows, 'ใบ'),
+    actions: btn('new:cashsale', '+ ขายเงินสด', periodIsOpen() ? 'primary' : 'disabled'),
+    filters: listFilters('cashsales', 'ค้นหาเลขที่หรือชื่อผู้ซื้อ', base),
+    body: tbl({
+      cols:[{t:'เลขที่'},{t:'วันที่'},{t:'ผู้ซื้อ'},{t:'รับชำระโดย'},{t:'ก่อนภาษี',a:'r'},{t:'ภาษี',a:'r'},{t:'รับเงิน',a:'r'},{t:'สถานะ'}],
+      rows: rows.map((d) => [{mono:d.no}, thDateNum(d.date), d.buyerName || {dim:'ลูกค้าทั่วไป'},
+        ({ cash:'เงินสด', transfer:'โอนเงิน', card:'บัตร' })[d.method] || d.method,
+        {n:d.base}, {n:d.vat}, {n:d.total}, statusPill(d.status)]),
+      rowAttr: (r, i) => rowCls(rows[i]) + ' data-act="sel:' + r[0].mono + '"',
+      foot: rows.length ? ['รวม', '', '', '', {n:t.base}, {n:t.vat}, {n:t.total}, ''] : null,
+      empty:'ยังไม่มีการขายเงินสดในงวดนี้',
+      emptyAction: periodIsOpen() ? btn('new:cashsale', 'ขายเงินสดใบแรก', 'primary') : '',
+    }),
+    foot:'ขายปลีกให้ผู้บริโภคทั่วไป รับเงินทันทีไม่ผ่านลูกหนี้ · เข้ารายงานภาษีขายเป็นใบกำกับอย่างย่อ ไม่มีเลขผู้เสียภาษีของผู้ซื้อ'
+      + ' · ลูกค้าที่ต้องการใบกำกับเต็มรูปเพื่อขอคืนภาษีซื้อ ให้ออกใบกำกับภาษีแทน',
+  });
 }
 
 /** รายละเอียดเอกสารที่ไม่มีบรรทัดสินค้า — ใบเสร็จ ใบลดหนี้ ใบเพิ่มหนี้ ใบสำคัญจ่าย */
@@ -615,36 +685,42 @@ function agingScreen(kind) {
 }
 
 function partnerScreen(kind) {
-  const list = DB.partners.filter((p) => p.kind === kind && (hit(p.name) || hit(p.code) || hit(p.taxId)));
+  const scr = kind === 'customer' ? 'customers' : 'vendors';
+  const base = DB.partners.filter((p) => p.kind === kind && (hit(p.name) || hit(p.code) || hit(p.taxId)));
+  const list = base.filter((p) => chipPass(scr, p));
+  const off = DB.partners.filter((p) => p.kind === kind && p.active === false).length;
   const to = pEnd();
   const ag = aging(kind === 'customer' ? 'ar' : 'ap', to);
   const bal = {};
   ag.rows.forEach((r) => { bal[r.code] = r.total; });
+  const typeLabel = (p) => (p.entityType === 'individual' ? 'บุคคลธรรมดา' : 'นิติบุคคล')
+    + (kind === 'customer' && p.entityType === 'individual' && partnerVatRegistered(p) ? ' (จด VAT)' : '')
+    + (kind === 'customer' && p.entityType !== 'individual' && !partnerVatRegistered(p) ? ' (ไม่ได้จด VAT)' : '');
   return card({
     title: kind === 'customer' ? 'ทะเบียนลูกค้า' : 'ทะเบียนผู้ขาย',
-    sub: list.length + ' ราย · ข้อมูลนี้จะถูกคัดลอกลงเอกสารทุกใบ ณ วันที่ออก',
+    sub: list.length + ' ราย' + (off ? ' · เลิกใช้งาน ' + off + ' ราย' : '') + ' · ข้อมูลนี้จะถูกคัดลอกลงเอกสารทุกใบ ณ วันที่ออก',
     actions: btn('partner:new:' + kind,
       kind === 'customer' ? '+ เพิ่มลูกค้า' : '+ เพิ่มผู้ขาย', 'primary'),
-    filters: searchBox('ค้นหาชื่อ รหัส หรือเลขประจำตัวผู้เสียภาษี'),
+    filters: listFilters(scr, 'ค้นหาชื่อ รหัส หรือเลขประจำตัวผู้เสียภาษี', base),
     body: tbl({
       cols:[{t:'รหัส'},{t:'ชื่อ'},{t:'เลขประจำตัวผู้เสียภาษี'},{t:'สาขา'},{t:'ประเภท'},{t:'เครดิต (วัน)',a:'r'}]
         .concat(kind === 'vendor' ? [{t:'หัก ณ ที่จ่าย'}] : [])
-        .concat([{t:'คงค้าง',a:'r'}]),
-      rows: list.map((p) => [{mono:p.code}, p.name, {mono:p.taxId},
-        p.branch === '00000' ? 'สำนักงานใหญ่' : (p.branch || '—'),
-        p.entityType === 'individual' ? 'บุคคลธรรมดา' : 'นิติบุคคล',
+        .concat([{t:'คงค้าง',a:'r'}, {t:'สถานะ'}]),
+      rows: list.map((p) => [{mono:p.code}, p.name, p.taxId ? {mono:p.taxId} : {dim:'—'},
+        p.branch === '00000' ? 'สำนักงานใหญ่' : (p.branch ? 'สาขา ' + p.branch : '—'),
+        typeLabel(p),
         {c:String(p.termDays)}]
         .concat(kind === 'vendor' ? [p.whtCode ? resolveRate(p.whtCode, TODAY, {channel:'manual'}).label
           + ' ' + resolveRate(p.whtCode, TODAY, {channel:'manual'}).rate + '%' : '—'] : [])
-        .concat([{n: bal[p.code] || 0}])),
+        .concat([{n: bal[p.code] || 0}, p.active === false ? {st:['late','เลิกใช้งาน']} : {st:['paid','ใช้งานอยู่']}])),
       rowAttr: (r) => 'class="row-link" data-act="partner:edit:' + r[0].mono + '"',
       empty: DB.partners.some((x) => x.kind === kind)
         ? 'ไม่พบรายชื่อที่ค้นหา' : 'ยังไม่มีรายชื่อในทะเบียนนี้',
       emptyAction: btn('partner:new:' + kind,
         kind === 'customer' ? 'เพิ่มลูกค้ารายแรก' : 'เพิ่มผู้ขายรายแรก', 'primary'),
     }),
-    foot: 'กดที่แถวเพื่อแก้ไข · เลขประจำตัวผู้เสียภาษีทุกเลขผ่านการตรวจหลักที่ 13 แล้ว '
-      + 'ระบบจะไม่ยอมออกใบกำกับให้เลขที่ผิด และกันการสร้างคู่ค้าซ้ำด้วยเลขเดียวกัน',
+    foot: 'กดที่แถวเพื่อแก้ไข ตั้งเลิกใช้งาน หรือลบรายที่ยังไม่เคยใช้ · เลขประจำตัวผู้เสียภาษีทุกเลขผ่านการตรวจหลักที่ 13 แล้ว '
+      + 'และกันการสร้างคู่ค้าซ้ำด้วยเลขเดียวกัน · รายที่เลิกใช้งานไม่ขึ้นให้เลือกในเอกสารใหม่ แต่ยอดค้างและรายงานเดิมยังอยู่ครบ',
   });
 }
 
@@ -811,6 +887,7 @@ function scCashFlow() {
 const ENTRY_SOURCE_SCREEN = { invoice:'invoices', receipt:'receipts', creditNote:'creditnotes', debitNote:'debitnotes',
   bill:'bills', payment:'payments', expense:'expenses', goodsReceipt:'goodsreceipts', payroll:'payroll',
   depreciation:'deprec', import:'import' };
+ENTRY_SOURCE_SCREEN.cashSale = 'cashsales';
 function entryCard(no) {
   const e = DB.entries.find((x) => x.no === no);
   if (!e) return '';
@@ -1530,6 +1607,7 @@ function scDebitNotes() {
    "ปิดแล้ว" บนใบเสนอราคาไม่สื่อ ต้องบอกว่าแปลงไปเป็นเอกสารถัดไปแล้ว */
 const TRADE_LABEL = { closed:'แปลงเป็นเอกสารถัดไปแล้ว', approved:'ตอบรับแล้ว' };
 function tradePill(st) {
+  if (st === 'partially_invoiced') return { st: ['wait', 'ออกใบกำกับบางส่วน'] };
   const p = statusPill(st);
   return TRADE_LABEL[st] ? { st: [p.st[0], TRADE_LABEL[st]] } : p;
 }
@@ -1540,21 +1618,30 @@ function tradeDocDetail(kind, no) {
   if (!d) return '';
   const st = tradeDocStatus(kind, d);
   const live = st === 'issued' || st === 'approved';
-  const partial = st === 'partially_received';
-  const got = kind === 'purchaseOrder' ? poReceived(d) : null;
+  const isPo = kind === 'purchaseOrder', isSo = kind === 'salesOrder';
+  /* รับของบางส่วน (ใบสั่งซื้อ) หรือออกใบกำกับบางส่วน (ใบสั่งขาย) — ยังทำต่อได้ ยกเลิกได้เฉพาะส่วนที่เหลือ */
+  const partial = st === 'partially_received' || st === 'partially_invoiced';
+  const got = isPo ? poReceived(d) : isSo ? soInvoiced(d) : null;
+  const gotLabel = isPo ? ['รับแล้ว', 'ค้างรับ'] : ['ออกใบกำกับแล้ว', 'ค้างออก'];
   const nextLabel = cfg.next === 'salesOrder' ? 'แปลงเป็นใบสั่งขาย'
-    : cfg.next === 'invoice' ? 'แปลงเป็นใบกำกับภาษี' : 'ตั้งหนี้ผู้ขาย';
+    : cfg.next === 'invoice' ? 'ออกใบกำกับภาษี' : 'ตั้งหนี้ผู้ขาย';
+  /* แก้ไขได้เฉพาะใบที่ยังไม่ตอบรับ ไม่ได้แปลง และยังไม่ได้รับของ/ออกใบกำกับ (ใบหมดอายุแก้เพื่อต่อวันยืนราคาได้) */
+  const editable = d.status === 'issued';
   return card({
     title: cfg.label + ' เลขที่ ' + d.no,
     sub: 'ออกวันที่ ' + thDate(d.date)
       + (d.validUntil ? ' · ยืนราคาถึง ' + thDate(d.validUntil) : '')
-      + (d.fromDoc ? ' · มาจาก ' + d.fromDoc : ''),
-    actions: ((live || partial) && kind === 'purchaseOrder' ? btn('grn:po:' + d.no, partial ? 'รับสินค้าส่วนที่เหลือ' : 'รับสินค้าเข้าคลัง', 'primary') : '')
-      + (live ? btn('trade:' + kind + ':convert:' + d.no, nextLabel, kind === 'purchaseOrder' ? '' : 'primary') : '')
+      + (d.fromDoc ? ' · มาจาก ' + d.fromDoc : '')
+      + (d.revision ? ' · แก้ไขแล้ว ' + d.revision + ' ครั้ง' : ''),
+    actions: ((live || partial) && isPo ? btn('grn:po:' + d.no, partial ? 'รับสินค้าส่วนที่เหลือ' : 'รับสินค้าเข้าคลัง', 'primary') : '')
+      + ((live || partial) && isSo ? btn('trade:salesOrder:invoice:' + d.no, partial ? 'ออกใบกำกับส่วนที่เหลือ' : 'ออกใบกำกับภาษี', 'primary') : '')
+      + (live && !isSo ? btn('trade:' + kind + ':convert:' + d.no, nextLabel, isPo ? '' : 'primary') : '')
+      + (live && kind === 'quotation' ? btn('trade:quotation:toinvoice:' + d.no, 'ออกใบกำกับภาษีเลย') : '')
+      + (editable ? btn('trade:' + kind + ':edit:' + d.no, 'แก้ไข') : '')
       + (st === 'issued' ? btn('trade:' + kind + ':approved:' + d.no,
-          kind === 'purchaseOrder' ? 'ผู้ขายยืนยันแล้ว' : 'ลูกค้าตอบรับ') : '')
+          isPo ? 'ผู้ขายยืนยันแล้ว' : 'ลูกค้าตอบรับ') : '')
       + (live ? btn('trade:' + kind + ':cancelled:' + d.no, 'ยกเลิก') : '')
-      + (partial ? btn('trade:' + kind + ':cancelled:' + d.no, 'ยกเลิกส่วนที่ยังไม่ได้รับ') : '')
+      + (partial ? btn('trade:' + kind + ':cancelled:' + d.no, isPo ? 'ยกเลิกส่วนที่ยังไม่ได้รับ' : 'ยกเลิกส่วนที่ยังไม่ได้ออก') : '')
       + printBtn(kind, d.no) + btn('sel:', 'ปิด'),
     body:
       '<div class="docgrid">'
@@ -1563,22 +1650,26 @@ function tradeDocDetail(kind, no) {
       + '<div>' + esc(d.snap ? d.snap.address : '') + '</div></div>'
       + '<div><div class="dim">สถานะ</div><b>' + esc(tradePill(st).st[1]) + '</b>'
       + (d.convertedTo ? '<div>เอกสารปลายทาง ' + esc(d.convertedTo) + '</div>' : '')
-      + (got && (d.grnNos || []).length && !d.convertedTo ? '<div>ใบรับสินค้า ' + esc(d.grnNos.join(', ')) + '</div>' : '')
+      + (isPo && (d.grnNos || []).length && !d.convertedTo ? '<div>ใบรับสินค้า ' + esc(d.grnNos.join(', ')) + '</div>' : '')
+      + (isSo && (d.invoiceNos || []).length && !d.convertedTo ? '<div>ใบกำกับภาษี ' + esc(d.invoiceNos.join(', ')) + '</div>' : '')
       + (d.statusReason ? '<div>' + esc(d.statusReason) + '</div>' : '') + '</div>'
       + '</div>'
       + tbl({
-          cols:[{t:'รายการ'},{t:'จำนวน',a:'r'}].concat(got ? [{t:'รับแล้ว',a:'r'},{t:'ค้างรับ',a:'r'}] : [])
-            .concat([{t:'ราคาต่อหน่วย',a:'r'},{t:'ภาษี'},{t:'จำนวนเงิน',a:'r'}]),
+          cols:[{t:'รายการ'},{t:'จำนวน',a:'r'}].concat(got ? [{t:gotLabel[0],a:'r'},{t:gotLabel[1],a:'r'}] : [])
+            .concat([{t:'ราคาต่อหน่วย',a:'r'},{t:'ภาษี'},{t:'บันทึกเข้าบัญชี'},{t:'จำนวนเงิน',a:'r'}]),
           rows: d.lines.map((l, i) => [l.desc, {n:M(String(l.qty))}]
             .concat(got ? [{n:M(String(got[i]))}, {n:M(String(roundQty(l.qty - got[i])))}] : [])
-            .concat([{n:l.price}, l.taxCode === 'VAT7' ? 'VAT 7%' : l.taxCode === 'VAT0' ? 'อัตรา 0%' : 'ยกเว้น', {n:l.amount}])),
+            .concat([{n:l.price}, l.taxCode === 'VAT7' ? 'VAT 7%' : l.taxCode === 'VAT0' ? 'อัตรา 0%' : 'ยกเว้น',
+              l.acc ? accLabel(l.acc) : {dim:'ตามชนิดสินค้า'}, {n:l.amount}])),
         })
       + '<div class="totals">'
       + '<div><span>มูลค่าก่อนภาษี</span><b>' + fmt(d.base) + '</b></div>'
       + '<div><span>ภาษีมูลค่าเพิ่ม</span><b>' + fmt(d.vat) + '</b></div>'
       + '<div class="gt"><span>จำนวนเงินรวมทั้งสิ้น</span><b>' + fmt(d.total) + '</b></div>'
       + '</div>',
-    foot:'เอกสารใบนี้ยังไม่มีผลทางบัญชี ตัวเลขจะเข้าบัญชีเมื่อกด' + nextLabel + 'เท่านั้น',
+    foot:'เอกสารใบนี้ยังไม่มีผลทางบัญชี ตัวเลขจะเข้าบัญชีเมื่อกด' + nextLabel + 'เท่านั้น'
+      + (isSo ? ' · ออกใบกำกับทีละงวดได้ ใบสั่งขายปิดเองเมื่อออกครบทุกรายการ' : '')
+      + (editable ? ' · แก้ไขได้จนกว่า' + (isPo ? 'ผู้ขายยืนยัน' : 'ลูกค้าตอบรับ') + 'หรือแปลงเป็นเอกสารถัดไป' : ''),
   });
 }
 
@@ -2035,7 +2126,7 @@ const SCREENS = {
   payroll: scPayroll, employees: scEmployees,
   projects: scProjects, budget: scBudget,
   bs: scBalanceSheet, pl: scIncomeStatement,
-  debitnotes: scDebitNotes,
+  debitnotes: scDebitNotes, cashsales: scCashSales,
   quotations: () => tradeDocScreen('quotation'),
   salesorders: () => tradeDocScreen('salesOrder'),
   purchaseorders: () => tradeDocScreen('purchaseOrder'),

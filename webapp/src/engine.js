@@ -178,6 +178,7 @@ function blankState() {
       creditNote: [], debitNote: [],
       purchaseOrder: [], goodsReceipt: [], bill: [], payment: [],
       expense: [], whtCert: [], paymentBatch: [], customerRefund: [],
+      cashSale: [],        // ขายเงินสด — ใบกำกับภาษีอย่างย่อ (ม.86/6)
       stockMove: [], stockAdj: [], payRun: [], depreciation: [], filing: [],
     },
     seq: {},             // {'invoice|2026-07': 12}
@@ -347,6 +348,7 @@ const SEQ_PREFIX = {
   invoice:'INV', receipt:'RC', creditNote:'CN', debitNote:'DN', quotation:'QT', salesOrder:'SO',
   purchaseOrder:'PO', bill:'AP', payment:'PV', whtCert:'WT', stockCount:'SC', stockAdj:'ST',
   billingNote:'BN', goodsReceipt:'GR', expense:'EX', paymentBatch:'PB', customerRefund:'RF',
+  cashSale:'CS',
   je_sales:'SA', je_purchase:'PU', je_receipt:'RV', je_payment:'PY',
   je_general:'JV', je_adjustment:'JV', je_payroll:'PR', je_asset:'AS',
   je_inventory:'IV', je_opening:'OB', je_closing:'CL',
@@ -546,6 +548,7 @@ const ENTRY_FROM = {
   expense:['ค่าใช้จ่าย', 'เปิดรายการค่าใช้จ่ายแล้วกดยกเลิกเอกสาร ระบบจะยกเลิก 50 ทวิ ให้ด้วย'],
   goodsReceipt:['ใบรับสินค้า', 'เปิดใบรับสินค้าแล้วกดยกเลิกเอกสาร'],
   customerRefund:['ใบคืนเงินลูกค้า', 'เปิดใบกำกับเดิมแล้วกดยกเลิกที่ใบคืนเงิน'],
+  cashSale:['ใบกำกับภาษีอย่างย่อ (ขายเงินสด)', 'เปิดรายการขายเงินสดแล้วกดยกเลิกเอกสาร ระบบจะคืนสินค้าเข้าคลังให้ด้วย'],
   payroll:['งวดเงินเดือน', 'ไปที่หน้าเงินเดือนแล้วกดยกเลิกงวดเงินเดือน ระบบจะตัดออกจาก ภ.ง.ด.1 ให้ด้วย'],
   depreciation:['ค่าเสื่อมราคาประจำงวด', 'ไปที่หน้าค่าเสื่อมราคาแล้วกดยกเลิกงวด ระบบจะคืนค่าเสื่อมสะสมของทรัพย์สินให้ด้วย'],
   filing:['การยื่นแบบภาษี', 'แบบที่ยื่นแล้วต้องยื่นเพิ่มเติมกับกรมสรรพากร แล้วบันทึกปรับปรุงแทน'],
