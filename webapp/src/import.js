@@ -450,6 +450,74 @@ function inferNameColumn(rows, map, headerRow) {
   }
 }
 
+/* ---------- ไฟล์รายการสินค้าคงเหลือ (ยอดสินค้ายกมา) ----------
+   รหัส · ชื่อ · หน่วย · จำนวนคงเหลือ · ต้นทุนต่อหน่วย หรือมูลค่า — ไม่มีเดบิต/เครดิต
+   FlowAccount: เมนูสินค้า → รายงานสินค้าคงเหลือ → ดาวน์โหลด Excel */
+const STOCK_HINTS = {
+  code:  ['รหัสสินค้า', 'รหัส', 'sku', 'item code', 'product code', 'code'],
+  name:  ['ชื่อสินค้า', 'ชื่อ', 'รายการสินค้า', 'รายการ', 'description', 'product name', 'item name', 'name'],
+  uom:   ['หน่วยนับ', 'หน่วย', 'uom', 'unit of measure', 'unit'],
+  qty:   ['จำนวนคงเหลือ', 'คงเหลือ', 'จำนวน', 'qty', 'quantity', 'on hand', 'onhand', 'balance qty'],
+  cost:  ['ต้นทุนต่อหน่วย', 'ต้นทุนเฉลี่ย', 'ราคาทุนต่อหน่วย', 'ราคาทุน', 'ต้นทุน', 'unit cost', 'avg cost', 'average cost', 'cost'],
+  value: ['มูลค่าคงเหลือ', 'มูลค่ารวม', 'มูลค่า', 'จำนวนเงิน', 'value', 'total cost', 'amount'],
+};
+function bestStockKey(text) {
+  const n = norm(text);
+  if (!n) return null;
+  let key = null, len = 0;
+  Object.keys(STOCK_HINTS).forEach(function (k) {
+    STOCK_HINTS[k].forEach(function (h) {
+      const hn = norm(h);
+      if (n.indexOf(hn) >= 0 && hn.length > len) { len = hn.length; key = k; }
+    });
+  });
+  return key;
+}
+function detectStockColumns(rows) {
+  let best = null;
+  headerCandidates(rows).forEach(function (c) {
+    const map = {};
+    let ledgerish = false;
+    c.cells.forEach(function (cell, j) {
+      const k = bestStockKey(cell);
+      const tb = bestKeyFor(cell);
+      if (tb === 'debit' || tb === 'credit') ledgerish = true;
+      if (k && map[k] === undefined) map[k] = j;
+    });
+    if (ledgerish || map.qty === undefined || (map.cost === undefined && map.value === undefined)) return;
+    if (map.code === undefined && map.name === undefined) return;
+    const st = readStockFile(rows, map, c.row);
+    const score = st.rows.length * 10 + Object.keys(map).length;
+    if (!best || score > best.score) best = { ok: st.rows.length > 0, headerRow: c.row, map, score };
+  });
+  return best || { ok: false };
+}
+function readStockFile(rows, map, headerRow) {
+  const out = [], skipped = [], seen = {};
+  rows.slice(headerRow + 1).forEach(function (r, i) {
+    const line = r.line || headerRow + 2 + i;
+    const code = cellText(r[map.code]), name = cellText(r[map.name]);
+    if (!code && !name) return;
+    if (nonAccountRow(code, name)) { skipped.push({ line, code, name, why: 'บรรทัดผลรวม ข้ามอัตโนมัติ' }); return; }
+    const q = parseAmount(r[map.qty]);
+    const c = map.cost === undefined ? '0' : parseAmount(r[map.cost]);
+    const v = map.value === undefined ? null : parseAmount(r[map.value]);
+    if (q === null || c === null || (map.value !== undefined && v === null)) {
+      skipped.push({ line, code, name, why: 'ตัวเลขอ่านไม่ออก', bad: true }); return;
+    }
+    const qty = roundQty(Number(q));
+    if (qty === 0) { skipped.push({ line, code, name, why: 'จำนวนเป็นศูนย์' }); return; }
+    if (qty < 0) { skipped.push({ line, code, name, why: 'จำนวนติดลบ — สต๊อกติดลบตั้งยอดยกมาไม่ได้', bad: true }); return; }
+    const amount = v !== null && satangOf(v) !== 0 ? satangOf(v) : round2(mulQty(M(c), qty));
+    if (amount < 0) { skipped.push({ line, code, name, why: 'มูลค่าติดลบ', bad: true }); return; }
+    const key = code || norm(name);
+    if (seen[key]) { skipped.push({ line, code, name, why: 'ซ้ำกับแถว ' + seen[key], bad: true }); return; }
+    seen[key] = line;
+    out.push({ line, code, name: name || code, uom: cellText(r[map.uom]), qty, amount, value: unM(amount) });
+  });
+  return { rows: out, skipped };
+}
+
 /* ---------- ไฟล์นี้คือรายงานอะไร ----------
    งบทดลองมีบัญชีละบรรทัด ส่วนบัญชีแยกประเภทมีรายการละบรรทัด รหัสบัญชีเดิมซ้ำได้เป็นร้อย
    ถ้าเผลอนำบัญชีแยกประเภทเข้าเป็นยอดยกมา ยอดจะกลายเป็นผลรวมรายการทั้งปี ไม่ใช่ยอดคงเหลือ */
@@ -1305,6 +1373,11 @@ function reverseImport(entryNo, reason) {
   const bfBill = DB.docs.bill.filter((d) => d.broughtForward && d.entryNo === e.no && d.status !== 'void');
   const blocked = [];
   bfInv.forEach((d) => voidBlockers('invoice', d).forEach((w) => blocked.push(d.no + ': ' + w)));
+  /* สินค้ายกมาที่มากับใบนี้ถูกขายหรือเบิกไปแล้ว ดึงกลับออกจากคลังไม่ได้ */
+  DB.docs.stockMove.filter((m) => m.src === e.no && m.dir === 'in').forEach(function (m) {
+    const it = DB.items.find((x) => x.code === m.item);
+    if (it && it.qty < m.qty) blocked.push(it.code + ': เหลือในคลัง ' + it.qty + ' น้อยกว่าที่ยกมา ' + m.qty + ' (ขายหรือเบิกไปแล้ว)');
+  });
   bfBill.forEach((d) => voidBlockers('bill', d).forEach((w) => blocked.push(d.no + ': ' + w)));
   if (blocked.length) {
     throw new DomainError('IMPORT_IN_USE',
@@ -1316,6 +1389,7 @@ function reverseImport(entryNo, reason) {
   const rev = reverse(entryNo, why, e.date, { fromSource: true });
   rev.importReversal = true;
   if (e.type === 'opening') rev.openingReversal = true;
+  stockBack(e.no, 'in');
   bfInv.concat(bfBill).forEach(function (d) {
     d.status = 'void';
     d.voidReason = 'ยกเลิกการนำเข้า ' + e.no;
@@ -1372,19 +1446,42 @@ function upsertPartner(p) {
   return 1;
 }
 
+/** สินค้าจากแฟ้มข้อมูล — ข้อมูลหลักอัปเดตได้ แต่จำนวนคงเหลือต้องเข้าคลังเป็นรายการ "ยอดยกมา" (stockOpening)
+    ห้ามเขียนทับจำนวน/มูลค่าตรง ๆ ไม่งั้นสต๊อกการ์ดไม่มีที่มา และยอดที่ขายไปแล้วจะถูกทับหาย */
 function upsertItem(i) {
-  const rec = {
-    code: i.code, name: i.name, category: i.category || 'ทั่วไป', uom: i.uom || 'หน่วย',
-    type: i.type === 'service' ? 'service' : 'stock',
-    avgCost: M(i.avgCost || '0'), price: M(i.price || '0'),
-    qty: roundQty(Number(i.qty || 0)), reorder: Number(i.reorder || 0),
-  };
+  const type = i.type === 'service' ? 'service' : 'stock';
+  const avgCost = M(i.avgCost || '0');
+  const qty = type === 'stock' ? roundQty(Number(i.qty || 0)) : 0;
   /* มูลค่าต้องเป็นจำนวนเต็มสตางค์ — จำนวนมีทศนิยม (12.5 หน่วย) คูณตรง ๆ ได้เศษเกินสตางค์ */
-  rec.value = mulQty(rec.avgCost, rec.qty);
-  const at = DB.items.findIndex((x) => x.code === rec.code);
-  if (at >= 0) { DB.items[at] = { ...DB.items[at], ...rec }; return 0; }
-  DB.items.push(rec);
-  return 1;
+  const want = { qty, value: round2(mulQty(avgCost, qty)) };
+  const master = { code: i.code, name: i.name, category: i.category || 'ทั่วไป', uom: i.uom || 'หน่วย',
+    type, price: M(i.price || '0'), reorder: Number(i.reorder || 0) };
+  const at = DB.items.findIndex((x) => x.code === master.code);
+  if (at >= 0) {
+    const it = DB.items[at];
+    Object.assign(it, master);
+    return { created: 0, item: it, want };
+  }
+  const it = { ...master, qty: 0, value: 0, avgCost: avgCost };
+  DB.items.push(it);
+  return { created: 1, item: it, want };
+}
+/** รับสินค้ายกมาจากแฟ้มเข้าคลัง — อ้างใบยอดยกมา (ยกเลิกการนำเข้าแล้วคืนออกได้) */
+function stockOpening(list, date, src, warnings) {
+  list.forEach(function (r) {
+    const it = r.item;
+    if (it.type !== 'stock' || !r.want.qty) return;
+    if (it.qty === r.want.qty && it.value === r.want.value) return;
+    if (it.qty !== 0 || it.value !== 0) {
+      warnings.push({ doc: it.code, message: 'สินค้า ' + it.name + ' มีสต๊อกในระบบแล้ว ' + it.qty + ' ' + it.uom
+        + ' ไม่ได้ยกยอดจากแฟ้มทับ — ถ้ายอดไม่ตรงให้ทำใบตรวจนับ' });
+      return;
+    }
+    it.qty = r.want.qty;
+    it.value = r.want.value;
+    it.avgCost = unitCost(it.value, it.qty);
+    DB.docs.stockMove.push({ date, item: it.code, dir: 'in', qty: it.qty, cost: it.value, src, balance: it.qty });
+  });
 }
 
 function upsertEmployee(e) {
@@ -1454,7 +1551,8 @@ function importPackage(pkg, overrides, opts) {
     employees: DB.employees.length };
   let newPartners = 0, newItems = 0, newEmployees = 0;
   (pkg.partners || []).forEach((p) => { newPartners += upsertPartner(p); });
-  (pkg.items || []).forEach((i) => { newItems += upsertItem(i); });
+  const itemRows = (pkg.items || []).map(upsertItem);
+  itemRows.forEach((r) => { newItems += r.created; });
   (pkg.employees || []).forEach((e) => { newEmployees += upsertEmployee(e); });
 
   let opening = null;
@@ -1480,6 +1578,8 @@ function importPackage(pkg, overrides, opts) {
     opening = importOpeningBalances(tb, pkg.cutoff, overrides, { partnerSplit: split, ack: !!opts.ack });
   }
   const docs = importOpenDocs(pkg, opening ? opening.entry.no : null);
+  const warnings = (pkg.warnings || []).slice();
+  stockOpening(itemRows, pkg.cutoff, opening ? opening.entry.no : 'ยกมา ' + pkg.cutoff, warnings);
 
   const asOf = pkg.cutoff;
   const rec = reconciliationChecks(asOf);
@@ -1495,7 +1595,7 @@ function importPackage(pkg, overrides, opts) {
     invoices: docs.inv, bills: docs.bill,
     coverage: pkg.coverage || [],
     opening: opening,
-    warnings: pkg.warnings || [],
+    warnings: warnings,
     checks: rec.checks, allPassed: rec.allPassed,
     before: before,
   };

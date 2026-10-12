@@ -1791,6 +1791,66 @@ const overflowInfo = (page) => page.evaluate(() => {
   ok('ลบถาวรจากถังขยะได้เมื่อพิมพ์ชื่อยืนยันถูก', await page.evaluate((id) => !COMPANY.trash.some((x) => x.id === id)
     && !localStorage.getItem('financii.trash.' + id), pid));
 
+  console.log('\n[28] ระบบสต๊อก — บริษัทเปล่ามีสต๊อกได้จริง');
+  await page.setViewportSize({ width: 1440, height: 950 });
+  await page.evaluate(() => { buildBlank({ name: 'บริษัท ทดสอบสต๊อก จำกัด', year: 2026 }); STATE.period = '2026-06';
+    saveItem({ newCode: 'W25', name: 'สายไฟ 2.5', type: 'stock', uom: 'ม้วน', price: '1200' });
+    saveItem({ newCode: 'CB16', name: 'เบรกเกอร์', type: 'stock', uom: 'ตัว', price: '350' });
+    STATE.screen = 'items'; STATE.sel = null; render(); });
+  ok('หน้าทะเบียนสินค้ามีปุ่มตั้งยอดยกมาและตรวจนับ', (await page.$('#main [data-act="stock:new:opening"]')) !== null
+    && (await page.$('#main [data-act="stock:new:count"]')) !== null);
+  await page.click('#main [data-act="stock:new:opening"]');
+  await page.waitForSelector('#modal.show');
+  await page.fill('[name="sdate"]', '2026-06-01');
+  await page.selectOption('[name="s0_item"]', 'W25'); await page.fill('[name="s0_qty"]', '10'); await page.fill('[name="s0_cost"]', '800');
+  await page.selectOption('[name="s1_item"]', 'CB16'); await page.fill('[name="s1_qty"]', '40'); await page.fill('[name="s1_cost"]', '210.50');
+  await page.click('[data-act="modal:submit"]');
+  await closed(page);
+  const stk1 = await page.evaluate(() => ({ screen: STATE.screen, sel: STATE.sel, w: DB.items.find((i) => i.code === 'W25').qty,
+    ok: reconciliationChecks('2026-06-30').checks.find((c) => c.code === 'INVENTORY_SUBLEDGER').ok,
+    detail: [...document.querySelectorAll('#main .card')].some((c) => c.textContent.indexOf('ตั้งยอดสินค้ายกมา เลขที่') >= 0) }));
+  ok('★ ตั้งยอดสินค้ายกมาจากหน้าจอได้ เปิดใบที่เพิ่งทำให้ดู และทะเบียนตรงกับบัญชี', stk1.screen === 'stockadj' && stk1.w === 10 && stk1.ok && stk1.detail, JSON.stringify(stk1));
+  await page.click('#main [data-act="stock:new:count"]');
+  await page.waitForSelector('#modal.show');
+  await page.fill('[name="sdate"]', '2026-06-30');
+  const cbRow = await page.evaluate(() => [...document.querySelectorAll('#modal input[type=hidden]')].findIndex((e) => e.value === 'CB16'));
+  ok('ใบตรวจนับแสดงสินค้าทุกตัวพร้อมยอดในระบบ', cbRow >= 0 && (await page.$$('#modal table.lines tbody tr')).length === 2);
+  await page.fill('[name="s' + cbRow + '_qty"]', '38');
+  await page.click('[data-act="modal:submit"]');
+  await closed(page);
+  const stk2 = await page.evaluate(() => ({ cb: DB.items.find((i) => i.code === 'CB16').qty, out: DB.docs.stockAdj[0].valueOut,
+    ok: reconciliationChecks('2026-06-30').checks.find((c) => c.code === 'INVENTORY_SUBLEDGER').ok }));
+  ok('★ ตรวจนับแล้วของขาดถูกตัดออกที่ต้นทุนเฉลี่ย ยอดคุมยังตรง', stk2.cb === 38 && stk2.out === 4210000 && stk2.ok, JSON.stringify(stk2));
+  await page.click('#main [data-act="stock:void:' + (await page.evaluate(() => DB.docs.stockAdj[0].no)) + '"]');
+  await page.waitForSelector('#modal.show');
+  await page.fill('[name="vreason"]', 'นับผิด ต้องนับใหม่');
+  await page.click('[data-act="modal:submit"]');
+  await closed(page);
+  ok('ยกเลิกใบตรวจนับจากหน้าจอ คืนสต๊อกให้', await page.evaluate(() => DB.items.find((i) => i.code === 'CB16').qty === 40 && DB.docs.stockAdj[0].status === 'void'));
+  await page.evaluate(() => { STATE.screen = 'stockcard'; STATE.sel = null; render(); });
+  await page.click('#main [data-act="sel:W25"]');
+  await page.waitForTimeout(150);
+  ok('★ สต๊อกการ์ดรายตัวและรายงานสินค้าคงเหลือ ผลต่างกับบัญชีเป็นศูนย์', await page.evaluate(() =>
+    [...document.querySelectorAll('#main .card')].some((c) => c.textContent.indexOf('สต๊อกการ์ด W25') >= 0)
+    && document.querySelector('#main').textContent.indexOf('มูลค่าสินค้ารายตัวตรงกับบัญชีสินค้าคงเหลือพอดี') >= 0));
+  /* หลังนำเข้างบทดลอง ลากไฟล์รายการสินค้าคงเหลือ แยกยอดเป็นรายตัวโดยไม่ลงบัญชีซ้ำ */
+  await page.evaluate(() => { buildBlank({ name: 'บริษัท ย้ายระบบ จำกัด', year: 2026 }); STATE.period = '2026-06';
+    importOpeningBalances([{ code: '11122.01', name: 'กสิกรไทย', debit: M('100000'), credit: 0 }, { code: '11511', name: 'สินค้าสำเร็จรูปคงเหลือ', debit: M('25420'), credit: 0 },
+      { code: '31110', name: 'ทุน', debit: 0, credit: M('125420') }], '2026-06-30', {});
+    STATE.screen = 'items'; render(); });
+  ok('ยกยอดสินค้ามาแต่ยังไม่มีรายตัว หน้าสินค้าเตือนพร้อมทางแก้', await page.evaluate(() => document.querySelector('#main').textContent.indexOf('ยังไม่มีรายตัวสินค้า') >= 0));
+  await page.evaluate(() => { STATE.screen = 'import'; render(); });
+  await page.evaluate((t) => handleFile(new File([t], 'สินค้าคงเหลือ.csv')),
+    'รายงานสินค้าคงเหลือ\nณ วันที่ 30/06/2569\nรหัสสินค้า,ชื่อสินค้า,หน่วย,จำนวนคงเหลือ,ต้นทุนต่อหน่วย,มูลค่าคงเหลือ\nW25,สายไฟ 2.5,ม้วน,10,800.00,"8,000.00"\nCB16,เบรกเกอร์,ตัว,40,210.50,"8,420.00"\nMC1,มอเตอร์,ชุด,2,4500,"9,000.00"\n');
+  await page.waitForTimeout(300);
+  ok('★ ลากไฟล์รายการสินค้าคงเหลือ ระบบรู้ว่าเป็นยอดสินค้ายกมา ไม่ใช่งบทดลอง', await page.evaluate(() => STATE.imp.kind === 'stock')
+    && (await page.$('#main [data-act="stockimp:run"].primary')) !== null);
+  await page.click('#main [data-act="stockimp:run"]');
+  await page.waitForTimeout(300);
+  const stk3 = await page.evaluate(() => ({ items: DB.items.length, entries: DB.entries.length, screen: STATE.screen,
+    ok: reconciliationChecks('2026-06-30').checks.find((c) => c.code === 'INVENTORY_SUBLEDGER').ok }));
+  ok('★ ตั้งยอดจากไฟล์แล้ว สร้างสินค้าให้ แยกยอดรายตัวตรงกับงบทดลอง ไม่ลงบัญชีซ้ำ', stk3.items === 3 && stk3.entries === 1 && stk3.ok && stk3.screen === 'stockadj', JSON.stringify(stk3));
+
   ok('ไม่มีข้อผิดพลาดในคอนโซลเลย', errors.length === 0, errors.slice(0, 3).join(' | '));
 
   await page.setViewportSize({ width: 1440, height: 950 });

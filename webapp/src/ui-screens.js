@@ -87,7 +87,10 @@ const PAGE_INFO = {
   taxcal:       { d:'กำหนดยื่นแบบภาษีทุกฉบับของงวดนี้ ทั้งแบบกระดาษและยื่นผ่านอินเทอร์เน็ต' },
   customers:    { d:'ทะเบียนลูกหนี้ — ชื่อ ที่อยู่ เลขผู้เสียภาษี และสาขา ถูกคัดลอกลงใบกำกับทุกใบ ณ วันที่ออก' },
   vendors:      { d:'ทะเบียนเจ้าหนี้ — ประเภทผู้รับเงินกำหนดว่ายื่น ภ.ง.ด.3 หรือ 53 และประเภทเงินได้ที่ต้องหัก' },
-  items:        { d:'ทะเบียนสินค้า ราคาทุนถัวเฉลี่ยถ่วงน้ำหนัก — สต๊อกเปลี่ยนจากเอกสารซื้อขายเท่านั้น' },
+  items:        { d:'ทะเบียนสินค้า ราคาทุนถัวเฉลี่ยถ่วงน้ำหนัก — สต๊อกเปลี่ยนจากเอกสารซื้อขายและใบปรับปรุงสินค้าเท่านั้น' },
+  stockadj:     { d:'งานสต๊อกที่ไม่มีเอกสารซื้อขาย: ตั้งยอดยกมา ตรวจนับปรับยอด ตัดจำหน่ายของเสีย เบิกไปใช้เอง',
+                  je: [['dr','ผลขาดทุนจากสินค้า / ค่าใช้จ่าย'], ['cr','สินค้าคงเหลือ']], book:'สมุดรายวันทั่วไป' },
+  stockcard:    { d:'บัญชีคุมสินค้ารายตัว ยกมา รับ จ่าย คงเหลือ ทั้งจำนวนและมูลค่า (รายงานสินค้าและวัตถุดิบ ม.87(3)) — มูลค่ารวมต้องเท่าบัญชีสินค้าคงเหลือ' },
   stockmoves:   { d:'รับเข้าและจ่ายออกของสินค้าทุกรายการ พร้อมต้นทุนและยอดคงเหลือ' },
   assets:       { d:'ทะเบียนทรัพย์สินถาวร ราคาทุน ค่าเสื่อมสะสมทางบัญชีและทางภาษี' },
   deprec:       { d:'ค่าเสื่อมราคาประจำงวด คิดทางบัญชีตามอายุใช้งาน และทางภาษีตาม พ.ร.ฎ.145',
@@ -116,6 +119,7 @@ const FLOWS = {
   book:  { l:'สมุดรายวัน', steps:['jgeneral', 'jpurchase', 'jsales', 'jpayment', 'jreceipt'] },
   close: { l:'งานปิดงวด', steps:['bank', 'deprec', 'payroll', 'pp30', 'pnd', 'close'] },
   fs:    { l:'งบการเงิน', steps:['tb', 'bs', 'pl', 'equity', 'cashflow'] },
+  stock: { l:'สต๊อก', steps:['items', 'stockadj', 'stockcard', 'stockmoves'] },
 };
 const FLOW_OF = {
   quotations:'sale', salesorders:'sale', invoices:'sale', billingnotes:'sale', receipts:'sale', creditnotes:'sale', debitnotes:'sale',
@@ -124,6 +128,7 @@ const FLOW_OF = {
   jgeneral:'book', jpurchase:'book', jsales:'book', jpayment:'book', jreceipt:'book',
   bank:'close', deprec:'close', payroll:'close', pp30:'close', pnd:'close', close:'close',
   tb:'fs', bs:'fs', pl:'fs', equity:'fs', cashflow:'fs',
+  items:'stock', stockadj:'stock', stockcard:'stock', stockmoves:'stock',
 };
 
 /** ตัวเลขเล็ก ๆ บนแต่ละขั้น — งานที่ยังค้าง หรือเครื่องหมายว่าทำแล้ว */
@@ -1159,19 +1164,22 @@ function scItems() {
   const low = DB.items.filter((i) => i.type === 'stock' && i.qty <= i.reorder);
   return card({
     title:'ทะเบียนสินค้า', sub: DB.items.length + ' รายการ · ตีราคาด้วยวิธีถัวเฉลี่ยถ่วงน้ำหนัก',
-    actions: btn('item:new', '+ เพิ่มสินค้าหรือบริการ', 'primary'),
+    actions: btn('item:new', '+ เพิ่มสินค้าหรือบริการ', 'primary')
+      + btn('stock:new:opening', 'ตั้งยอดยกมา', periodIsOpen() ? '' : 'disabled')
+      + btn('stock:new:count', 'ตรวจนับ', periodIsOpen() ? '' : 'disabled'),
     filters: searchBox('ค้นหารหัส ชื่อ หรือหมวดสินค้า'),
-    body: (low.length ? '<div class="note warn">ต่ำกว่าจุดสั่งซื้อ ' + low.length + ' รายการ: '
+    body: stockGapNote() + (low.length ? '<div class="note warn">ต่ำกว่าจุดสั่งซื้อ ' + low.length + ' รายการ: '
         + esc(low.map((i) => i.code).join(', ')) + '</div>' : '')
       + tbl({
-        cols:[{t:'รหัส'},{t:'ชื่อสินค้า'},{t:'หมวด'},{t:'หน่วย'},{t:'ประเภท'},{t:'คงเหลือ',a:'r'},{t:'จุดสั่งซื้อ',a:'r'},{t:'ต้นทุนเฉลี่ย',a:'r'},{t:'ราคาขาย',a:'r'},{t:'มูลค่าคงเหลือ',a:'r'}],
+        cols:[{t:'รหัส'},{t:'ชื่อสินค้า'},{t:'หมวด'},{t:'หน่วย'},{t:'ประเภท'},{t:'คงเหลือ',a:'r'},{t:'จุดสั่งซื้อ',a:'r'},{t:'ต้นทุนเฉลี่ย',a:'r'},{t:'ราคาขาย',a:'r'},{t:'มูลค่าคงเหลือ',a:'r'},{t:''}],
         rows: list.map((i) => [{mono:i.code}, i.name, i.category, i.uom,
           i.type === 'stock' ? 'สินค้า' : {dim:'บริการ'},
           i.type === 'stock' ? {n:M(String(i.qty)), cls: i.qty <= i.reorder ? 'bad' : ''} : {dim:'—'},
           i.type === 'stock' ? {n:M(String(i.reorder))} : {dim:'—'},
-          {n:i.avgCost}, {n:i.price}, {n:i.value}]),
+          {n:i.avgCost}, {n:i.price}, {n:i.value},
+          i.type === 'stock' ? {html: btn('stock:card:' + i.code, 'สต๊อกการ์ด')} : '']),
         rowAttr: (r) => 'class="row-link" data-act="item:edit:' + r[0].mono + '"',
-        foot: ['','','','','','','','','รวมมูลค่าสินค้าคงเหลือ', {n:value}],
+        foot: ['','','','','','','','','รวมมูลค่าสินค้าคงเหลือ', {n:value}, ''],
         empty:'ยังไม่มีสินค้าในทะเบียน',
         emptyAction: btn('item:new', 'เพิ่มสินค้ารายการแรก', 'primary'),
       })
@@ -1179,8 +1187,8 @@ function scItems() {
       + '<div><span>ยอดบัญชีสินค้าคงเหลือในงบทดลอง</span><b>' + fmt(glInv) + '</b></div>'
       + '<div class="gt"><span>ผลต่าง</span><b>' + fmt(value - glInv) + '</b></div></div>',
     foot: (value === glInv ? 'ทะเบียนสินค้าตรงกับบัญชีคุมพอดี'
-      : 'ผลต่างเกิดจากยอดยกมาต้นงวดที่ยังไม่ได้แยกรายตัวสินค้า — ตรวจสอบก่อนปิดปี')
-      + ' · กดที่แถวเพื่อแก้ไข จำนวนคงเหลือแก้ตรงนี้ไม่ได้ ต้องมาจากเอกสารซื้อขายเท่านั้น',
+      : 'ยังไม่ตรงกัน — ตั้งยอดยกมาส่วนที่ยังไม่แยกรายตัว ระบบไม่ให้ปิดงวดจนกว่าจะตรง')
+      + ' · กดที่แถวเพื่อแก้ไข · จำนวนคงเหลือเปลี่ยนด้วยเอกสารซื้อขาย หรือใบปรับปรุงสินค้า (ยอดยกมา ตรวจนับ ตัดจำหน่าย เบิกใช้)',
   });
 }
 
@@ -2022,7 +2030,7 @@ const SCREENS = {
   journals: scJournals, ledger: scLedger, tb: scTrialBalance, coa: scCoa,
   vatout: () => vatRegister('vat_output'), vatin: () => vatRegister('vat_input'),
   pp30: scPp30, pnd: scPnd, whtcert: scWhtCert, taxcal: scTaxCal,
-  items: scItems, stockmoves: scStockMoves,
+  items: scItems, stockmoves: scStockMoves, stockadj: scStockAdj, stockcard: scStockCard,
   assets: scAssets, deprec: scDeprec,
   payroll: scPayroll, employees: scEmployees,
   projects: scProjects, budget: scBudget,
@@ -2075,6 +2083,7 @@ function scImport() {
       + '<div class="dim" style="margin-top:14px">'
       + 'งบทดลอง — FlowAccount: เมนู รายงาน → หมวด บัญชี → งบทดลอง → เลือกช่วงเวลา → ดาวน์โหลด Excel<br>'
       + 'ผังบัญชี — เมนู บริหารบัญชี → ผังบัญชี → ปุ่ม เพิ่มเติม → ดาวน์โหลด Excel<br>'
+      + 'สินค้าคงเหลือ (ตั้งยอดสินค้ายกมา) — ไฟล์ที่มี รหัส ชื่อสินค้า จำนวนคงเหลือ และต้นทุนต่อหน่วยหรือมูลค่า<br>'
       + 'ไม่ต้องแก้ไฟล์ก่อน ลากไฟล์ที่ดาวน์โหลดมาได้เลย ระบบจะถามเองถ้าอ่านไม่ออก</div>'
       + '</div></div>'
       + (IMP.error ? '<div class="note warn">' + esc(IMP.error) + '</div>' : ''),
@@ -2118,6 +2127,7 @@ function scImport() {
   if (!IMP.rows) return step1 + health + history + blank;
 
   /* ---- ไฟล์ไม่ใช่งบทดลอง บอกให้ชัดว่าไฟล์ไหนที่ต้องใช้ ---- */
+  if (IMP.kind === 'stock') return step1 + importStockCard(IMP) + history + blank;
   if (IMP.kind === 'ledger' || IMP.kind === 'chart') {
     const isLedger = IMP.kind === 'ledger';
     return step1 + card({

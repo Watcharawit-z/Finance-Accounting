@@ -944,7 +944,7 @@ function blankState() {
       creditNote: [], debitNote: [],
       purchaseOrder: [], goodsReceipt: [], bill: [], payment: [],
       expense: [], whtCert: [], paymentBatch: [], customerRefund: [],
-      stockMove: [], payRun: [], depreciation: [], filing: [],
+      stockMove: [], stockAdj: [], payRun: [], depreciation: [], filing: [],
     },
     seq: {},             // {'invoice|2026-07': 12}
     budget: [],          // {account,period,amount}
@@ -1099,7 +1099,7 @@ function periodFor(date) {
    =================================================================== */
 const SEQ_PREFIX = {
   invoice:'INV', receipt:'RC', creditNote:'CN', debitNote:'DN', quotation:'QT', salesOrder:'SO',
-  purchaseOrder:'PO', bill:'AP', payment:'PV', whtCert:'WT', stockCount:'SC',
+  purchaseOrder:'PO', bill:'AP', payment:'PV', whtCert:'WT', stockCount:'SC', stockAdj:'ST',
   billingNote:'BN', goodsReceipt:'GR', expense:'EX', paymentBatch:'PB', customerRefund:'RF',
   je_sales:'SA', je_purchase:'PU', je_receipt:'RV', je_payment:'PY',
   je_general:'JV', je_adjustment:'JV', je_payroll:'PR', je_asset:'AS',
@@ -1304,6 +1304,7 @@ const ENTRY_FROM = {
   depreciation:['ค่าเสื่อมราคาประจำงวด', 'ไปที่หน้าค่าเสื่อมราคาแล้วกดยกเลิกงวด ระบบจะคืนค่าเสื่อมสะสมของทรัพย์สินให้ด้วย'],
   filing:['การยื่นแบบภาษี', 'แบบที่ยื่นแล้วต้องยื่นเพิ่มเติมกับกรมสรรพากร แล้วบันทึกปรับปรุงแทน'],
   import:['การนำเข้าข้อมูล', 'ยกเลิกที่หน้านำเข้าข้อมูลจากระบบเดิม'],
+  stockAdj:['ใบปรับปรุงสินค้า', 'เปิดใบปรับปรุงสินค้าที่หน้าสินค้า → ยอดยกมา ตรวจนับ ตัดจำหน่าย แล้วกดยกเลิก'],
   reversal:['การกลับรายการ', 'กลับรายการซ้อนไม่ได้ ให้บันทึกใบสำคัญใหม่แทน'],
 };
 
@@ -1672,6 +1673,17 @@ function aging(kind, asOf) {
   return { rows, totals: { notDue:sum('notDue'), b30:sum('b30'), b60:sum('b60'), b90:sum('b90'), over:sum('over'), total:sum('total') } };
 }
 
+/* ---------- มูลค่าสินค้าคงเหลือตามทะเบียน ณ วันที่ ----------
+   ย้อนจากมูลค่าปัจจุบันของสินค้าแต่ละตัว ด้วยรายการรับ/จ่ายที่เกิดหลังวันนั้น
+   ใช้ได้แม้สินค้าที่ยกมารุ่นก่อนไม่มีรายการรับเข้า (มูลค่าตั้งไว้ตรง ๆ) */
+function stockValueAsOf(asOf) {
+  let v = DB.items.reduce((s, i) => s + (i.type === 'stock' ? (i.value || 0) : 0), 0);
+  DB.docs.stockMove.forEach(function (m) {
+    if (m.date > asOf) v -= (m.dir === 'in' ? 1 : -1) * m.cost;
+  });
+  return v;
+}
+
 /* ---------- ตรวจยอดคุม ---------- */
 function reconciliationChecks(asOf) {
   const checks = [];
@@ -1700,6 +1712,15 @@ function reconciliationChecks(asOf) {
     .reduce((s, g) => s + g.total, 0);
   checks.push({ code:'GRNI_SUBLEDGER', label:'ใบรับสินค้าที่รอตั้งหนี้ = บัญชีพักรับสินค้า',
     control:grniControl, sub:grniSub, ok:grniControl === grniSub });
+
+  /* สินค้ารายตัวรวมกันต้องเท่าบัญชีสินค้าคงเหลือ — ไม่งั้นต้นทุนขายและกำไรผิดตั้งแต่ใบกำกับใบแรก */
+  const invControl = balBySub(['inventory'], asOf);
+  const invSub = stockValueAsOf(asOf);
+  checks.push({ code:'INVENTORY_SUBLEDGER', label:'มูลค่าสินค้ารายตัวรวม = บัญชีสินค้าคงเหลือ',
+    control:invControl, sub:invSub, ok:invControl === invSub,
+    why: (invControl !== invSub && invSub === 0 && invControl !== 0)
+      ? 'ยกยอดสินค้าคงเหลือรวมมาแล้ว แต่ยังไม่ได้ตั้งยอดสินค้ายกมาเป็นรายตัว'
+      : (invControl > invSub ? 'ยอดในบัญชีสูงกว่าสินค้ารายตัว ' + fmt(invControl - invSub) + ' บาท — ตั้งยอดยกมาส่วนที่เหลือ หรือหารายการที่ลงบัญชีสินค้าโดยไม่ผ่านเอกสาร' : null) });
 
   const glDiff = balanceOf(() => true, asOf);
   checks.push({ code:'GL_BALANCED', label:'เดบิตรวม = เครดิตรวม ทั้งฐานข้อมูล', control:glDiff, sub:0, ok:glDiff === 0 });
@@ -3485,6 +3506,7 @@ const CONTROL_SUBS = {
   output_vat: 'ภาษีขายต้องมาจากใบกำกับภาษี ใบลดหนี้ หรือใบเพิ่มหนี้',
   input_vat: 'ภาษีซื้อต้องมาจากการตั้งหนี้หรือบันทึกค่าใช้จ่ายที่มีใบกำกับภาษี',
   grni: 'พักรับสินค้าต้องมาจากใบรับสินค้า และล้างออกตอนตั้งหนี้จากใบรับสินค้า',
+  inventory: 'สินค้าคงเหลือต้องมาจากเอกสารซื้อขายหรือใบปรับปรุงสินค้า (ยอดยกมา ตรวจนับ ตัดจำหน่าย เบิกใช้) ทะเบียนสินค้ารายตัวจะได้ตรงกับบัญชี',
   wht_payable_pnd1: 'ภาษีหัก ณ ที่จ่ายจากเงินเดือนมาจากการทำเงินเดือน',
   wht_payable_pnd3: 'ภาษีหัก ณ ที่จ่ายต้องมาจากค่าใช้จ่ายหรือการจ่ายชำระที่ออก 50 ทวิ',
   wht_payable_pnd53: 'ภาษีหัก ณ ที่จ่ายต้องมาจากค่าใช้จ่ายหรือการจ่ายชำระที่ออก 50 ทวิ',
@@ -3977,7 +3999,7 @@ function assertStockAvailable(lines) {
     if (need[code] > it.qty) {
       throw new DomainError('INSUFFICIENT_STOCK',
         it.name + ' (' + code + ') มีในคลัง ' + it.qty + ' ' + (it.uom || '') + ' แต่จะขาย ' + need[code],
-        'บันทึกรับสินค้าเข้าคลังก่อน (ใบรับสินค้าหรือตั้งหนี้ผู้ขาย) แล้วจึงออกใบกำกับ');
+        'รับสินค้าเข้าคลังก่อน (ใบรับสินค้าหรือตั้งหนี้ผู้ขาย) — ของที่มีอยู่แล้วก่อนเริ่มใช้ระบบ ตั้งยอดที่ สินค้า → ยอดยกมา · ตรวจนับ');
     }
   });
 }
@@ -4069,6 +4091,14 @@ function billLineAccount(l, i) {
       throw new DomainError('BILL_ACCOUNT_INVALID', 'บรรทัดที่ ' + (i + 1) + ' บัญชี ' + l.acc + ' ใช้บันทึกรายการซื้อไม่ได้',
         'เลือกบัญชีค่าใช้จ่าย สินค้าคงเหลือ ทรัพย์สิน หรือค่าใช้จ่ายจ่ายล่วงหน้า');
     }
+    /* ลงบัญชีสินค้าคงเหลือโดยไม่ระบุสินค้า ยอดบัญชีจะขึ้นแต่ไม่มีของในทะเบียน ขายไม่ได้และยอดคุมไม่มีวันตรง */
+    if (acc(l.acc).subType === 'inventory') {
+      const it = l.itemCode ? DB.items.find((x) => x.code === l.itemCode) : null;
+      if (!it || it.type !== 'stock') {
+        throw new DomainError('BILL_INVENTORY_NEEDS_ITEM', 'บรรทัดที่ ' + (i + 1) + ' ลงบัญชีสินค้าคงเหลือ ต้องเลือกสินค้าที่มีสต๊อกด้วย',
+          'เลือกสินค้าในบรรทัดนั้น ระบบจะรับเข้าคลังให้ หรือเลือกบัญชีค่าใช้จ่ายแทน');
+      }
+    }
     if (l.itemCode && acc(l.acc).subType !== 'inventory') {
       const it = DB.items.find((x) => x.code === l.itemCode);
       if (it && it.type === 'stock') {
@@ -4127,6 +4157,324 @@ payPaymentBatch = transactional(payPaymentBatch);
 postJournalVoucher = transactional(postJournalVoucher);
 openNextFiscalYear = transactional(openNextFiscalYear);
 buildSeed = bulkTransaction(buildSeed);
+
+
+/* ===== stock.js ===== */
+/* ===================================================================
+   ระบบสต๊อก
+   ใบปรับปรุงสินค้า (ST) ใบเดียวใช้ได้สี่งาน — งานที่เอกสารซื้อขายทำให้ไม่ได้
+   1. ยอดยกมา    ของที่มีอยู่แล้ววันเริ่มใช้ระบบ (ระบบเดิมหรือนับจริง)
+   2. ตรวจนับ     นับของจริงแล้วปรับยอดในระบบให้ตรง ขาด = ขาดทุน เกิน = รายได้อื่น
+   3. ตัดจำหน่าย  ของชำรุด สูญหาย หมดอายุ
+   4. เบิกใช้      เอาสินค้าไปใช้เองในกิจการ ลงเป็นค่าใช้จ่ายตามบัญชีที่เลือก
+   ตีราคาด้วยต้นทุนเฉลี่ยถ่วงน้ำหนักของสินค้าตัวนั้น ณ ตอนบันทึก (ยอดยกมาใช้ต้นทุนที่กรอก)
+   ทะเบียนสินค้า (มูลค่ารายตัว) ต้องเท่ากับบัญชีสินค้าคงเหลือเสมอ — ตรวจในยอดคุมก่อนปิดงวด
+   =================================================================== */
+const STOCK_ADJ = {
+  opening:  { th: 'ยอดยกมา',    verb: 'ตั้งยอดสินค้ายกมา' },
+  count:    { th: 'ตรวจนับ',     verb: 'ปรับยอดตามที่ตรวจนับ' },
+  writeoff: { th: 'ตัดจำหน่าย',  verb: 'ตัดจำหน่ายสินค้า' },
+  issue:    { th: 'เบิกใช้',      verb: 'เบิกสินค้าไปใช้' },
+};
+
+function stockItem(code) {
+  const it = DB.items.find((x) => x.code === code);
+  if (!it) throw new DomainError('ITEM_NOT_FOUND', 'ไม่พบสินค้ารหัส ' + code);
+  if (it.type !== 'stock') {
+    throw new DomainError('ITEM_NOT_STOCK', it.name + ' (' + it.code + ') เป็นบริการ ไม่มีสต๊อก',
+      'เปลี่ยนประเภทเป็นสินค้าที่หน้าทะเบียนสินค้าก่อน');
+  }
+  return it;
+}
+/** วันที่ของความเคลื่อนไหวล่าสุดของสินค้าตัวนี้ */
+function lastMoveDate(code) {
+  return DB.docs.stockMove.reduce((d, m) => (m.item === code && m.date > d ? m.date : d), '');
+}
+function moveIn(it, qty, cost, date, src) {
+  it.qty = roundQty(it.qty + qty);
+  it.value += cost;
+  it.avgCost = unitCost(it.value, it.qty);
+  DB.docs.stockMove.push({ date, item: it.code, dir: 'in', qty, cost, src, balance: it.qty });
+}
+/** จ่ายออกที่ต้นทุนเฉลี่ย — ชิ้นสุดท้ายรับมูลค่าที่เหลือทั้งหมด ของหมดแล้วมูลค่าต้องเป็นศูนย์ */
+function moveOut(it, qty, date, src) {
+  const c = qty === it.qty ? it.value : round2(mulQty(it.avgCost, qty));
+  it.qty = roundQty(it.qty - qty);
+  it.value -= c;
+  DB.docs.stockMove.push({ date, item: it.code, dir: 'out', qty, cost: c, src, balance: it.qty });
+  return c;
+}
+
+/** ยอดสินค้าคงเหลือในบัญชีที่ยังไม่มีรายตัวสินค้ารองรับ — มักมาจากงบทดลองที่นำเข้า */
+function stockUnallocated(asOf) {
+  return balBySub(['inventory'], asOf) - stockValueAsOf(asOf);
+}
+
+/* ---------- ตรวจข้อมูลก่อนแตะอะไรทั้งหมด ---------- */
+function stockAdjLines(kind, input) {
+  const seen = {};
+  const lines = (input.lines || []).filter((l) => l && String(l.itemCode || '').trim());
+  if (!lines.length) throw new DomainError('STOCK_NO_LINES', 'ต้องมีสินค้าอย่างน้อย 1 รายการ');
+  return lines.map(function (l, i) {
+    const row = 'บรรทัดที่ ' + (i + 1) + ' ';
+    const code = String(l.itemCode).trim();
+    if (seen[code]) throw new DomainError('STOCK_DUP_ITEM', row + 'สินค้า ' + code + ' ซ้ำกับบรรทัดก่อนหน้า', 'รวมจำนวนไว้บรรทัดเดียว');
+    seen[code] = true;
+    const it = stockItem(code);
+    const q = Number(l.qty);
+    if (!isFinite(q) || q < 0 || (kind !== 'count' && q <= 0)) {
+      throw new DomainError('STOCK_QTY_INVALID', row + it.name + ' จำนวนต้อง' + (kind === 'count' ? 'ไม่ติดลบ' : 'มากกว่าศูนย์'));
+    }
+    const qty = roundQty(q);
+    if (kind !== 'opening') {
+      /* ตรวจนับ ตัดจำหน่าย เบิกใช้ คิดจากยอดคงเหลือปัจจุบัน — ลงย้อนหลังก่อนรายการล่าสุดไม่ได้
+         ไม่งั้นยอดคงเหลือที่ใช้คำนวณไม่ใช่ยอด ณ วันนั้น */
+      const last = lastMoveDate(it.code);
+      if (last && input.date < last) {
+        throw new DomainError('STOCK_BACKDATED', row + it.name + ' มีรายการล่าสุดวันที่ ' + thDate(last)
+          + ' ' + STOCK_ADJ[kind].th + 'ย้อนหลังก่อนวันนั้นไม่ได้', 'ใช้วันที่ ' + thDate(last) + ' หรือหลังจากนั้น');
+      }
+    }
+    if ((kind === 'writeoff' || kind === 'issue') && qty > it.qty) {
+      throw new DomainError('INSUFFICIENT_STOCK', row + it.name + ' มีในคลัง ' + it.qty + ' ' + (it.uom || '')
+        + ' แต่จะ' + STOCK_ADJ[kind].th + ' ' + qty);
+    }
+    let cost = null;
+    if (kind === 'opening') {
+      const value = l.value !== undefined && l.value !== null && String(l.value).trim() !== '' ? M(l.value) : null;
+      const unit = l.unitCost !== undefined && String(l.unitCost).trim() !== '' ? M(l.unitCost) : null;
+      if (value === null && unit === null) {
+        throw new DomainError('STOCK_COST_REQUIRED', row + it.name + ' ต้องกรอกต้นทุนต่อหน่วยหรือมูลค่ารวม',
+          'ใช้ต้นทุนเฉลี่ยจากระบบเดิม หรือราคาซื้อล่าสุด');
+      }
+      cost = value !== null ? round2(value) : round2(mulQty(unit, qty));
+      if (cost < 0) throw new DomainError('STOCK_COST_INVALID', row + it.name + ' มูลค่าติดลบไม่ได้');
+    }
+    return { it, qty, cost, unitCost: l.unitCost };
+  });
+}
+
+/**
+ * บันทึกใบปรับปรุงสินค้า
+ * input: { kind: opening|count|writeoff|issue, date, reason, account (เบิกใช้), lines:[{itemCode, qty, unitCost?, value?}] }
+ *   ตรวจนับ: qty = จำนวนที่นับได้จริง (0 ได้) ระบบคิดผลต่างจากยอดในระบบเอง
+ */
+function saveStockAdj(input) {
+  const kind = input.kind;
+  if (!STOCK_ADJ[kind]) throw new DomainError('STOCK_KIND_UNKNOWN', 'ไม่รู้จักงานสต๊อกชนิด ' + kind);
+  const date = String(input.date || '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new DomainError('DATE_REQUIRED', 'ต้องระบุวันที่');
+  const p = periodFor(date);
+  if (p.status !== 'open') {
+    throw new DomainError('PERIOD_CLOSED', 'งวดบัญชี ' + thPeriod(p.code) + ' ปิดแล้ว ลงรายการไม่ได้');
+  }
+  const reason = String(input.reason || '').trim();
+  if ((kind === 'writeoff' || kind === 'issue') && reason.length < 3) {
+    throw new DomainError('REASON_REQUIRED', kind === 'writeoff'
+      ? 'ต้องระบุเหตุผลที่ตัดจำหน่าย (ชำรุด สูญหาย หมดอายุ ฯลฯ)' : 'ต้องระบุว่าเบิกไปใช้ทำอะไร',
+      kind === 'writeoff' ? 'จะนำไปหักเป็นรายจ่ายทางภาษีได้ ต้องมีหลักฐานการทำลายหรือแจ้งสรรพากรตามระเบียบ' : 'ผู้สอบบัญชีจะเห็นข้อความนี้');
+  }
+  let expAcc = null;
+  if (kind === 'issue') {
+    expAcc = input.account || defaultAccountFor('admin_expense');
+    if (!expenseAccounts().some((a) => a.code === expAcc)) {
+      throw new DomainError('ISSUE_ACCOUNT_INVALID', 'บัญชี ' + expAcc + ' ใช้รับรู้การเบิกสินค้าไม่ได้', 'เลือกบัญชีค่าใช้จ่าย');
+    }
+  }
+  const rows = stockAdjLines(kind, input);
+
+  let mode = null;
+  if (kind === 'opening') {
+    const total = rows.reduce((s, r) => s + r.cost, 0);
+    const free = stockUnallocated(date);
+    /* ยอดสินค้าที่ยกมากับงบทดลองอยู่ในบัญชีแล้ว ใบนี้แค่แยกเป็นรายตัว ห้ามลงบัญชีซ้ำ
+       ไม่มียอดค้างแยก = เริ่มจากศูนย์จริง ลงบัญชีคู่กับบัญชีปรับปรุงยอดยกมา */
+    if (free > 0) {
+      if (total > free) {
+        throw new DomainError('OPENING_STOCK_EXCEEDS',
+          'มูลค่าสินค้ายกมา ' + fmt(total) + ' บาท มากกว่ายอดสินค้าคงเหลือในบัญชีที่ยังไม่แยกรายตัว ' + fmt(free) + ' บาท',
+          'ยอดรวมรายตัวต้องเท่ากับยอดสินค้าคงเหลือในงบทดลองที่นำเข้า — ตรวจจำนวนและต้นทุนอีกครั้ง');
+      }
+      mode = 'allocate';
+    } else mode = 'post';
+  }
+
+  const no = nextNo('stockAdj', date);
+  const lines = [];
+  let outCost = 0, inCost = 0, shortage = 0, surplus = 0;
+  rows.forEach(function (r) {
+    const it = r.it;
+    const book = it.qty;
+    const line = { itemCode: it.code, name: it.name, uom: it.uom, bookQty: book, qty: r.qty, diff: 0, cost: 0 };
+    if (kind === 'opening') {
+      moveIn(it, r.qty, r.cost, date, no);
+      line.diff = r.qty; line.cost = r.cost; inCost += r.cost;
+    } else if (kind === 'count') {
+      const diff = roundQty(r.qty - book);
+      line.diff = diff;
+      if (diff < 0) {
+        line.cost = -moveOut(it, -diff, date, no);
+        shortage -= line.cost;
+      } else if (diff > 0) {
+        const unit = it.avgCost || (r.unitCost !== undefined && String(r.unitCost).trim() !== '' ? M(r.unitCost) : 0);
+        if (!unit) {
+          throw new DomainError('STOCK_COST_REQUIRED', it.name + ' นับได้เกินแต่ยังไม่มีต้นทุนเฉลี่ย ต้องกรอกต้นทุนต่อหน่วย');
+        }
+        line.cost = round2(mulQty(unit, diff));
+        moveIn(it, diff, line.cost, date, no);
+        surplus += line.cost;
+      }
+    } else {
+      line.diff = -r.qty;
+      line.cost = -moveOut(it, r.qty, date, no);
+      outCost -= line.cost;
+    }
+    lines.push(line);
+  });
+
+  /* ลงบัญชี — ยอดยกมาแบบแยกรายตัวไม่ลง (อยู่ในบัญชีแล้ว) ตรวจนับที่ตรงพอดีก็ไม่มีอะไรให้ลง */
+  const inv = accBySub('inventory');
+  let jl = [];
+  if (kind === 'opening' && mode === 'post' && inCost > 0) {
+    jl = [{ acc: inv, dr: inCost }, { acc: accBySub('opening_balance'), cr: inCost }];
+  } else if (kind === 'count') {
+    const net = surplus - shortage;
+    if (shortage) jl.push({ acc: accBySub('inventory_writeoff'), dr: shortage, memo: 'สินค้าขาดจากการตรวจนับ' });
+    if (surplus) jl.push({ acc: accBySub('other_income'), cr: surplus, memo: 'สินค้าเกินจากการตรวจนับ' });
+    if (net > 0) jl.push({ acc: inv, dr: net });
+    if (net < 0) jl.push({ acc: inv, cr: -net });
+  } else if (kind === 'writeoff' && outCost) {
+    jl = [{ acc: accBySub('inventory_writeoff'), dr: outCost }, { acc: inv, cr: outCost }];
+  } else if (kind === 'issue' && outCost) {
+    jl = [{ acc: expAcc, dr: outCost }, { acc: inv, cr: outCost }];
+  }
+  const je = jl.length >= 2 ? post({
+    type: kind === 'opening' ? 'opening' : 'inventory', date,
+    desc: STOCK_ADJ[kind].verb + ' ' + no + (reason ? ' — ' + reason : ''),
+    src: 'stockAdj', srcId: no, lines: jl,
+  }) : null;
+
+  const doc = {
+    no, date, kind, reason, account: expAcc, mode, lines,
+    valueIn: inCost + surplus, valueOut: outCost + shortage,
+    entryNo: je ? je.no : null, status: 'posted',
+  };
+  DB.docs.stockAdj.unshift(doc);
+  audit('stockAdj', no, 'create', null, { kind, lines: lines.length, in: fmt(doc.valueIn), out: fmt(doc.valueOut), mode });
+  return doc;
+}
+
+/** ยกเลิกใบปรับปรุงสินค้า — กลับรายการบัญชีและคืนสต๊อกตามที่ใบนี้ทำไว้ */
+function voidStockAdj(no, reason) {
+  if (!reason || String(reason).trim().length < 5) {
+    throw new DomainError('REASON_REQUIRED', 'การยกเลิกเอกสารต้องระบุเหตุผล อย่างน้อย 5 ตัวอักษร');
+  }
+  const why = String(reason).trim();
+  const d = DB.docs.stockAdj.find((x) => x.no === no);
+  if (!d) throw new DomainError('DOC_NOT_FOUND', 'ไม่พบใบปรับปรุงสินค้า ' + no);
+  if (d.status === 'void') throw new DomainError('ALREADY_VOID', 'ใบปรับปรุงสินค้า ' + no + ' ยกเลิกไปแล้ว');
+  const p = periodFor(d.date);
+  if (p.status !== 'open') {
+    throw new DomainError('PERIOD_CLOSED', 'งวด ' + thPeriod(p.code) + ' ปิดแล้ว ยกเลิกใบนี้ไม่ได้',
+      'ทำใบตรวจนับหรือตัดจำหน่ายใหม่ในงวดปัจจุบันแทน');
+  }
+  /* ของที่รับเข้าด้วยใบนี้ถูกขายหรือใช้ไปแล้ว ดึงกลับออกไม่ได้ */
+  DB.docs.stockMove.filter((m) => m.src === no && m.dir === 'in').forEach(function (m) {
+    const it = DB.items.find((x) => x.code === m.item);
+    if (it && it.qty < m.qty) {
+      throw new DomainError('VOID_HAS_DEPENDENTS', 'ยกเลิกไม่ได้ ' + it.name + ' เหลือในคลัง ' + it.qty + ' ' + it.uom
+        + ' น้อยกว่าที่ใบนี้รับเข้า ' + m.qty, 'ของถูกขายหรือเบิกไปแล้ว — ทำใบตรวจนับใหม่แทน');
+    }
+  });
+  if (d.entryNo) {
+    const e = DB.entries.find((x) => x.no === d.entryNo);
+    if (e && e.status === 'posted') reverse(d.entryNo, 'ยกเลิกใบปรับปรุงสินค้า ' + no + ' — ' + why, d.date, { fromSource: true });
+  }
+  stockBack(no, 'in');
+  stockBack(no, 'out');
+  d.status = 'void';
+  d.voidReason = why;
+  d.voidedAt = new Date().toISOString();
+  audit('stockAdj', no, 'void', { status: 'posted' }, { status: 'void' }, why);
+  return d;
+}
+
+/* ---------- รายงานคุมสินค้า ---------- */
+/** เอกสารต้นทางของความเคลื่อนไหว — ใช้บอกชนิดเอกสารในสต๊อกการ์ด */
+function stockSrcLabel(src) {
+  const s = String(src || '');
+  const voided = / \(ยกเลิก\)$/.test(s);
+  const no = s.replace(/ \(ยกเลิก\)$/, '');
+  const kinds = [['invoice', 'ขาย'], ['creditNote', 'รับคืนจากลูกค้า'], ['bill', 'ซื้อ'], ['goodsReceipt', 'รับสินค้า']];
+  let label = null;
+  kinds.forEach(function (k) { if (!label && (DB.docs[k[0]] || []).some((d) => d.no === no)) label = k[1]; });
+  if (!label) {
+    const a = DB.docs.stockAdj.find((d) => d.no === no);
+    if (a) label = STOCK_ADJ[a.kind].th;
+  }
+  if (!label && DB.entries.some((e) => e.no === no && e.src === 'import')) label = 'ยอดยกมาจากระบบเดิม';
+  return (voided ? 'ยกเลิก' : '') + (label || 'อื่น ๆ');
+}
+
+/** สต๊อกการ์ด (รายงานสินค้าและวัตถุดิบ) ของสินค้าหนึ่งตัวในช่วงวันที่ — ยอดยกมา รับ จ่าย คงเหลือทีละรายการ */
+function stockCard(code, from, to) {
+  const it = stockItem(code);
+  const mine = DB.docs.stockMove.map((m, i) => ({ m, i })).filter((x) => x.m.item === code);
+  /* ย้อนจากยอดปัจจุบัน — ใช้ได้แม้สินค้าที่ยกมารุ่นก่อนไม่มีรายการรับเข้า */
+  let qty = it.qty, value = it.value;
+  mine.forEach(function (x) {
+    if (x.m.date < from) return;
+    const s = x.m.dir === 'in' ? 1 : -1;
+    qty = roundQty(qty - s * x.m.qty); value -= s * x.m.cost;
+  });
+  const opening = { qty, value };
+  const rows = mine.filter((x) => x.m.date >= from && x.m.date <= to)
+    .sort((a, b) => (a.m.date < b.m.date ? -1 : a.m.date > b.m.date ? 1 : a.i - b.i))
+    .map(function (x) {
+      const m = x.m, s = m.dir === 'in' ? 1 : -1;
+      qty = roundQty(qty + s * m.qty); value += s * m.cost;
+      return { date: m.date, src: m.src, kind: stockSrcLabel(m.src), dir: m.dir,
+        inQty: m.dir === 'in' ? m.qty : 0, inValue: m.dir === 'in' ? m.cost : 0,
+        outQty: m.dir === 'out' ? m.qty : 0, outValue: m.dir === 'out' ? m.cost : 0,
+        unitCost: m.qty ? unitCost(m.cost, m.qty) : 0, balQty: qty, balValue: value };
+    });
+  const sum = (k) => rows.reduce((t, r) => t + r[k], 0);
+  return { item: it, from, to, opening, rows, closing: { qty, value },
+    inQty: roundQty(sum('inQty')), inValue: sum('inValue'), outQty: roundQty(sum('outQty')), outValue: sum('outValue') };
+}
+
+/** สรุปสินค้าทุกตัวในช่วงวันที่ — ยกมา รับ จ่าย คงเหลือ (จำนวนและมูลค่า) */
+function stockSummary(from, to) {
+  const rows = DB.items.filter((i) => i.type === 'stock').map(function (i) {
+    const c = stockCard(i.code, from, to);
+    return { code: i.code, name: i.name, uom: i.uom, opening: c.opening, inQty: c.inQty, inValue: c.inValue,
+      outQty: c.outQty, outValue: c.outValue, closing: c.closing, moves: c.rows.length };
+  });
+  const sum = (f) => rows.reduce((t, r) => t + f(r), 0);
+  return { from, to, rows,
+    totals: { opening: sum((r) => r.opening.value), inValue: sum((r) => r.inValue), outValue: sum((r) => r.outValue),
+      closing: sum((r) => r.closing.value) },
+    gl: balBySub(['inventory'], to) };
+}
+
+/** ตั้งยอดสินค้ายกมาจากไฟล์ — สินค้าที่ยังไม่มีในทะเบียนสร้างให้ แล้วออกใบยอดยกมาใบเดียว (ทั้งหมดหรือไม่มีเลย) */
+function importOpeningStock(rows, date, fileName) {
+  let created = 0;
+  const lines = (rows || []).map(function (r) {
+    let it = r.code ? DB.items.find((x) => x.code === r.code) : DB.items.find((x) => norm(x.name) === norm(r.name));
+    if (!it) {
+      it = saveItem({ newCode: r.code || '', name: r.name, type: 'stock', uom: r.uom || 'หน่วย', category: 'ยกมาจากระบบเดิม', price: '0' }).item;
+      created++;
+    }
+    return { itemCode: it.code, qty: r.qty, value: r.value };
+  });
+  const doc = saveStockAdj({ kind: 'opening', date, reason: 'ยอดสินค้ายกมาจากไฟล์' + (fileName ? ' ' + fileName : ''), lines });
+  return { doc, created };
+}
+
+saveStockAdj = transactional(saveStockAdj);
+importOpeningStock = transactional(importOpeningStock);
+voidStockAdj = transactional(voidStockAdj);
 
 
 /* ===== seed.js ===== */
@@ -5362,6 +5710,8 @@ function navGroups() {
     ]},
     { g: 'สินค้า', icon: 'box', items: [
       ['items', 'ทะเบียนสินค้า', null],
+      ['stockadj', 'ยอดยกมา · ตรวจนับ · ตัดจำหน่าย', null],
+      ['stockcard', 'สต๊อกการ์ด · สินค้าคงเหลือ', null],
       ['stockmoves', 'ความเคลื่อนไหวสต๊อก', null],
     ]},
     { g: 'สินทรัพย์', icon: 'asset', items: [
@@ -6477,6 +6827,74 @@ function inferNameColumn(rows, map, headerRow) {
   }
 }
 
+/* ---------- ไฟล์รายการสินค้าคงเหลือ (ยอดสินค้ายกมา) ----------
+   รหัส · ชื่อ · หน่วย · จำนวนคงเหลือ · ต้นทุนต่อหน่วย หรือมูลค่า — ไม่มีเดบิต/เครดิต
+   FlowAccount: เมนูสินค้า → รายงานสินค้าคงเหลือ → ดาวน์โหลด Excel */
+const STOCK_HINTS = {
+  code:  ['รหัสสินค้า', 'รหัส', 'sku', 'item code', 'product code', 'code'],
+  name:  ['ชื่อสินค้า', 'ชื่อ', 'รายการสินค้า', 'รายการ', 'description', 'product name', 'item name', 'name'],
+  uom:   ['หน่วยนับ', 'หน่วย', 'uom', 'unit of measure', 'unit'],
+  qty:   ['จำนวนคงเหลือ', 'คงเหลือ', 'จำนวน', 'qty', 'quantity', 'on hand', 'onhand', 'balance qty'],
+  cost:  ['ต้นทุนต่อหน่วย', 'ต้นทุนเฉลี่ย', 'ราคาทุนต่อหน่วย', 'ราคาทุน', 'ต้นทุน', 'unit cost', 'avg cost', 'average cost', 'cost'],
+  value: ['มูลค่าคงเหลือ', 'มูลค่ารวม', 'มูลค่า', 'จำนวนเงิน', 'value', 'total cost', 'amount'],
+};
+function bestStockKey(text) {
+  const n = norm(text);
+  if (!n) return null;
+  let key = null, len = 0;
+  Object.keys(STOCK_HINTS).forEach(function (k) {
+    STOCK_HINTS[k].forEach(function (h) {
+      const hn = norm(h);
+      if (n.indexOf(hn) >= 0 && hn.length > len) { len = hn.length; key = k; }
+    });
+  });
+  return key;
+}
+function detectStockColumns(rows) {
+  let best = null;
+  headerCandidates(rows).forEach(function (c) {
+    const map = {};
+    let ledgerish = false;
+    c.cells.forEach(function (cell, j) {
+      const k = bestStockKey(cell);
+      const tb = bestKeyFor(cell);
+      if (tb === 'debit' || tb === 'credit') ledgerish = true;
+      if (k && map[k] === undefined) map[k] = j;
+    });
+    if (ledgerish || map.qty === undefined || (map.cost === undefined && map.value === undefined)) return;
+    if (map.code === undefined && map.name === undefined) return;
+    const st = readStockFile(rows, map, c.row);
+    const score = st.rows.length * 10 + Object.keys(map).length;
+    if (!best || score > best.score) best = { ok: st.rows.length > 0, headerRow: c.row, map, score };
+  });
+  return best || { ok: false };
+}
+function readStockFile(rows, map, headerRow) {
+  const out = [], skipped = [], seen = {};
+  rows.slice(headerRow + 1).forEach(function (r, i) {
+    const line = r.line || headerRow + 2 + i;
+    const code = cellText(r[map.code]), name = cellText(r[map.name]);
+    if (!code && !name) return;
+    if (nonAccountRow(code, name)) { skipped.push({ line, code, name, why: 'บรรทัดผลรวม ข้ามอัตโนมัติ' }); return; }
+    const q = parseAmount(r[map.qty]);
+    const c = map.cost === undefined ? '0' : parseAmount(r[map.cost]);
+    const v = map.value === undefined ? null : parseAmount(r[map.value]);
+    if (q === null || c === null || (map.value !== undefined && v === null)) {
+      skipped.push({ line, code, name, why: 'ตัวเลขอ่านไม่ออก', bad: true }); return;
+    }
+    const qty = roundQty(Number(q));
+    if (qty === 0) { skipped.push({ line, code, name, why: 'จำนวนเป็นศูนย์' }); return; }
+    if (qty < 0) { skipped.push({ line, code, name, why: 'จำนวนติดลบ — สต๊อกติดลบตั้งยอดยกมาไม่ได้', bad: true }); return; }
+    const amount = v !== null && satangOf(v) !== 0 ? satangOf(v) : round2(mulQty(M(c), qty));
+    if (amount < 0) { skipped.push({ line, code, name, why: 'มูลค่าติดลบ', bad: true }); return; }
+    const key = code || norm(name);
+    if (seen[key]) { skipped.push({ line, code, name, why: 'ซ้ำกับแถว ' + seen[key], bad: true }); return; }
+    seen[key] = line;
+    out.push({ line, code, name: name || code, uom: cellText(r[map.uom]), qty, amount, value: unM(amount) });
+  });
+  return { rows: out, skipped };
+}
+
 /* ---------- ไฟล์นี้คือรายงานอะไร ----------
    งบทดลองมีบัญชีละบรรทัด ส่วนบัญชีแยกประเภทมีรายการละบรรทัด รหัสบัญชีเดิมซ้ำได้เป็นร้อย
    ถ้าเผลอนำบัญชีแยกประเภทเข้าเป็นยอดยกมา ยอดจะกลายเป็นผลรวมรายการทั้งปี ไม่ใช่ยอดคงเหลือ */
@@ -7332,6 +7750,11 @@ function reverseImport(entryNo, reason) {
   const bfBill = DB.docs.bill.filter((d) => d.broughtForward && d.entryNo === e.no && d.status !== 'void');
   const blocked = [];
   bfInv.forEach((d) => voidBlockers('invoice', d).forEach((w) => blocked.push(d.no + ': ' + w)));
+  /* สินค้ายกมาที่มากับใบนี้ถูกขายหรือเบิกไปแล้ว ดึงกลับออกจากคลังไม่ได้ */
+  DB.docs.stockMove.filter((m) => m.src === e.no && m.dir === 'in').forEach(function (m) {
+    const it = DB.items.find((x) => x.code === m.item);
+    if (it && it.qty < m.qty) blocked.push(it.code + ': เหลือในคลัง ' + it.qty + ' น้อยกว่าที่ยกมา ' + m.qty + ' (ขายหรือเบิกไปแล้ว)');
+  });
   bfBill.forEach((d) => voidBlockers('bill', d).forEach((w) => blocked.push(d.no + ': ' + w)));
   if (blocked.length) {
     throw new DomainError('IMPORT_IN_USE',
@@ -7343,6 +7766,7 @@ function reverseImport(entryNo, reason) {
   const rev = reverse(entryNo, why, e.date, { fromSource: true });
   rev.importReversal = true;
   if (e.type === 'opening') rev.openingReversal = true;
+  stockBack(e.no, 'in');
   bfInv.concat(bfBill).forEach(function (d) {
     d.status = 'void';
     d.voidReason = 'ยกเลิกการนำเข้า ' + e.no;
@@ -7399,19 +7823,42 @@ function upsertPartner(p) {
   return 1;
 }
 
+/** สินค้าจากแฟ้มข้อมูล — ข้อมูลหลักอัปเดตได้ แต่จำนวนคงเหลือต้องเข้าคลังเป็นรายการ "ยอดยกมา" (stockOpening)
+    ห้ามเขียนทับจำนวน/มูลค่าตรง ๆ ไม่งั้นสต๊อกการ์ดไม่มีที่มา และยอดที่ขายไปแล้วจะถูกทับหาย */
 function upsertItem(i) {
-  const rec = {
-    code: i.code, name: i.name, category: i.category || 'ทั่วไป', uom: i.uom || 'หน่วย',
-    type: i.type === 'service' ? 'service' : 'stock',
-    avgCost: M(i.avgCost || '0'), price: M(i.price || '0'),
-    qty: roundQty(Number(i.qty || 0)), reorder: Number(i.reorder || 0),
-  };
+  const type = i.type === 'service' ? 'service' : 'stock';
+  const avgCost = M(i.avgCost || '0');
+  const qty = type === 'stock' ? roundQty(Number(i.qty || 0)) : 0;
   /* มูลค่าต้องเป็นจำนวนเต็มสตางค์ — จำนวนมีทศนิยม (12.5 หน่วย) คูณตรง ๆ ได้เศษเกินสตางค์ */
-  rec.value = mulQty(rec.avgCost, rec.qty);
-  const at = DB.items.findIndex((x) => x.code === rec.code);
-  if (at >= 0) { DB.items[at] = { ...DB.items[at], ...rec }; return 0; }
-  DB.items.push(rec);
-  return 1;
+  const want = { qty, value: round2(mulQty(avgCost, qty)) };
+  const master = { code: i.code, name: i.name, category: i.category || 'ทั่วไป', uom: i.uom || 'หน่วย',
+    type, price: M(i.price || '0'), reorder: Number(i.reorder || 0) };
+  const at = DB.items.findIndex((x) => x.code === master.code);
+  if (at >= 0) {
+    const it = DB.items[at];
+    Object.assign(it, master);
+    return { created: 0, item: it, want };
+  }
+  const it = { ...master, qty: 0, value: 0, avgCost: avgCost };
+  DB.items.push(it);
+  return { created: 1, item: it, want };
+}
+/** รับสินค้ายกมาจากแฟ้มเข้าคลัง — อ้างใบยอดยกมา (ยกเลิกการนำเข้าแล้วคืนออกได้) */
+function stockOpening(list, date, src, warnings) {
+  list.forEach(function (r) {
+    const it = r.item;
+    if (it.type !== 'stock' || !r.want.qty) return;
+    if (it.qty === r.want.qty && it.value === r.want.value) return;
+    if (it.qty !== 0 || it.value !== 0) {
+      warnings.push({ doc: it.code, message: 'สินค้า ' + it.name + ' มีสต๊อกในระบบแล้ว ' + it.qty + ' ' + it.uom
+        + ' ไม่ได้ยกยอดจากแฟ้มทับ — ถ้ายอดไม่ตรงให้ทำใบตรวจนับ' });
+      return;
+    }
+    it.qty = r.want.qty;
+    it.value = r.want.value;
+    it.avgCost = unitCost(it.value, it.qty);
+    DB.docs.stockMove.push({ date, item: it.code, dir: 'in', qty: it.qty, cost: it.value, src, balance: it.qty });
+  });
 }
 
 function upsertEmployee(e) {
@@ -7481,7 +7928,8 @@ function importPackage(pkg, overrides, opts) {
     employees: DB.employees.length };
   let newPartners = 0, newItems = 0, newEmployees = 0;
   (pkg.partners || []).forEach((p) => { newPartners += upsertPartner(p); });
-  (pkg.items || []).forEach((i) => { newItems += upsertItem(i); });
+  const itemRows = (pkg.items || []).map(upsertItem);
+  itemRows.forEach((r) => { newItems += r.created; });
   (pkg.employees || []).forEach((e) => { newEmployees += upsertEmployee(e); });
 
   let opening = null;
@@ -7507,6 +7955,8 @@ function importPackage(pkg, overrides, opts) {
     opening = importOpeningBalances(tb, pkg.cutoff, overrides, { partnerSplit: split, ack: !!opts.ack });
   }
   const docs = importOpenDocs(pkg, opening ? opening.entry.no : null);
+  const warnings = (pkg.warnings || []).slice();
+  stockOpening(itemRows, pkg.cutoff, opening ? opening.entry.no : 'ยกมา ' + pkg.cutoff, warnings);
 
   const asOf = pkg.cutoff;
   const rec = reconciliationChecks(asOf);
@@ -7522,7 +7972,7 @@ function importPackage(pkg, overrides, opts) {
     invoices: docs.inv, bills: docs.bill,
     coverage: pkg.coverage || [],
     opening: opening,
-    warnings: pkg.warnings || [],
+    warnings: warnings,
     checks: rec.checks, allPassed: rec.allPassed,
     before: before,
   };
@@ -7677,6 +8127,7 @@ function importHealth(asOf) {
         : c.code === 'AP_SUBLEDGER' ? (imported ? 'นำเข้ารายการตั้งหนี้ที่ยังค้างจ่ายเป็นรายใบ ยอดรวมต้องเท่ายอดเจ้าหนี้ที่ยกมา' : '')
         : c.code === 'OUTPUT_VAT' || c.code === 'INPUT_VAT' ? 'ยอดภาษีที่ยกมาจากระบบเดิมไม่มีใบกำกับรายใบในทะเบียนภาษี — ยื่น ภ.พ.30 ของงวดนั้นจากระบบเดิม แล้วบันทึกปิดบัญชีภาษีในงวดนี้'
         : c.code === 'SUSPENSE_ZERO' ? 'ไล่ดูบัญชีพักว่ามาจากบรรทัดไหนของไฟล์ แล้วจับคู่ใหม่ให้ถูกบัญชี'
+        : c.code === 'INVENTORY_SUBLEDGER' ? 'ตั้งยอดสินค้ายกมาเป็นรายตัวที่ สินค้า → ยอดยกมา · ตรวจนับ (กรอกเอง หรือลากไฟล์รายการสินค้าคงเหลือที่หน้านี้) ยอดรวมต้องเท่ายอดสินค้าคงเหลือที่ยกมา'
         : 'ดูรายละเอียดที่หน้าปิดงวด');
   });
   if (!rec.checks.some((c) => !c.ok)) push('ok', 'ยอดคุมทุกตัวตรงกับรายตัว', 'ลูกหนี้ เจ้าหนี้ ภาษีขาย ภาษีซื้อ พักรับสินค้า บัญชีพัก');
@@ -7980,7 +8431,10 @@ const PAGE_INFO = {
   taxcal:       { d:'กำหนดยื่นแบบภาษีทุกฉบับของงวดนี้ ทั้งแบบกระดาษและยื่นผ่านอินเทอร์เน็ต' },
   customers:    { d:'ทะเบียนลูกหนี้ — ชื่อ ที่อยู่ เลขผู้เสียภาษี และสาขา ถูกคัดลอกลงใบกำกับทุกใบ ณ วันที่ออก' },
   vendors:      { d:'ทะเบียนเจ้าหนี้ — ประเภทผู้รับเงินกำหนดว่ายื่น ภ.ง.ด.3 หรือ 53 และประเภทเงินได้ที่ต้องหัก' },
-  items:        { d:'ทะเบียนสินค้า ราคาทุนถัวเฉลี่ยถ่วงน้ำหนัก — สต๊อกเปลี่ยนจากเอกสารซื้อขายเท่านั้น' },
+  items:        { d:'ทะเบียนสินค้า ราคาทุนถัวเฉลี่ยถ่วงน้ำหนัก — สต๊อกเปลี่ยนจากเอกสารซื้อขายและใบปรับปรุงสินค้าเท่านั้น' },
+  stockadj:     { d:'งานสต๊อกที่ไม่มีเอกสารซื้อขาย: ตั้งยอดยกมา ตรวจนับปรับยอด ตัดจำหน่ายของเสีย เบิกไปใช้เอง',
+                  je: [['dr','ผลขาดทุนจากสินค้า / ค่าใช้จ่าย'], ['cr','สินค้าคงเหลือ']], book:'สมุดรายวันทั่วไป' },
+  stockcard:    { d:'บัญชีคุมสินค้ารายตัว ยกมา รับ จ่าย คงเหลือ ทั้งจำนวนและมูลค่า (รายงานสินค้าและวัตถุดิบ ม.87(3)) — มูลค่ารวมต้องเท่าบัญชีสินค้าคงเหลือ' },
   stockmoves:   { d:'รับเข้าและจ่ายออกของสินค้าทุกรายการ พร้อมต้นทุนและยอดคงเหลือ' },
   assets:       { d:'ทะเบียนทรัพย์สินถาวร ราคาทุน ค่าเสื่อมสะสมทางบัญชีและทางภาษี' },
   deprec:       { d:'ค่าเสื่อมราคาประจำงวด คิดทางบัญชีตามอายุใช้งาน และทางภาษีตาม พ.ร.ฎ.145',
@@ -8009,6 +8463,7 @@ const FLOWS = {
   book:  { l:'สมุดรายวัน', steps:['jgeneral', 'jpurchase', 'jsales', 'jpayment', 'jreceipt'] },
   close: { l:'งานปิดงวด', steps:['bank', 'deprec', 'payroll', 'pp30', 'pnd', 'close'] },
   fs:    { l:'งบการเงิน', steps:['tb', 'bs', 'pl', 'equity', 'cashflow'] },
+  stock: { l:'สต๊อก', steps:['items', 'stockadj', 'stockcard', 'stockmoves'] },
 };
 const FLOW_OF = {
   quotations:'sale', salesorders:'sale', invoices:'sale', billingnotes:'sale', receipts:'sale', creditnotes:'sale', debitnotes:'sale',
@@ -8017,6 +8472,7 @@ const FLOW_OF = {
   jgeneral:'book', jpurchase:'book', jsales:'book', jpayment:'book', jreceipt:'book',
   bank:'close', deprec:'close', payroll:'close', pp30:'close', pnd:'close', close:'close',
   tb:'fs', bs:'fs', pl:'fs', equity:'fs', cashflow:'fs',
+  items:'stock', stockadj:'stock', stockcard:'stock', stockmoves:'stock',
 };
 
 /** ตัวเลขเล็ก ๆ บนแต่ละขั้น — งานที่ยังค้าง หรือเครื่องหมายว่าทำแล้ว */
@@ -9052,19 +9508,22 @@ function scItems() {
   const low = DB.items.filter((i) => i.type === 'stock' && i.qty <= i.reorder);
   return card({
     title:'ทะเบียนสินค้า', sub: DB.items.length + ' รายการ · ตีราคาด้วยวิธีถัวเฉลี่ยถ่วงน้ำหนัก',
-    actions: btn('item:new', '+ เพิ่มสินค้าหรือบริการ', 'primary'),
+    actions: btn('item:new', '+ เพิ่มสินค้าหรือบริการ', 'primary')
+      + btn('stock:new:opening', 'ตั้งยอดยกมา', periodIsOpen() ? '' : 'disabled')
+      + btn('stock:new:count', 'ตรวจนับ', periodIsOpen() ? '' : 'disabled'),
     filters: searchBox('ค้นหารหัส ชื่อ หรือหมวดสินค้า'),
-    body: (low.length ? '<div class="note warn">ต่ำกว่าจุดสั่งซื้อ ' + low.length + ' รายการ: '
+    body: stockGapNote() + (low.length ? '<div class="note warn">ต่ำกว่าจุดสั่งซื้อ ' + low.length + ' รายการ: '
         + esc(low.map((i) => i.code).join(', ')) + '</div>' : '')
       + tbl({
-        cols:[{t:'รหัส'},{t:'ชื่อสินค้า'},{t:'หมวด'},{t:'หน่วย'},{t:'ประเภท'},{t:'คงเหลือ',a:'r'},{t:'จุดสั่งซื้อ',a:'r'},{t:'ต้นทุนเฉลี่ย',a:'r'},{t:'ราคาขาย',a:'r'},{t:'มูลค่าคงเหลือ',a:'r'}],
+        cols:[{t:'รหัส'},{t:'ชื่อสินค้า'},{t:'หมวด'},{t:'หน่วย'},{t:'ประเภท'},{t:'คงเหลือ',a:'r'},{t:'จุดสั่งซื้อ',a:'r'},{t:'ต้นทุนเฉลี่ย',a:'r'},{t:'ราคาขาย',a:'r'},{t:'มูลค่าคงเหลือ',a:'r'},{t:''}],
         rows: list.map((i) => [{mono:i.code}, i.name, i.category, i.uom,
           i.type === 'stock' ? 'สินค้า' : {dim:'บริการ'},
           i.type === 'stock' ? {n:M(String(i.qty)), cls: i.qty <= i.reorder ? 'bad' : ''} : {dim:'—'},
           i.type === 'stock' ? {n:M(String(i.reorder))} : {dim:'—'},
-          {n:i.avgCost}, {n:i.price}, {n:i.value}]),
+          {n:i.avgCost}, {n:i.price}, {n:i.value},
+          i.type === 'stock' ? {html: btn('stock:card:' + i.code, 'สต๊อกการ์ด')} : '']),
         rowAttr: (r) => 'class="row-link" data-act="item:edit:' + r[0].mono + '"',
-        foot: ['','','','','','','','','รวมมูลค่าสินค้าคงเหลือ', {n:value}],
+        foot: ['','','','','','','','','รวมมูลค่าสินค้าคงเหลือ', {n:value}, ''],
         empty:'ยังไม่มีสินค้าในทะเบียน',
         emptyAction: btn('item:new', 'เพิ่มสินค้ารายการแรก', 'primary'),
       })
@@ -9072,8 +9531,8 @@ function scItems() {
       + '<div><span>ยอดบัญชีสินค้าคงเหลือในงบทดลอง</span><b>' + fmt(glInv) + '</b></div>'
       + '<div class="gt"><span>ผลต่าง</span><b>' + fmt(value - glInv) + '</b></div></div>',
     foot: (value === glInv ? 'ทะเบียนสินค้าตรงกับบัญชีคุมพอดี'
-      : 'ผลต่างเกิดจากยอดยกมาต้นงวดที่ยังไม่ได้แยกรายตัวสินค้า — ตรวจสอบก่อนปิดปี')
-      + ' · กดที่แถวเพื่อแก้ไข จำนวนคงเหลือแก้ตรงนี้ไม่ได้ ต้องมาจากเอกสารซื้อขายเท่านั้น',
+      : 'ยังไม่ตรงกัน — ตั้งยอดยกมาส่วนที่ยังไม่แยกรายตัว ระบบไม่ให้ปิดงวดจนกว่าจะตรง')
+      + ' · กดที่แถวเพื่อแก้ไข · จำนวนคงเหลือเปลี่ยนด้วยเอกสารซื้อขาย หรือใบปรับปรุงสินค้า (ยอดยกมา ตรวจนับ ตัดจำหน่าย เบิกใช้)',
   });
 }
 
@@ -9915,7 +10374,7 @@ const SCREENS = {
   journals: scJournals, ledger: scLedger, tb: scTrialBalance, coa: scCoa,
   vatout: () => vatRegister('vat_output'), vatin: () => vatRegister('vat_input'),
   pp30: scPp30, pnd: scPnd, whtcert: scWhtCert, taxcal: scTaxCal,
-  items: scItems, stockmoves: scStockMoves,
+  items: scItems, stockmoves: scStockMoves, stockadj: scStockAdj, stockcard: scStockCard,
   assets: scAssets, deprec: scDeprec,
   payroll: scPayroll, employees: scEmployees,
   projects: scProjects, budget: scBudget,
@@ -9968,6 +10427,7 @@ function scImport() {
       + '<div class="dim" style="margin-top:14px">'
       + 'งบทดลอง — FlowAccount: เมนู รายงาน → หมวด บัญชี → งบทดลอง → เลือกช่วงเวลา → ดาวน์โหลด Excel<br>'
       + 'ผังบัญชี — เมนู บริหารบัญชี → ผังบัญชี → ปุ่ม เพิ่มเติม → ดาวน์โหลด Excel<br>'
+      + 'สินค้าคงเหลือ (ตั้งยอดสินค้ายกมา) — ไฟล์ที่มี รหัส ชื่อสินค้า จำนวนคงเหลือ และต้นทุนต่อหน่วยหรือมูลค่า<br>'
       + 'ไม่ต้องแก้ไฟล์ก่อน ลากไฟล์ที่ดาวน์โหลดมาได้เลย ระบบจะถามเองถ้าอ่านไม่ออก</div>'
       + '</div></div>'
       + (IMP.error ? '<div class="note warn">' + esc(IMP.error) + '</div>' : ''),
@@ -10011,6 +10471,7 @@ function scImport() {
   if (!IMP.rows) return step1 + health + history + blank;
 
   /* ---- ไฟล์ไม่ใช่งบทดลอง บอกให้ชัดว่าไฟล์ไหนที่ต้องใช้ ---- */
+  if (IMP.kind === 'stock') return step1 + importStockCard(IMP) + history + blank;
   if (IMP.kind === 'ledger' || IMP.kind === 'chart') {
     const isLedger = IMP.kind === 'ledger';
     return step1 + card({
@@ -10407,6 +10868,294 @@ function scImportResult() {
           ? 'ข้อที่ยังไม่ตรงพร้อมคำอธิบายข้างบน เป็นเรื่องที่คาดไว้เมื่อยกมาแต่ยอดรวม '
             + 'ระบบจะไม่ยอมให้ปิดงวดจนกว่าจะนำเอกสารค้างเข้ามาครบ'
           : 'มียอดคุมที่ยังไม่ตรง — แปลว่าย้ายมาไม่ครบ ตรวจรายการข้างต้นก่อนใช้งานจริง'),
+  });
+}
+
+
+/* ===== ui-stock.js ===== */
+/* ===================================================================
+   หน้าจอระบบสต๊อก — ยอดยกมา · ตรวจนับ · ตัดจำหน่าย · เบิกใช้ · สต๊อกการ์ด
+   ตรรกะอยู่ใน stock.js หน้านี้แค่แสดงและรับค่า
+   =================================================================== */
+const STOCK_ADJ_ST = { opening:['open','ยอดยกมา'], count:['paid','ตรวจนับ'], writeoff:['late','ตัดจำหน่าย'], issue:['wait','เบิกใช้'] };
+const stockItems = () => DB.items.filter((i) => i.type === 'stock');
+const qtyFmt = (q) => fmt(M(String(roundQty(q || 0)))).replace(/\.00$/, '');
+
+/** หมายเหตุยอดสินค้าในบัญชีที่ยังไม่มีรายตัว — ขึ้นทุกหน้าที่เกี่ยวกับสต๊อกจนกว่าจะตั้งยอดครบ */
+function stockGapNote() {
+  const free = stockUnallocated(pEnd());
+  if (free === 0) return '';
+  return '<div class="note warn">' + (free > 0
+    ? '<b>บัญชีสินค้าคงเหลือมียอด ' + fmt(free) + ' บาท ที่ยังไม่มีรายตัวสินค้า</b> (มักมาจากงบทดลองที่นำเข้า) '
+      + 'ขายสินค้าไม่ได้จนกว่าจะมีของในทะเบียน — กด <b>ตั้งยอดยกมา</b> หรือลากไฟล์รายการสินค้าคงเหลือ (.xlsx/.csv) ที่หน้านำเข้าข้อมูล '
+      + 'ยอดรวมรายตัวต้องเท่ายอดนี้ ระบบไม่ลงบัญชีซ้ำ'
+    : '<b>มูลค่าสินค้ารายตัวสูงกว่าบัญชีสินค้าคงเหลือ ' + fmt(-free) + ' บาท</b> — ตรวจรายการที่ลงบัญชีสินค้าโดยตรง') + '</div>';
+}
+
+/* ---------- ใบปรับปรุงสินค้า ---------- */
+function stockAdjDetail(no) {
+  const d = DB.docs.stockAdj.find((x) => x.no === no);
+  if (!d) return '';
+  const k = d.kind;
+  const cols = k === 'count'
+    ? [{t:'สินค้า'},{t:'หน่วย'},{t:'ยอดในระบบ',a:'r'},{t:'นับได้',a:'r'},{t:'ขาด (−) / เกิน (+)',a:'r'},{t:'มูลค่าที่ปรับ',a:'r'}]
+    : [{t:'สินค้า'},{t:'หน่วย'},{t:'ยอดก่อนบันทึก',a:'r'},{t:k === 'opening' ? 'รับเข้า' : 'จ่ายออก',a:'r'},{t:'มูลค่า',a:'r'}];
+  const rows = d.lines.map((l) => k === 'count'
+    ? [{mono:l.itemCode}, l.uom, {n:M(String(l.bookQty))}, {n:M(String(l.qty))},
+       {n:M(String(l.diff)), cls: l.diff < 0 ? 'bad' : l.diff > 0 ? 'good' : ''}, {n:l.cost}]
+    : [{mono:l.itemCode}, l.uom, {n:M(String(l.bookQty))}, {n:M(String(Math.abs(l.diff)))}, {n:Math.abs(l.cost)}]);
+  rows.forEach((r, i) => { r[0] = {html: '<span class="mono">' + esc(d.lines[i].itemCode) + '</span> ' + esc(d.lines[i].name)}; });
+  return card({
+    title: STOCK_ADJ[k].verb + ' เลขที่ ' + d.no,
+    sub: 'วันที่ ' + thDate(d.date) + (d.reason ? ' · ' + d.reason : '')
+      + (k === 'issue' && d.account ? ' · ลงบัญชี ' + d.account + ' ' + acc(d.account).name : ''),
+    actions: (d.entryNo ? btn('entry:' + d.entryNo, 'ดูใบสำคัญ') : '')
+      + (isVoid(d) ? '' : btn('stock:void:' + d.no, 'ยกเลิกเอกสาร', 'danger')) + btn('sel:', 'ปิด'),
+    body: voidBanner(d)
+      + tbl({ cols, rows })
+      + '<div class="totals">'
+      + '<div><span>มูลค่ารับเข้าคลัง</span><b>' + fmt(d.valueIn) + '</b></div>'
+      + '<div><span>มูลค่าจ่ายออกจากคลัง</span><b>' + fmt(d.valueOut) + '</b></div>'
+      + '</div>'
+      + (k === 'opening' ? '<div class="note">' + (d.mode === 'allocate'
+          ? 'แยกยอดสินค้าคงเหลือที่ยกมากับงบทดลองเป็นรายตัว — ไม่ลงบัญชีซ้ำ เพราะยอดอยู่ในบัญชีแล้ว'
+          : 'ลงบัญชี Dr สินค้าคงเหลือ / Cr บัญชีปรับปรุงยอดยกมา') + '</div>' : ''),
+    foot: isVoid(d) ? 'ยกเลิกแล้ว — คืนสต๊อกและกลับรายการบัญชีแล้ว'
+      : 'ลงบัญชีแล้วแก้ไม่ได้ ถ้าผิดให้กดยกเลิกเอกสารแล้วทำใหม่ · ตีราคาด้วยต้นทุนเฉลี่ยถ่วงน้ำหนัก ณ วันที่บันทึก',
+  });
+}
+
+function scStockAdj() {
+  const base = DB.docs.stockAdj.filter((d) => (periodOf(d.date) === STATE.period || STATE.sel === d.no)
+    && (hit(d.no) || hit(d.reason || '') || d.lines.some((l) => hit(l.itemCode) || hit(l.name))));
+  const open = periodIsOpen();
+  const act = (k, label, kind) => btn('stock:new:' + k, label, open ? kind : 'disabled');
+  return (STATE.sel ? stockAdjDetail(STATE.sel) : '')
+    + card({
+      title:'ยอดยกมา · ตรวจนับ · ตัดจำหน่าย · เบิกใช้',
+      sub: thPeriod(STATE.period) + ' · ' + countNote(base, 'ใบ'),
+      actions: act('opening', '+ ตั้งยอดยกมา', stockUnallocated(pEnd()) > 0 ? 'primary' : '')
+        + act('count', '+ ตรวจนับ', stockUnallocated(pEnd()) > 0 ? '' : 'primary') + act('writeoff', '+ ตัดจำหน่าย') + act('issue', '+ เบิกใช้'),
+      filters: searchBox('ค้นหาเลขที่ เหตุผล หรือสินค้า'),
+      body: stockGapNote() + tbl({
+        cols:[{t:'เลขที่'},{t:'วันที่'},{t:'งาน'},{t:'รายการ',a:'r'},{t:'รับเข้า',a:'r'},{t:'จ่ายออก',a:'r'},{t:'เหตุผล'},{t:'ใบสำคัญ'}],
+        rows: base.map((d) => [{mono:d.no}, thDateNum(d.date), {st: isVoid(d) ? ['void','ยกเลิก'] : STOCK_ADJ_ST[d.kind]},
+          {c:String(d.lines.length)}, {n:d.valueIn}, {n:d.valueOut}, {dim: d.reason || '—'},
+          d.entryNo ? {mono:d.entryNo} : {dim: d.mode === 'allocate' ? 'แยกรายตัว ไม่ลงบัญชีซ้ำ' : '—'}]),
+        rowAttr: (r, i) => rowCls(base[i]) + ' data-act="sel:' + r[0].mono + '"',
+        empty:'ยังไม่มีใบปรับปรุงสินค้าในงวดนี้',
+        emptyAction: open ? btn('stock:new:count', 'ตรวจนับสินค้า', 'primary') : '',
+      }),
+      foot:'ของที่มีอยู่ก่อนเริ่มใช้ระบบ → ตั้งยอดยกมา · นับของจริงแล้วไม่ตรง → ตรวจนับ (ขาดลงขาดทุน เกินลงรายได้อื่น) · '
+        + 'ของเสีย/หาย → ตัดจำหน่าย · เอาไปใช้เอง → เบิกใช้ (ลงค่าใช้จ่ายตามบัญชีที่เลือก)',
+    });
+}
+
+/** แบบฟอร์มงานสต๊อก — ตรวจนับแสดงสินค้าทุกตัวพร้อมยอดในระบบ แก้เฉพาะตัวที่นับได้ไม่ตรง */
+function modalStockAdj(kind) {
+  const items = stockItems();
+  if (!items.length) {
+    toast('ยังไม่มีสินค้าที่มีสต๊อกในทะเบียน', 'err', 'เพิ่มสินค้าที่ ทะเบียนสินค้า ก่อน หรือลากไฟล์รายการสินค้าคงเหลือที่หน้านำเข้าข้อมูล ระบบสร้างสินค้าให้');
+    return;
+  }
+  const isCount = kind === 'count', isOpen = kind === 'opening';
+  const n = isCount ? items.length : 8;
+  const opt = (sel) => '<option value="">— เลือกสินค้า —</option>' + items.map((i) => '<option value="' + esc(i.code) + '"'
+    + (i.code === sel ? ' selected' : '') + '>' + esc(i.code + ' · ' + i.name + ' (คงเหลือ ' + qtyFmt(i.qty) + ' ' + (i.uom || '') + ')') + '</option>').join('');
+  let rows = '';
+  for (let i = 0; i < n; i++) {
+    const it = isCount ? items[i] : null;
+    rows += '<tr>'
+      + (isCount
+        ? '<td><input type="hidden" name="s' + i + '_item" value="' + esc(it.code) + '"><span class="mono">' + esc(it.code) + '</span> ' + esc(it.name) + '</td>'
+          + '<td class="num">' + qtyFmt(it.qty) + ' ' + esc(it.uom || '') + '</td>'
+        : '<td><select name="s' + i + '_item">' + opt('') + '</select></td>')
+      + '<td><input name="s' + i + '_qty" class="r" inputmode="decimal" value="' + (isCount ? esc(String(it.qty)) : '') + '"></td>'
+      + (isOpen || isCount ? '<td><input name="s' + i + '_cost" class="r" inputmode="decimal" placeholder="'
+          + (isCount ? (it.avgCost ? fmt(it.avgCost) : 'ต้นทุนต่อหน่วย') : 'ต้นทุนต่อหน่วย') + '"' + (isCount && it.avgCost ? ' disabled' : '') + '></td>' : '')
+      + '</tr>';
+  }
+  const free = stockUnallocated(defaultDate());
+  const head = isCount ? '<th>สินค้า</th><th class="r">ยอดในระบบ</th><th class="r">นับได้จริง</th><th class="r">ต้นทุนต่อหน่วย (เฉพาะของเกินที่ยังไม่มีต้นทุน)</th>'
+    : '<th>สินค้า</th><th class="r">' + (isOpen ? 'จำนวนยกมา' : 'จำนวน') + '</th>' + (isOpen ? '<th class="r">ต้นทุนต่อหน่วย</th>' : '');
+  modal({
+    title: STOCK_ADJ[kind].verb,
+    sub: isOpen ? (free > 0 ? 'ยอดสินค้าคงเหลือในบัญชีที่ยังไม่แยกรายตัว ' + fmt(free) + ' บาท — ยอดรวมที่กรอกต้องไม่เกินนี้ ระบบไม่ลงบัญชีซ้ำ'
+        : 'ยังไม่มียอดสินค้าในบัญชี — ระบบจะลงบัญชี Dr สินค้าคงเหลือ / Cr บัญชีปรับปรุงยอดยกมา')
+      : isCount ? 'แก้เฉพาะช่อง "นับได้จริง" ของตัวที่ไม่ตรง ขาดลงผลขาดทุนจากสินค้า เกินลงรายได้อื่น ตีราคาด้วยต้นทุนเฉลี่ย'
+      : kind === 'writeoff' ? 'ของชำรุด สูญหาย หมดอายุ — ลงบัญชีผลขาดทุนจากสินค้าที่ต้นทุนเฉลี่ย'
+      : 'เอาสินค้าไปใช้เองในกิจการ — ลงค่าใช้จ่ายตามบัญชีที่เลือกที่ต้นทุนเฉลี่ย',
+    body:'<div class="flds">'
+      + field({ name:'sdate', label: isOpen ? 'วันที่ยอดยกมา' : isCount ? 'วันที่ตรวจนับ' : 'วันที่', type:'date', value: defaultDate() })
+      + field({ name:'sreason', label: kind === 'writeoff' ? 'เหตุผลที่ตัดจำหน่าย' : kind === 'issue' ? 'เบิกไปใช้ทำอะไร' : 'หมายเหตุ',
+          placeholder: kind === 'writeoff' ? 'เช่น สินค้าชำรุดจากน้ำท่วมคลัง' : kind === 'issue' ? 'เช่น ใช้ซ่อมอาคารสำนักงาน' : isCount ? 'เช่น ตรวจนับสิ้นเดือน' : 'เช่น ยอดยกมาจากระบบเดิม' })
+      + (kind === 'issue' ? field({ name:'saccount', label:'ลงบัญชีค่าใช้จ่าย', type:'select', value: defaultAccountFor('admin_expense'),
+          options: expenseAccounts().map((a) => [a.code, a.code + ' ' + a.name]) }) : '')
+      + '</div>'
+      + '<div class="scroll"><table class="lines"><thead><tr>' + head + '</tr></thead><tbody>' + rows + '</tbody></table></div>'
+      + '<input type="hidden" name="scount" value="' + n + '">',
+    submitLabel: STOCK_ADJ[kind].verb,
+    note: kind === 'writeoff' ? 'หักเป็นรายจ่ายทางภาษีได้เมื่อมีหลักฐานการทำลายหรือแจ้งสรรพากรตามระเบียบ' : 'ลงบัญชีแล้วแก้ไม่ได้ ถ้าผิดยกเลิกแล้วทำใหม่',
+    onSubmit: function () {
+      submitAction(function () {
+        const lines = [];
+        const cnt = Number(val('scount')) || 0;
+        for (let i = 0; i < cnt; i++) {
+          const code = val('s' + i + '_item'), q = val('s' + i + '_qty').replace(/,/g, '').trim();
+          if (!code || q === '') continue;
+          lines.push({ itemCode: code, qty: Number(q), unitCost: val('s' + i + '_cost').replace(/,/g, '').trim() });
+        }
+        const d = saveStockAdj({ kind, date: val('sdate'), reason: val('sreason'), account: val('saccount') || null, lines });
+        STATE.screen = 'stockadj'; STATE.sel = d.no; STATE.period = periodOf(d.date);
+        toast(STOCK_ADJ[kind].verb + ' ' + d.no + ' แล้ว', 'ok',
+          (d.valueIn ? 'รับเข้า ' + fmt(d.valueIn) + ' บาท ' : '') + (d.valueOut ? 'จ่ายออก ' + fmt(d.valueOut) + ' บาท' : '')
+          + (!d.valueIn && !d.valueOut ? 'ยอดตรงกับระบบทุกรายการ' : ''));
+        return d;
+      });
+    },
+  });
+}
+
+function modalStockVoid(no) {
+  const d = DB.docs.stockAdj.find((x) => x.no === no);
+  if (!d) return;
+  modal({
+    title:'ยกเลิก ' + STOCK_ADJ[d.kind].verb + ' ' + no,
+    sub: d.lines.length + ' รายการ · รับเข้า ' + fmt(d.valueIn) + ' · จ่ายออก ' + fmt(d.valueOut),
+    body:'<div class="prose"><p>ระบบจะคืนสต๊อกทุกรายการตามที่ใบนี้ทำไว้'
+      + (d.entryNo ? ' และกลับรายการใบสำคัญ ' + esc(d.entryNo) + ' ณ วันที่เดิม' : '') + ' เลขที่เอกสารยังอยู่และเห็นว่ายกเลิก</p></div>'
+      + '<div class="flds">' + field({ name:'vreason', label:'เหตุผล (ผู้สอบบัญชีจะเห็นข้อความนี้)', wide:true }) + '</div>',
+    submitLabel:'ยกเลิกเอกสาร', submitKind:'danger',
+    onSubmit: function () {
+      submitAction(function () {
+        const r = voidStockAdj(no, val('vreason'));
+        toast('ยกเลิก ' + no + ' แล้ว', 'ok', 'คืนสต๊อกและกลับรายการบัญชีแล้ว');
+        return r;
+      });
+    },
+  });
+}
+
+/* ---------- สต๊อกการ์ด / รายงานสินค้าและวัตถุดิบ ---------- */
+function stockRange() {
+  const ytd = STATE.stockRange === 'ytd';
+  const start = ytd ? (fyStartOf(pStart()) || pStart()) : pStart();
+  return { from: start, to: pEnd(), ytd };
+}
+function stockCardDetail(code) {
+  const it = DB.items.find((x) => x.code === code && x.type === 'stock');
+  if (!it) return '';
+  const r = stockRange();
+  const c = stockCard(code, r.from, r.to);
+  const rows = [[thDateNum(r.from), {dim:'ยอดยกมา'}, '', '', '', '', '', '', {n:M(String(c.opening.qty))}, {n:c.opening.value}]]
+    .concat(c.rows.map((x) => [thDateNum(x.date), {mono:x.src}, x.kind,
+      x.inQty ? {n:M(String(x.inQty))} : '', x.inQty ? {n:x.inValue} : '',
+      x.outQty ? {n:M(String(x.outQty))} : '', x.outQty ? {n:x.outValue} : '',
+      {n:x.unitCost}, {n:M(String(x.balQty))}, {n:x.balValue}]));
+  return card({
+    title:'สต๊อกการ์ด ' + it.code + ' ' + it.name,
+    sub: 'หน่วย ' + (it.uom || '—') + ' · ' + thDate(r.from) + ' ถึง ' + thDate(r.to) + ' · ตีราคาถัวเฉลี่ยถ่วงน้ำหนัก',
+    actions: btn('stock:range:' + (r.ytd ? 'month' : 'ytd'), r.ytd ? 'ดูเฉพาะเดือนนี้' : 'ดูตั้งแต่ต้นปี') + btn('sel:', 'ปิด'),
+    body: tbl({
+      cols:[{t:'วันที่'},{t:'เอกสาร'},{t:'รายการ'},{t:'รับ',a:'r'},{t:'มูลค่ารับ',a:'r'},{t:'จ่าย',a:'r'},{t:'มูลค่าจ่าย',a:'r'},
+        {t:'ต้นทุน/หน่วย',a:'r'},{t:'คงเหลือ',a:'r'},{t:'มูลค่าคงเหลือ',a:'r'}],
+      rows,
+      foot:['', '', 'รวม', {n:M(String(c.inQty))}, {n:c.inValue}, {n:M(String(c.outQty))}, {n:c.outValue}, '', {n:M(String(c.closing.qty))}, {n:c.closing.value}],
+    }),
+    foot:'บัญชีคุมสินค้ารายตัว ใช้เป็นรายงานสินค้าและวัตถุดิบตามมาตรา 87(3) ได้ · ยอดคงเหลือตรงกับทะเบียนสินค้า',
+  });
+}
+function scStockCard() {
+  const r = stockRange();
+  const s = stockSummary(r.from, r.to);
+  const rows = s.rows.filter((x) => hit(x.code) || hit(x.name));
+  const diff = s.totals.closing - s.gl;
+  return (STATE.sel ? stockCardDetail(STATE.sel) : '')
+    + card({
+      title:'รายงานสินค้าคงเหลือ',
+      sub: thDate(r.from) + ' ถึง ' + thDate(r.to) + ' · ' + s.rows.length + ' รายการ · กดที่สินค้าเพื่อดูสต๊อกการ์ด',
+      actions: btn('stock:range:' + (r.ytd ? 'month' : 'ytd'), r.ytd ? 'ดูเฉพาะเดือนนี้' : 'ดูตั้งแต่ต้นปี')
+        + btn('stock:new:count', 'ตรวจนับ', periodIsOpen() ? '' : 'disabled'),
+      filters: searchBox('ค้นหารหัสหรือชื่อสินค้า'),
+      body: stockGapNote() + tbl({
+        cols:[{t:'รหัส'},{t:'ชื่อสินค้า'},{t:'หน่วย'},{t:'ยกมา',a:'r'},{t:'รับ',a:'r'},{t:'จ่าย',a:'r'},{t:'คงเหลือ',a:'r'},
+          {t:'มูลค่ายกมา',a:'r'},{t:'มูลค่ารับ',a:'r'},{t:'มูลค่าจ่าย',a:'r'},{t:'มูลค่าคงเหลือ',a:'r'}],
+        rows: rows.map((x) => [{mono:x.code}, x.name, x.uom, {n:M(String(x.opening.qty))}, {n:M(String(x.inQty))},
+          {n:M(String(x.outQty))}, {n:M(String(x.closing.qty)), cls: x.closing.qty < 0 ? 'bad' : ''},
+          {n:x.opening.value}, {n:x.inValue}, {n:x.outValue}, {n:x.closing.value}]),
+        rowAttr: (row) => 'class="row-link" data-act="sel:' + row[0].mono + '"',
+        foot:['', '', '', '', '', '', 'รวม', {n:s.totals.opening}, {n:s.totals.inValue}, {n:s.totals.outValue}, {n:s.totals.closing}],
+        empty:'ยังไม่มีสินค้าที่มีสต๊อก',
+      })
+      + '<div class="reco"><div><span>มูลค่าสินค้ารายตัว ณ ' + thDate(r.to) + '</span><b>' + fmt(s.totals.closing) + '</b></div>'
+      + '<div><span>บัญชีสินค้าคงเหลือในงบทดลอง</span><b>' + fmt(s.gl) + '</b></div>'
+      + '<div class="gt"><span>ผลต่าง</span><b class="' + (diff ? 'neg' : '') + '">' + fmt(diff) + '</b></div></div>',
+      foot: diff === 0 ? 'มูลค่าสินค้ารายตัวตรงกับบัญชีสินค้าคงเหลือพอดี' : 'ยังไม่ตรงกัน — ระบบไม่ให้ปิดงวดจนกว่าจะตรง',
+    });
+}
+
+/* ---------- ไฟล์รายการสินค้าคงเหลือที่หน้านำเข้า ---------- */
+function importStockCard(IMP) {
+  const st = readStockFile(IMP.rows, IMP.stock.map, IMP.stock.headerRow);
+  const date = IMP.stockDate || (IMP.dates && IMP.dates.to) || pEnd();
+  const total = st.rows.reduce((s, r) => s + r.amount, 0);
+  const free = stockUnallocated(date);
+  const known = (r) => r.code ? DB.items.find((x) => x.code === r.code) : DB.items.find((x) => norm(x.name) === norm(r.name));
+  const bad = st.skipped.filter((x) => x.bad);
+  const over = free > 0 && total > free;
+  const fresh = st.rows.filter((r) => !known(r)).length;
+  const notStock = st.rows.filter((r) => { const k = known(r); return k && k.type !== 'stock'; });
+  const ready = st.rows.length > 0 && !bad.length && !over && !notStock.length;
+  return card({
+    title:'ไฟล์รายการสินค้าคงเหลือ — ตั้งยอดสินค้ายกมา',
+    sub: esc(IMP.name) + ' · อ่านได้ ' + st.rows.length + ' รายการ · มูลค่ารวม ' + fmt(total) + ' บาท',
+    actions: btn('imp:reset', 'เลือกไฟล์ใหม่') + btn('stockimp:run', 'ตั้งยอดสินค้ายกมา', ready ? 'primary' : 'disabled'),
+    body:'<div class="flds">' + field({ name:'stockDate', label:'วันที่ยอดยกมา', type:'date', value: date,
+        hint: IMP.dates ? 'ไฟล์ระบุ ณ ' + thDate(IMP.dates.to) : 'ใช้วันเดียวกับวันตัดยอดของงบทดลองที่นำเข้า' }) + '</div>'
+      + '<div class="reco">'
+      + '<div><span>มูลค่าสินค้าในไฟล์</span><b>' + fmt(total) + '</b></div>'
+      + '<div><span>ยอดสินค้าในบัญชีที่ยังไม่แยกรายตัว ณ ' + thDate(date) + '</span><b>' + fmt(Math.max(0, free)) + '</b></div>'
+      + '<div class="gt"><span>' + (free > 0 ? 'เหลือที่ยังไม่แยกหลังนำเข้า' : 'จะลงบัญชี Dr สินค้า / Cr ปรับปรุงยอดยกมา') + '</span><b class="'
+        + (over ? 'neg' : '') + '">' + fmt(free > 0 ? free - total : total) + '</b></div></div>'
+      + (over ? '<div class="note warn">มูลค่าในไฟล์มากกว่ายอดสินค้าคงเหลือในบัญชีที่ยังไม่แยกรายตัว — ตรวจจำนวนและต้นทุน หรือวันที่ให้ตรงกับงบทดลองที่นำเข้า</div>' : '')
+      + (free > 0 && total < free && !over ? '<div class="note">ยังเหลือยอดที่ไม่แยกรายตัว ' + fmt(free - total) + ' บาท หลังนำเข้า — ถ้าไฟล์ครบทุกรายการแล้ว ยอดควรเท่ากันพอดี</div>' : '')
+      + (fresh ? '<div class="note">มีสินค้าใหม่ ' + fresh + ' รายการที่ยังไม่อยู่ในทะเบียน ระบบจะสร้างให้ด้วยรหัสและชื่อจากไฟล์</div>' : '')
+      + (notStock.length ? '<div class="note warn">รายการเหล่านี้เป็นบริการในทะเบียน ตั้งสต๊อกไม่ได้: ' + esc(notStock.map((r) => r.code || r.name).join(', ')) + '</div>' : '')
+      + (bad.length ? '<div class="note warn">อ่านไม่ออก ' + bad.length + ' แถว: ' + esc(bad.slice(0, 5).map((x) => 'แถว ' + x.line + ' ' + x.why).join(' · ')) + ' — แก้ในไฟล์แล้วลากเข้ามาใหม่</div>' : '')
+      + tbl({
+        cols:[{t:'แถว',a:'r'},{t:'รหัส'},{t:'ชื่อสินค้า'},{t:'หน่วย'},{t:'จำนวน',a:'r'},{t:'ต้นทุน/หน่วย',a:'r'},{t:'มูลค่า',a:'r'},{t:'ในทะเบียน'}],
+        rows: st.rows.map((r) => { const k = known(r); return [{c:String(r.line)}, {mono:r.code || '—'}, r.name, r.uom || '',
+          {n:M(String(r.qty))}, {n:r.qty ? unitCost(r.amount, r.qty) : 0}, {n:r.amount},
+          k ? (k.type === 'stock' ? {dim:'มีแล้ว ' + k.code} : {st:['late','เป็นบริการ']}) : {st:['open','สร้างใหม่']}]; }),
+        foot:['', '', '', '', '', 'รวม', {n:total}, ''],
+      })
+      + (st.skipped.length ? '<details class="adv"><summary>ข้ามไป ' + st.skipped.length + ' แถว — กดดูทุกแถว</summary>'
+        + tbl({ cols:[{t:'แถว',a:'r'},{t:'รหัส'},{t:'ชื่อ'},{t:'เหตุผล'}],
+            rows: st.skipped.map((x) => [{c:String(x.line)}, {mono:x.code || ''}, x.name || '', x.bad ? {st:['late', x.why]} : {dim:x.why}]) })
+        + '</details>' : ''),
+    foot:'ยอดยกมาของสินค้ารายตัวเข้าคลังเป็นเอกสาร "ยอดยกมา" หนึ่งใบ ยกเลิกได้ · บัญชีสินค้าคงเหลือที่ยกมากับงบทดลองแล้วจะไม่ถูกลงซ้ำ',
+  });
+}
+
+/** ปุ่มทั้งหมดของหน้าสต๊อก */
+function stockDispatch(rest) {
+  const what = rest[0], arg = rest.slice(1).join(':');
+  if (what === 'new') { modalStockAdj(arg); return true; }
+  if (what === 'void') { modalStockVoid(arg); return true; }
+  if (what === 'range') { STATE.stockRange = arg; render(); return true; }
+  if (what === 'card') { STATE.screen = 'stockcard'; STATE.sel = arg; render(); return true; }
+  return false;
+}
+function runStockImport() {
+  const I = STATE.imp;
+  if (!I || I.kind !== 'stock') return;
+  runAction(function () {
+    const st = readStockFile(I.rows, I.stock.map, I.stock.headerRow);
+    const date = val('stockDate') || I.stockDate || (I.dates && I.dates.to) || pEnd();
+    const r = importOpeningStock(st.rows, date, I.name);
+    STATE.imp = null; STATE.screen = 'stockadj'; STATE.sel = r.doc.no; STATE.period = periodOf(r.doc.date);
+    toast('ตั้งยอดสินค้ายกมา ' + r.doc.lines.length + ' รายการแล้ว', 'ok',
+      'มูลค่า ' + fmt(r.doc.valueIn) + ' บาท' + (r.created ? ' · สร้างสินค้าใหม่ ' + r.created + ' รายการ' : ''));
   });
 }
 
@@ -10918,6 +11667,10 @@ const CREATE_MENU = [
     ['new:payment', 'จ่ายชำระเจ้าหนี้'], ['new:expense', 'ค่าใช้จ่าย'],
     ['new:whtcert', 'หนังสือรับรอง 50 ทวิ'], ['new:paymentbatch', 'ใบเตรียมจ่าย'],
   ]},
+  { s:'สต๊อก', icon:'box', items:[
+    ['stock:new:opening', 'ตั้งยอดสินค้ายกมา'], ['stock:new:count', 'ตรวจนับสินค้า'],
+    ['stock:new:writeoff', 'ตัดจำหน่ายสินค้า'], ['stock:new:issue', 'เบิกสินค้าไปใช้'],
+  ]},
   { s:'บัญชี', icon:'book', items:[
     ['jv:general', 'ใบสำคัญทั่วไป'], ['jv:purchase', 'ใบสำคัญซื้อ'], ['jv:sales', 'ใบสำคัญขาย'],
     ['jv:payment', 'ใบสำคัญจ่าย'], ['jv:receipt', 'ใบสำคัญรับ'],
@@ -10937,6 +11690,8 @@ const SCREEN_WORDS = {
   invoices:'invoice tax ขาย', receipts:'receipt รับเงิน', bills:'ap เจ้าหนี้ ซื้อ', expenses:'expense จ่าย',
   ar:'ลูกหนี้ aging', ap:'เจ้าหนี้ aging', close:'ปิดบัญชี ปิดเดือน', settings:'ตั้งค่า บริษัท company',
   paymentprep:'จ่ายเงิน payment run', billingnotes:'billing วางบิล', goodsreceipts:'grn รับของ',
+  stockadj:'stock count ตรวจนับ นับสต๊อก ปรับปรุงสต๊อก ตัดสต๊อก ของเสีย เบิก ยอดยกมาสินค้า', stockcard:'stock card สต๊อกการ์ด สินค้าคงเหลือ รายงานสินค้าและวัตถุดิบ inventory',
+  items:'สินค้า stock inventory สต๊อก', stockmoves:'stock movement เคลื่อนไหว',
 };
 
 /* ---------- เมนูสร้างเอกสาร ---------- */
@@ -11761,7 +12516,7 @@ function modalItem(code) {
     title: it ? 'แก้ไข ' + it.code : 'เพิ่มสินค้าหรือบริการ',
     sub: it && it.type === 'stock'
       ? 'คงเหลือ ' + it.qty + ' ' + it.uom + ' · ต้นทุนเฉลี่ย ' + fmt(it.avgCost)
-        + ' — จำนวนและต้นทุนแก้ที่นี่ไม่ได้ ต้องมาจากเอกสารซื้อขาย'
+        + ' — จำนวนเปลี่ยนด้วยเอกสารซื้อขาย หรือ ตรวจนับ/ยอดยกมา ที่หน้าสต๊อก'
       : 'สินค้าจะตัดสต๊อกและต้นทุนขายอัตโนมัติ ส่วนบริการไม่แตะสต๊อก',
     body:'<div class="flds">'
       + field({ name:'name', label:'ชื่อสินค้าหรือบริการ', wide:true, value: it ? it.name : '' })
@@ -12849,6 +13604,8 @@ function dispatch(act) {
     if (what === 'edit') modalPartner(null, v);
     return;
   }
+  if (head === 'stock') { stockDispatch(rest); return; }
+  if (head === 'stockimp') { runStockImport(); return; }
   if (head === 'item') {
     if (rest[0] === 'new') modalItem(null);
     if (rest[0] === 'edit') modalItem(rest[1]);
@@ -12981,6 +13738,7 @@ function bindEvents() {
     /* วันตัดยอดเปลี่ยน — การ์ดตรวจเทียบต้องเปลี่ยนไปเทียบกับยอดยกมาของวันนั้นด้วย */
     if (t.name === 'cutoff' && STATE.imp && STATE.imp.rows) { STATE.imp.cutoff = t.value; STATE.imp.verifyNo = null; STATE.imp.ack = false; render(); return; }
     if (t.id === 'impAck') { if (STATE.imp) { STATE.imp.ack = t.checked; render(); } return; }
+    if (t.name === 'stockDate' && STATE.imp) { STATE.imp.stockDate = t.value; render(); return; }
     if (t.id === 'impMode') {
       const I = STATE.imp;
       if (I) {
@@ -13284,6 +14042,14 @@ async function handleFile(file) {
 
     /* เดาหัวตารางไม่ได้ ก็ต้องไม่ตัน — พาไปหน้าจับคู่คอลัมน์ด้วยมือแทน
        การบอกให้ผู้ใช้กลับไปแก้ไฟล์เองคือทางตันสำหรับคนที่ไม่ถนัดคอมพิวเตอร์ */
+    /* ไฟล์รายการสินค้าคงเหลือ (จำนวน + ต้นทุน ไม่มีเดบิต/เครดิต) — ตั้งยอดสินค้ายกมา ไม่ใช่งบทดลอง */
+    const stk = detectStockColumns(rows);
+    if (stk.ok) {
+      STATE.imp = { name: file.name, rows: rows, kind: 'stock', stock: stk, headerRow: stk.headerRow,
+        dates: readFileDates(rows, stk.headerRow), stockDate: null };
+      render();
+      return;
+    }
     const det = detectColumns(rows);
     const kind = detectFileKind(rows, det.map, det.headerRow);
     /* วันที่ในหัวไฟล์ตั้งวันตัดยอดให้ตรงกับงบทดลอง — ค่าเดิม (วันแรกของงวดที่เปิดอยู่) ผิดเกือบทุกครั้ง */

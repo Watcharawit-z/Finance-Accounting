@@ -1,6 +1,6 @@
 /* ทดสอบเครื่องบัญชีในเบราว์เซอร์ — รันด้วย node webapp/test.js */
 const fs = require('fs');
-const src = ['engine','operations','seed','import','verify'].map(f => fs.readFileSync(__dirname + '/src/' + f + '.js','utf8')).join('\n');
+const src = ['engine','operations','stock','seed','import','verify'].map(f => fs.readFileSync(__dirname + '/src/' + f + '.js','utf8')).join('\n');
 const ctx = new Function(src + '\nreturn {DB,buildSeed,trialBalance,balanceSheet,incomeStatement,cashFlow,' +
   'reconciliationChecks,aging,issueInvoice,receivePayment,issueCreditNote,recordBill,payBill,' +
   'runPayroll,runDepreciation,fileVat,fileWht,post,reverse,fmt,M,validTaxId,DomainError,' +
@@ -17,7 +17,8 @@ const ctx = new Function(src + '\nreturn {DB,buildSeed,trialBalance,balanceSheet
   'createPaymentBatch,approvePaymentBatch,payPaymentBatch,postJournalVoucher,journalOf,' +
   'bahtText,equityStatement,saveCompany,companyGaps,verifyAgainstFile,importHealth,importFor,voidDocument,voidPreview,voidCheck,voidRun,runCheck,' +
   'creditableBase,matchBankTxn,reopenPeriod,repairDuplicateEntryNos,loadState,' +
-  'tbFileChecks,importPreflight,readFileDates,decodeText,satangOf,defaultSet,importPackage,accBySub,acc,matchAccount};')();
+  'tbFileChecks,importPreflight,readFileDates,decodeText,satangOf,defaultSet,importPackage,accBySub,acc,matchAccount,' +
+  'saveStockAdj,voidStockAdj,stockCard,stockSummary,stockValueAsOf,stockUnallocated,detectStockColumns,readStockFile,importOpeningStock};')();
 
 let pass = 0, fail = 0;
 function ok(label, cond, extra) {
@@ -1440,22 +1441,129 @@ console.log('\n=== 10.6 หลังเริ่มใช้ระบบ: เอ
     items: [{ code: 'X', name: 'ของเศษหน่วย', avgCost: '880.3333', qty: 12.5 }],
     trialBalance: [{ code: '1113', name: 'เงินฝากธนาคาร–กระแสรายวัน', debit: '100000', credit: '' },
       { code: '1131', name: 'ลูกหนี้การค้า–ในประเทศ', debit: '15000', credit: '' },
-      { code: '3120', name: 'ทุนที่ออกและชำระแล้ว', debit: '', credit: '115000' }],
+      { code: '1154', name: 'สินค้าคงเหลือ', debit: '11004.17', credit: '' },
+      { code: '3120', name: 'ทุนที่ออกและชำระแล้ว', debit: '', credit: '126004.17' }],
     openInvoices: [{ no: 'IV-1', date: '2026-06-01', partnerCode: 'C-001', partnerName: 'ลูกค้า ก', base: '9345.79', vat: '654.21', total: '10000' },
       { no: 'IV-2', date: '2026-06-05', partnerCode: 'C-002', partnerName: 'ลูกค้า ข', base: '4672.90', vat: '327.10', total: '5000' }] };
   const r = ctx.importPackage(JSON.parse(JSON.stringify(pkg)), {});
   const arLines = r.opening.entry.lines.filter((l) => l.acc === '1131');
   ok('★ ลูกหนี้ยกมาแยกบรรทัดตามลูกค้าจากเอกสารค้าง (บัญชีย่อยรายลูกค้าถูกตั้งแต่วันแรก)',
     arLines.length === 2 && arLines.some((l) => l.partner === 'C-001' && l.dr === ctx.M('10000')) && r.allPassed);
-  ok('มูลค่าสินค้าที่จำนวนมีทศนิยมเป็นจำนวนเต็มสตางค์', Number.isInteger(ctx.DB.items[0].value), String(ctx.DB.items[0].value));
+  ok('มูลค่าสินค้าที่จำนวนมีทศนิยมเป็นจำนวนเต็มสตางค์ และเท่าบัญชีสินค้าคงเหลือ', ctx.DB.items[0].value === ctx.M('11004.17')
+    && ctx.reconciliationChecks('2026-06-30').checks.find((c) => c.code === 'INVENTORY_SUBLEDGER').ok, String(ctx.DB.items[0].value));
+  ok('สินค้ายกมาจากแฟ้มเข้าคลังเป็นรายการยกมา (มีที่มาในสต๊อกการ์ด)', ctx.DB.docs.stockMove.some((m) => m.item === 'X' && m.src === r.opening.entry.no && m.dir === 'in'));
   const rv = ctx.reverseImport(r.opening.entry.no, 'ทดสอบ: ยกเลิกแฟ้มข้อมูล');
   ok('★ ยกเลิกการนำเข้าแฟ้มข้อมูล เอกสารค้างยกมาถูกยกเลิกตาม ทะเบียนลูกหนี้ตรงกับบัญชีคุม',
     rv.voidedDocs === 2 && ctx.reconciliationChecks('2026-06-30').checks.find((c) => c.code === 'AR_SUBLEDGER').ok);
+  ok('★ ยกเลิกการนำเข้าแล้วสินค้ายกมาออกจากคลังด้วย ทะเบียนสินค้าตรงกับบัญชี', ctx.DB.items[0].qty === 0
+    && ctx.reconciliationChecks('2026-06-30').checks.find((c) => c.code === 'INVENTORY_SUBLEDGER').ok);
   const again = ctx.importPackage(JSON.parse(JSON.stringify(pkg)), {});
   ok('★ นำเข้าแฟ้มเดิมใหม่หลังยกเลิก เอกสารค้างกลับมาครบ ยอดคุมตรง', again.invoices === 2 && again.allPassed);
   throws('★ ยอดเงินในแฟ้มที่อ่านไม่ออกต้องหยุด ไม่กลายเป็นศูนย์เงียบ ๆ',
     () => ctx.importPackage(Object.assign(JSON.parse(JSON.stringify(pkg)), { cutoff: '2026-07-31',
       trialBalance: [{ code: '1113', name: 'x', debit: '1O0', credit: '' }] }), {}), 'BAD_AMOUNT');
+}
+
+/* ===================================================================
+   11. ระบบสต๊อก — ยอดยกมา ตรวจนับ ตัดจำหน่าย เบิกใช้ สต๊อกการ์ด และยอดคุม
+   =================================================================== */
+console.log('\n=== 11. ระบบสต๊อก: บริษัทเปล่ามีสต๊อกได้จริง ===');
+{
+  ctx.buildBlank({ name: 'บริษัท ทดสอบสต๊อก จำกัด', year: 2026 });
+  const S = ctx.DB;
+  ctx.saveItem({ newCode: 'W25', name: 'สายไฟ 2.5', type: 'stock', uom: 'ม้วน', price: '1200' });
+  ctx.saveItem({ newCode: 'CB16', name: 'เบรกเกอร์', type: 'stock', uom: 'ตัว', price: '350' });
+  ctx.saveItem({ newCode: 'SV', name: 'ค่าติดตั้ง', type: 'service', uom: 'งาน', price: '500' });
+  const cust = ctx.savePartner({ kind: 'customer', name: 'บริษัท ลูกค้า จำกัด', taxId: '0105548021442', branch: '00000', address: 'กรุงเทพฯ' }).partner;
+  const sell = (date, code, qty) => ctx.issueInvoice({ partnerCode: cust.code, date, lines: [{ itemCode: code, desc: code, qty, price: '1000', taxCode: 'VAT7' }] });
+  const chk = (d) => ctx.reconciliationChecks(d).checks.find((c) => c.code === 'INVENTORY_SUBLEDGER');
+  throws('ยังไม่มีของ ขายไม่ได้ (คำแนะนำบอกทางตั้งยอดยกมา)', () => sell('2026-06-05', 'W25', 1), 'INSUFFICIENT_STOCK');
+
+  const op = ctx.saveStockAdj({ kind: 'opening', date: '2026-06-01', lines: [
+    { itemCode: 'W25', qty: 10, unitCost: '800' }, { itemCode: 'CB16', qty: 40, value: '8420' }] });
+  ok('★ ตั้งยอดสินค้ายกมาได้ (บริษัทเปล่า ลงบัญชี Dr สินค้า / Cr ปรับปรุงยอดยกมา)', op.mode === 'post' && op.valueIn === ctx.M('16420')
+    && S.items.find((i) => i.code === 'W25').qty === 10 && !!op.entryNo, op.no + ' ' + ctx.fmt(op.valueIn));
+  ok('ใบยอดยกมาเป็นใบสำคัญประเภทยอดยกมา (งบกระแสเงินสด/ส่วนของผู้ถือหุ้นนับเป็นยอดต้นงวด)',
+    S.entries.find((e) => e.no === op.entryNo).type === 'opening');
+  ok('★ ทะเบียนสินค้า = บัญชีสินค้าคงเหลือ', chk('2026-06-30').ok);
+  const inv = sell('2026-06-10', 'W25', 3);
+  ok('มีของแล้วขายได้ ตัดต้นทุนที่ต้นทุนเฉลี่ย', inv && S.items.find((i) => i.code === 'W25').qty === 7 && chk('2026-06-30').ok);
+
+  const cnt = ctx.saveStockAdj({ kind: 'count', date: '2026-06-30', reason: 'ตรวจนับสิ้นเดือน', lines: [
+    { itemCode: 'W25', qty: 7 }, { itemCode: 'CB16', qty: 38 }] });
+  const je = S.entries.find((e) => e.no === cnt.entryNo);
+  ok('★ ตรวจนับ: ของขาด 2 ตัว ลงผลขาดทุนจากสินค้าที่ต้นทุนเฉลี่ย ตัวที่ตรงไม่ลงอะไร',
+    cnt.valueOut === ctx.M('421') && cnt.lines[0].diff === 0 && cnt.lines[1].diff === -2
+    && je.lines.some((l) => ctx.acc(l.acc).subType === 'inventory_writeoff' && l.dr === ctx.M('421')), ctx.fmt(cnt.valueOut));
+  const over = ctx.saveStockAdj({ kind: 'count', date: '2026-06-30', lines: [{ itemCode: 'W25', qty: 8 }] });
+  ok('ตรวจนับ: ของเกิน ลงรายได้อื่นที่ต้นทุนเฉลี่ย', over.valueIn === ctx.M('800')
+    && S.entries.find((e) => e.no === over.entryNo).lines.some((l) => ctx.acc(l.acc).subType === 'other_income' && l.cr === ctx.M('800')));
+  ok('ตรวจนับที่ยอดตรงทุกรายการ ไม่มีใบสำคัญ', !ctx.saveStockAdj({ kind: 'count', date: '2026-06-30', lines: [{ itemCode: 'W25', qty: 8 }] }).entryNo);
+  throws('★ ตรวจนับย้อนหลังก่อนรายการล่าสุดไม่ได้ (ยอดในระบบไม่ใช่ยอด ณ วันนั้น)',
+    () => ctx.saveStockAdj({ kind: 'count', date: '2026-06-09', lines: [{ itemCode: 'W25', qty: 1 }] }), 'STOCK_BACKDATED');
+  const wo = ctx.saveStockAdj({ kind: 'writeoff', date: '2026-06-30', reason: 'สายไฟชำรุดจากน้ำท่วม', lines: [{ itemCode: 'W25', qty: 1 }] });
+  ok('ตัดจำหน่ายของเสีย ลงผลขาดทุนจากสินค้า', wo.valueOut === ctx.M('800') && S.items.find((i) => i.code === 'W25').qty === 7);
+  throws('ตัดจำหน่ายต้องมีเหตุผล', () => ctx.saveStockAdj({ kind: 'writeoff', date: '2026-06-30', lines: [{ itemCode: 'W25', qty: 1 }] }), 'REASON_REQUIRED');
+  throws('ตัดจำหน่ายเกินของที่มีไม่ได้', () => ctx.saveStockAdj({ kind: 'writeoff', date: '2026-06-30', reason: 'หาย', lines: [{ itemCode: 'W25', qty: 99 }] }), 'INSUFFICIENT_STOCK');
+  const office = S.accounts.find((a) => a.postable && a.type === 'expense' && /วัสดุ/.test(a.name)) || S.accounts.find((a) => a.subType === 'admin_expense' && a.postable);
+  const iss = ctx.saveStockAdj({ kind: 'issue', date: '2026-06-30', reason: 'ใช้ซ่อมสำนักงาน', account: office.code, lines: [{ itemCode: 'CB16', qty: 2 }] });
+  ok('เบิกใช้ ลงค่าใช้จ่ายตามบัญชีที่เลือก', S.entries.find((e) => e.no === iss.entryNo).lines.some((l) => l.acc === office.code && l.dr === iss.valueOut));
+  throws('บริการไม่มีสต๊อก', () => ctx.saveStockAdj({ kind: 'count', date: '2026-06-30', lines: [{ itemCode: 'SV', qty: 1 }] }), 'ITEM_NOT_STOCK');
+  ok('★ หลังทุกงาน ทะเบียนสินค้ายังเท่าบัญชีสินค้าคงเหลือทุกสตางค์', chk('2026-06-30').ok, ctx.fmt(chk('2026-06-30').control));
+
+  const card = ctx.stockCard('CB16', '2026-06-01', '2026-06-30');
+  ok('★ สต๊อกการ์ด: ยกมา + รับ − จ่าย = คงเหลือ ทั้งจำนวนและมูลค่า และตรงกับทะเบียน',
+    card.rows.length === 3 && card.closing.qty === S.items.find((i) => i.code === 'CB16').qty
+    && card.opening.value + card.inValue - card.outValue === card.closing.value && card.closing.value === S.items.find((i) => i.code === 'CB16').value,
+    card.rows.map((r) => r.kind).join(' → '));
+  const sum = ctx.stockSummary('2026-06-01', '2026-06-30');
+  ok('รายงานสินค้าคงเหลือรวมทุกตัว = บัญชีสินค้าคงเหลือ', sum.totals.closing === sum.gl && sum.rows.length === 2);
+  ok('มูลค่าสินค้า ณ วันที่ย้อนหลังคิดได้ (ก่อนยอดยกมาเป็นศูนย์)', ctx.stockValueAsOf('2026-05-31') === 0);
+
+  throws('★ ยกเลิกใบยอดยกมาไม่ได้ถ้าของถูกขายไปแล้ว', () => ctx.voidStockAdj(op.no, 'ทดสอบยกเลิกยอดยกมา'), 'VOID_HAS_DEPENDENTS');
+  const qBefore = S.items.find((i) => i.code === 'CB16').qty;
+  ctx.voidStockAdj(cnt.no, 'นับผิด นับใหม่');
+  ok('ยกเลิกใบตรวจนับ คืนสต๊อกและกลับรายการบัญชี', S.items.find((i) => i.code === 'CB16').qty === qBefore + 2
+    && S.entries.find((e) => e.no === cnt.entryNo).status === 'reversed' && chk('2026-06-30').ok);
+  throws('ใบสำคัญของใบปรับปรุงสินค้ากลับรายการตรง ๆ ไม่ได้', () => ctx.reverse(wo.entryNo, 'ทดสอบกลับรายการ'), 'ENTRY_FROM_DOCUMENT');
+  throws('★ บันทึกสินค้าคงเหลือด้วยใบสำคัญทั่วไปไม่ได้ (ทะเบียนจะไม่ตรงบัญชี)', () => ctx.postJournalVoucher({ book: 'general', date: '2026-06-30',
+    desc: 'ปรับสินค้า', lines: [{ acc: ctx.accBySub('inventory'), dr: '100' }, { acc: ctx.accBySub('other_income'), cr: '100' }] }), 'CONTROL_ACCOUNT_MANUAL');
+  const vend = ctx.savePartner({ kind: 'vendor', name: 'บริษัท ผู้ขาย จำกัด', taxId: '0105536000003', branch: '00000', address: 'กรุงเทพฯ' }).partner;
+  throws('★ ตั้งหนี้ลงบัญชีสินค้าคงเหลือโดยไม่เลือกสินค้าไม่ได้', () => ctx.recordBill({ date: '2026-06-30', partnerCode: vend.code, vendorNo: 'IV-1',
+    lines: [{ desc: 'ของ', qty: 1, price: '100', acc: ctx.accBySub('inventory') }] }), 'BILL_INVENTORY_NEEDS_ITEM');
+}
+
+console.log('\n=== 11.1 สต๊อกหลังนำเข้างบทดลอง: แยกยอดเป็นรายตัว ไม่ลงบัญชีซ้ำ ===');
+{
+  ctx.buildBlank({ name: 'บริษัท ย้ายระบบ จำกัด', year: 2026 });
+  ctx.importOpeningBalances([{ code: '11122.01', name: 'กสิกรไทย', debit: ctx.M('100000'), credit: 0 },
+    { code: '11511', name: 'สินค้าสำเร็จรูปคงเหลือ', debit: ctx.M('25420'), credit: 0 },
+    { code: '31110', name: 'ทุน', debit: 0, credit: ctx.M('125420') }], '2026-06-30', {});
+  const c0 = ctx.reconciliationChecks('2026-06-30').checks.find((c) => c.code === 'INVENTORY_SUBLEDGER');
+  ok('★ ยกยอดสินค้ารวมมาแต่ยังไม่มีรายตัว ยอดคุมไม่ผ่านพร้อมเหตุผล (ปิดงวดไม่ได้)', !c0.ok && /รายตัว/.test(c0.why), c0.why);
+  ok('ยอดที่ยังไม่แยกรายตัว = ยอดสินค้าในงบทดลอง', ctx.stockUnallocated('2026-06-30') === ctx.M('25420'));
+  const csv = 'รายงานสินค้าคงเหลือ\nณ วันที่ 30/06/2569\n\nรหัสสินค้า,ชื่อสินค้า,หน่วย,จำนวนคงเหลือ,ต้นทุนต่อหน่วย,มูลค่าคงเหลือ\n'
+    + 'W25,สายไฟ 2.5,ม้วน,10,800.00,"8,000.00"\nCB16,เบรกเกอร์,ตัว,40,210.50,"8,420.00"\nMC1,มอเตอร์,ชุด,2,4500,\nZ0,ของหมด,ชิ้น,0,10,0\n,รวม,,,,"25,420.00"\n';
+  const rows = ctx.parseCsv(csv);
+  const det = ctx.detectStockColumns(rows);
+  ok('★ จับได้ว่าเป็นไฟล์รายการสินค้าคงเหลือ (จำนวน + ต้นทุน ไม่มีเดบิต/เครดิต)', det.ok && det.map.qty === 3 && det.map.cost === 4 && det.map.value === 5);
+  const st = ctx.readStockFile(rows, det.map, det.headerRow);
+  ok('อ่านได้ครบ ข้ามแถวรวมและสินค้าจำนวนศูนย์ มูลค่าว่างคิดจากต้นทุน × จำนวน',
+    st.rows.length === 3 && st.rows[2].amount === ctx.M('9000') && st.skipped.length === 2 && st.rows[0].line === 5, JSON.stringify(st.skipped.map((x) => x.line + ':' + x.why)));
+  const tbDet = ctx.detectColumns(rows);
+  ok('ไฟล์งบทดลองไม่ถูกเข้าใจผิดว่าเป็นไฟล์สินค้า', !ctx.detectStockColumns(ctx.parseCsv('รหัสบัญชี,ชื่อบัญชี,เดบิต,เครดิต\n1111,เงินสด,100,\n3111,ทุน,,100')).ok);
+  void tbDet;
+  const entriesBefore = ctx.DB.entries.length;
+  throws('มูลค่าเกินยอดสินค้าในงบทดลองถูกปฏิเสธ', () => ctx.saveStockAdj({ kind: 'opening', date: '2026-06-30',
+    lines: [{ itemCode: ctx.saveItem({ newCode: 'BIG', name: 'ของแพง', type: 'stock' }).item.code, qty: 1, value: '99999' }] }), 'OPENING_STOCK_EXCEEDS');
+  const r = ctx.importOpeningStock(st.rows, '2026-06-30', 'สินค้าคงเหลือ.csv');
+  ok('★ ตั้งยอดสินค้ายกมาจากไฟล์: สร้างสินค้าที่ยังไม่มี แยกยอดเป็นรายตัว ไม่ลงบัญชีซ้ำ',
+    r.created === 3 && r.doc.mode === 'allocate' && !r.doc.entryNo && ctx.DB.entries.length === entriesBefore, 'สร้างใหม่ ' + r.created);
+  ok('★ หลังตั้งยอดครบ ทะเบียนสินค้า = บัญชีสินค้าคงเหลือ', ctx.reconciliationChecks('2026-06-30').checks.find((c) => c.code === 'INVENTORY_SUBLEDGER').ok);
+  ok('ขายได้ทันทีหลังตั้งยอด', (function () {
+    const cu = ctx.savePartner({ kind: 'customer', name: 'ลูกค้า', taxId: '0105548021442', branch: '00000', address: 'กทม.' }).partner;
+    return !!ctx.issueInvoice({ partnerCode: cu.code, date: '2026-07-02', lines: [{ itemCode: 'MC1', desc: 'มอเตอร์', qty: 1, price: '6000', taxCode: 'VAT7' }] }).no;
+  })());
 }
 
 console.log('\n════════════════════════════════════════');

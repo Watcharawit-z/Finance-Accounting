@@ -422,6 +422,8 @@ function navGroups() {
     ]},
     { g: 'สินค้า', icon: 'box', items: [
       ['items', 'ทะเบียนสินค้า', null],
+      ['stockadj', 'ยอดยกมา · ตรวจนับ · ตัดจำหน่าย', null],
+      ['stockcard', 'สต๊อกการ์ด · สินค้าคงเหลือ', null],
       ['stockmoves', 'ความเคลื่อนไหวสต๊อก', null],
     ]},
     { g: 'สินทรัพย์', icon: 'asset', items: [

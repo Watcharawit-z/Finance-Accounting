@@ -14,6 +14,10 @@ const CREATE_MENU = [
     ['new:payment', 'จ่ายชำระเจ้าหนี้'], ['new:expense', 'ค่าใช้จ่าย'],
     ['new:whtcert', 'หนังสือรับรอง 50 ทวิ'], ['new:paymentbatch', 'ใบเตรียมจ่าย'],
   ]},
+  { s:'สต๊อก', icon:'box', items:[
+    ['stock:new:opening', 'ตั้งยอดสินค้ายกมา'], ['stock:new:count', 'ตรวจนับสินค้า'],
+    ['stock:new:writeoff', 'ตัดจำหน่ายสินค้า'], ['stock:new:issue', 'เบิกสินค้าไปใช้'],
+  ]},
   { s:'บัญชี', icon:'book', items:[
     ['jv:general', 'ใบสำคัญทั่วไป'], ['jv:purchase', 'ใบสำคัญซื้อ'], ['jv:sales', 'ใบสำคัญขาย'],
     ['jv:payment', 'ใบสำคัญจ่าย'], ['jv:receipt', 'ใบสำคัญรับ'],
@@ -33,6 +37,8 @@ const SCREEN_WORDS = {
   invoices:'invoice tax ขาย', receipts:'receipt รับเงิน', bills:'ap เจ้าหนี้ ซื้อ', expenses:'expense จ่าย',
   ar:'ลูกหนี้ aging', ap:'เจ้าหนี้ aging', close:'ปิดบัญชี ปิดเดือน', settings:'ตั้งค่า บริษัท company',
   paymentprep:'จ่ายเงิน payment run', billingnotes:'billing วางบิล', goodsreceipts:'grn รับของ',
+  stockadj:'stock count ตรวจนับ นับสต๊อก ปรับปรุงสต๊อก ตัดสต๊อก ของเสีย เบิก ยอดยกมาสินค้า', stockcard:'stock card สต๊อกการ์ด สินค้าคงเหลือ รายงานสินค้าและวัตถุดิบ inventory',
+  items:'สินค้า stock inventory สต๊อก', stockmoves:'stock movement เคลื่อนไหว',
 };
 
 /* ---------- เมนูสร้างเอกสาร ---------- */

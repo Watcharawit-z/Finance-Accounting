@@ -80,9 +80,9 @@ cd apps/web && npm install && npm run dev    # http://localhost:5173
 ## การทดสอบ
 
 ```bash
-node tools/flowaccount-import/test.js  # 74 ข้อ — ย้ายข้อมูลจาก FlowAccount เข้าระบบจริง
-node webapp/test.js              # 391 ข้อ — เครื่องบัญชีในเบราว์เซอร์ (ไม่ต้องติดตั้งอะไร)
-node webapp/uitest.js            # 299 ข้อ — หน้าเว็บจริงใน Chromium ทุกหน้าจอทุกปุ่ม
+node tools/flowaccount-import/test.js  # 75 ข้อ — ย้ายข้อมูลจาก FlowAccount เข้าระบบจริง
+node webapp/test.js              # 426 ข้อ — เครื่องบัญชีในเบราว์เซอร์ (ไม่ต้องติดตั้งอะไร)
+node webapp/uitest.js            # 310 ข้อ — หน้าเว็บจริงใน Chromium ทุกหน้าจอทุกปุ่ม
 db/tests/run.sh                  # 43 ข้อ — กฎบัญชีที่บังคับในฐานข้อมูล
 cd apps/api && npm test          # 52 ข้อ — เงิน ภาษี บัญชีแยกประเภท RLS และสัญญา HTTP
 ```

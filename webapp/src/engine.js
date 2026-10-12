@@ -178,7 +178,7 @@ function blankState() {
       creditNote: [], debitNote: [],
       purchaseOrder: [], goodsReceipt: [], bill: [], payment: [],
       expense: [], whtCert: [], paymentBatch: [], customerRefund: [],
-      stockMove: [], payRun: [], depreciation: [], filing: [],
+      stockMove: [], stockAdj: [], payRun: [], depreciation: [], filing: [],
     },
     seq: {},             // {'invoice|2026-07': 12}
     budget: [],          // {account,period,amount}
@@ -333,7 +333,7 @@ function periodFor(date) {
    =================================================================== */
 const SEQ_PREFIX = {
   invoice:'INV', receipt:'RC', creditNote:'CN', debitNote:'DN', quotation:'QT', salesOrder:'SO',
-  purchaseOrder:'PO', bill:'AP', payment:'PV', whtCert:'WT', stockCount:'SC',
+  purchaseOrder:'PO', bill:'AP', payment:'PV', whtCert:'WT', stockCount:'SC', stockAdj:'ST',
   billingNote:'BN', goodsReceipt:'GR', expense:'EX', paymentBatch:'PB', customerRefund:'RF',
   je_sales:'SA', je_purchase:'PU', je_receipt:'RV', je_payment:'PY',
   je_general:'JV', je_adjustment:'JV', je_payroll:'PR', je_asset:'AS',
@@ -538,6 +538,7 @@ const ENTRY_FROM = {
   depreciation:['ค่าเสื่อมราคาประจำงวด', 'ไปที่หน้าค่าเสื่อมราคาแล้วกดยกเลิกงวด ระบบจะคืนค่าเสื่อมสะสมของทรัพย์สินให้ด้วย'],
   filing:['การยื่นแบบภาษี', 'แบบที่ยื่นแล้วต้องยื่นเพิ่มเติมกับกรมสรรพากร แล้วบันทึกปรับปรุงแทน'],
   import:['การนำเข้าข้อมูล', 'ยกเลิกที่หน้านำเข้าข้อมูลจากระบบเดิม'],
+  stockAdj:['ใบปรับปรุงสินค้า', 'เปิดใบปรับปรุงสินค้าที่หน้าสินค้า → ยอดยกมา ตรวจนับ ตัดจำหน่าย แล้วกดยกเลิก'],
   reversal:['การกลับรายการ', 'กลับรายการซ้อนไม่ได้ ให้บันทึกใบสำคัญใหม่แทน'],
 };
 
@@ -906,6 +907,17 @@ function aging(kind, asOf) {
   return { rows, totals: { notDue:sum('notDue'), b30:sum('b30'), b60:sum('b60'), b90:sum('b90'), over:sum('over'), total:sum('total') } };
 }
 
+/* ---------- มูลค่าสินค้าคงเหลือตามทะเบียน ณ วันที่ ----------
+   ย้อนจากมูลค่าปัจจุบันของสินค้าแต่ละตัว ด้วยรายการรับ/จ่ายที่เกิดหลังวันนั้น
+   ใช้ได้แม้สินค้าที่ยกมารุ่นก่อนไม่มีรายการรับเข้า (มูลค่าตั้งไว้ตรง ๆ) */
+function stockValueAsOf(asOf) {
+  let v = DB.items.reduce((s, i) => s + (i.type === 'stock' ? (i.value || 0) : 0), 0);
+  DB.docs.stockMove.forEach(function (m) {
+    if (m.date > asOf) v -= (m.dir === 'in' ? 1 : -1) * m.cost;
+  });
+  return v;
+}
+
 /* ---------- ตรวจยอดคุม ---------- */
 function reconciliationChecks(asOf) {
   const checks = [];
@@ -934,6 +946,15 @@ function reconciliationChecks(asOf) {
     .reduce((s, g) => s + g.total, 0);
   checks.push({ code:'GRNI_SUBLEDGER', label:'ใบรับสินค้าที่รอตั้งหนี้ = บัญชีพักรับสินค้า',
     control:grniControl, sub:grniSub, ok:grniControl === grniSub });
+
+  /* สินค้ารายตัวรวมกันต้องเท่าบัญชีสินค้าคงเหลือ — ไม่งั้นต้นทุนขายและกำไรผิดตั้งแต่ใบกำกับใบแรก */
+  const invControl = balBySub(['inventory'], asOf);
+  const invSub = stockValueAsOf(asOf);
+  checks.push({ code:'INVENTORY_SUBLEDGER', label:'มูลค่าสินค้ารายตัวรวม = บัญชีสินค้าคงเหลือ',
+    control:invControl, sub:invSub, ok:invControl === invSub,
+    why: (invControl !== invSub && invSub === 0 && invControl !== 0)
+      ? 'ยกยอดสินค้าคงเหลือรวมมาแล้ว แต่ยังไม่ได้ตั้งยอดสินค้ายกมาเป็นรายตัว'
+      : (invControl > invSub ? 'ยอดในบัญชีสูงกว่าสินค้ารายตัว ' + fmt(invControl - invSub) + ' บาท — ตั้งยอดยกมาส่วนที่เหลือ หรือหารายการที่ลงบัญชีสินค้าโดยไม่ผ่านเอกสาร' : null) });
 
   const glDiff = balanceOf(() => true, asOf);
   checks.push({ code:'GL_BALANCED', label:'เดบิตรวม = เครดิตรวม ทั้งฐานข้อมูล', control:glDiff, sub:0, ok:glDiff === 0 });

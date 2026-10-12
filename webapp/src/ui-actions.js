@@ -305,7 +305,7 @@ function modalItem(code) {
     title: it ? 'แก้ไข ' + it.code : 'เพิ่มสินค้าหรือบริการ',
     sub: it && it.type === 'stock'
       ? 'คงเหลือ ' + it.qty + ' ' + it.uom + ' · ต้นทุนเฉลี่ย ' + fmt(it.avgCost)
-        + ' — จำนวนและต้นทุนแก้ที่นี่ไม่ได้ ต้องมาจากเอกสารซื้อขาย'
+        + ' — จำนวนเปลี่ยนด้วยเอกสารซื้อขาย หรือ ตรวจนับ/ยอดยกมา ที่หน้าสต๊อก'
       : 'สินค้าจะตัดสต๊อกและต้นทุนขายอัตโนมัติ ส่วนบริการไม่แตะสต๊อก',
     body:'<div class="flds">'
       + field({ name:'name', label:'ชื่อสินค้าหรือบริการ', wide:true, value: it ? it.name : '' })
@@ -1393,6 +1393,8 @@ function dispatch(act) {
     if (what === 'edit') modalPartner(null, v);
     return;
   }
+  if (head === 'stock') { stockDispatch(rest); return; }
+  if (head === 'stockimp') { runStockImport(); return; }
   if (head === 'item') {
     if (rest[0] === 'new') modalItem(null);
     if (rest[0] === 'edit') modalItem(rest[1]);
@@ -1525,6 +1527,7 @@ function bindEvents() {
     /* วันตัดยอดเปลี่ยน — การ์ดตรวจเทียบต้องเปลี่ยนไปเทียบกับยอดยกมาของวันนั้นด้วย */
     if (t.name === 'cutoff' && STATE.imp && STATE.imp.rows) { STATE.imp.cutoff = t.value; STATE.imp.verifyNo = null; STATE.imp.ack = false; render(); return; }
     if (t.id === 'impAck') { if (STATE.imp) { STATE.imp.ack = t.checked; render(); } return; }
+    if (t.name === 'stockDate' && STATE.imp) { STATE.imp.stockDate = t.value; render(); return; }
     if (t.id === 'impMode') {
       const I = STATE.imp;
       if (I) {
@@ -1828,6 +1831,14 @@ async function handleFile(file) {
 
     /* เดาหัวตารางไม่ได้ ก็ต้องไม่ตัน — พาไปหน้าจับคู่คอลัมน์ด้วยมือแทน
        การบอกให้ผู้ใช้กลับไปแก้ไฟล์เองคือทางตันสำหรับคนที่ไม่ถนัดคอมพิวเตอร์ */
+    /* ไฟล์รายการสินค้าคงเหลือ (จำนวน + ต้นทุน ไม่มีเดบิต/เครดิต) — ตั้งยอดสินค้ายกมา ไม่ใช่งบทดลอง */
+    const stk = detectStockColumns(rows);
+    if (stk.ok) {
+      STATE.imp = { name: file.name, rows: rows, kind: 'stock', stock: stk, headerRow: stk.headerRow,
+        dates: readFileDates(rows, stk.headerRow), stockDate: null };
+      render();
+      return;
+    }
     const det = detectColumns(rows);
     const kind = detectFileKind(rows, det.map, det.headerRow);
     /* วันที่ในหัวไฟล์ตั้งวันตัดยอดให้ตรงกับงบทดลอง — ค่าเดิม (วันแรกของงวดที่เปิดอยู่) ผิดเกือบทุกครั้ง */
