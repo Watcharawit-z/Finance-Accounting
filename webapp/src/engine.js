@@ -179,7 +179,9 @@ function blankState() {
       purchaseOrder: [], goodsReceipt: [], bill: [], payment: [],
       expense: [], whtCert: [], paymentBatch: [], customerRefund: [],
       stockMove: [], stockAdj: [], payRun: [], depreciation: [], filing: [],
+      payRemit: [],      // นำส่งเงินสมทบประกันสังคม/กองทุนสำรองเลี้ยงชีพ (payroll.js)
     },
+    payDrafts: [],       // แผ่นงานเงินเดือนที่แก้ไว้แต่ยังไม่ลงบัญชี (payroll.js)
     seq: {},             // {'invoice|2026-07': 12}
     budget: [],          // {account,period,amount}
     projects: [],
@@ -350,6 +352,7 @@ const SEQ_PREFIX = {
   je_sales:'SA', je_purchase:'PU', je_receipt:'RV', je_payment:'PY',
   je_general:'JV', je_adjustment:'JV', je_payroll:'PR', je_asset:'AS',
   je_inventory:'IV', je_opening:'OB', je_closing:'CL',
+  payRun:'PAY', payRemit:'PRM',
 };
 /* ชนิดที่ใช้คำนำหน้าเดียวกันต้องนับด้วยตัวนับเดียวกัน — ใบสำคัญทั่วไปกับใบปรับปรุงใช้ JV ร่วมกัน
    เดิมนับแยกตามชนิด จึงได้ JV2601-00001 สองใบ (ค่าธรรมเนียมธนาคาร กับ ปิดภาษี ภ.พ.30) */
@@ -547,6 +550,7 @@ const ENTRY_FROM = {
   goodsReceipt:['ใบรับสินค้า', 'เปิดใบรับสินค้าแล้วกดยกเลิกเอกสาร'],
   customerRefund:['ใบคืนเงินลูกค้า', 'เปิดใบกำกับเดิมแล้วกดยกเลิกที่ใบคืนเงิน'],
   payroll:['งวดเงินเดือน', 'ไปที่หน้าเงินเดือนแล้วกดยกเลิกงวดเงินเดือน ระบบจะตัดออกจาก ภ.ง.ด.1 ให้ด้วย'],
+  payRemit:['การนำส่งเงินสมทบ', 'ไปที่หน้าเงินเดือน → ภ.ง.ด.1 · สปส.1-10 · นำส่ง แล้วกดยกเลิกที่รายการนำส่ง'],
   depreciation:['ค่าเสื่อมราคาประจำงวด', 'ไปที่หน้าค่าเสื่อมราคาแล้วกดยกเลิกงวด ระบบจะคืนค่าเสื่อมสะสมของทรัพย์สินให้ด้วย'],
   filing:['การยื่นแบบภาษี', 'แบบที่ยื่นแล้วต้องยื่นเพิ่มเติมกับกรมสรรพากร แล้วบันทึกปรับปรุงแทน'],
   import:['การนำเข้าข้อมูล', 'ยกเลิกที่หน้านำเข้าข้อมูลจากระบบเดิม'],

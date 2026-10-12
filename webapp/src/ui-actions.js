@@ -333,44 +333,7 @@ function modalItem(code) {
   });
 }
 
-function modalEmployee(code) {
-  const e = code ? DB.employees.find((x) => x.code === code) : null;
-  if (code && !e) return;
-  modal({
-    title: e ? 'แก้ไขพนักงาน ' + e.code : 'เพิ่มพนักงาน',
-    sub:'ข้อมูลชุดนี้ใช้คำนวณภาษีเงินได้ ประกันสังคม และกองทุนสำรองเลี้ยงชีพตอนทำเงินเดือน',
-    body:'<div class="flds">'
-      + field({ name:'name', label:'ชื่อ-สกุล', wide:true, value: e ? e.name : '' })
-      + field({ name:'dept', label:'แผนก', value: e ? e.dept : '' })
-      + field({ name:'hired', label:'วันเริ่มงาน', type:'date', value: e && e.hired ? e.hired : '' })
-      + field({ name:'nationalId', label:'เลขประจำตัวประชาชน',
-          value: e && e.nationalId ? e.nationalId : '',
-          hint:'ใช้ตอนยื่น ภ.ง.ด.1 และขึ้นทะเบียนประกันสังคม' })
-      + field({ name:'ssoNumber', label:'เลขที่ประกันสังคม', value: e && e.ssoNumber ? e.ssoNumber : '' })
-      + field({ name:'salary', label:'เงินเดือน', value: e ? unM(e.salary) : '' })
-      + field({ name:'otHours', label:'ชั่วโมงล่วงเวลาต่อเดือน (ถ้ามีประจำ)',
-          value: e ? String(e.otHours || 0) : '0' })
-      + field({ name:'pvdRate', label:'อัตราสะสมกองทุนสำรองเลี้ยงชีพ (%)',
-          value: e ? String(e.pvdRate || 0) : '0', hint:'0 ถึง 15 · ใส่ 0 ถ้าไม่เข้าร่วม' })
-      + field({ name:'active', label:'สถานะ', type:'select',
-          value: e && e.active === false ? 'no' : 'yes',
-          options:[['yes','ทำงานอยู่'],['no','พ้นสภาพแล้ว']] })
-      + '</div>',
-    submitLabel: e ? 'บันทึกการแก้ไข' : 'เพิ่มพนักงาน',
-    onSubmit: function () {
-      submitAction(function () {
-        const r = saveEmployee({
-          code: e ? e.code : null, name: val('name'), dept: val('dept'), hired: val('hired') || null,
-          nationalId: val('nationalId'), ssoNumber: val('ssoNumber'),
-          salary: val('salary'), otHours: val('otHours'), pvdRate: val('pvdRate'),
-          active: val('active') !== 'no',
-        });
-        toast((r.created ? 'เพิ่ม' : 'แก้ไข') + 'พนักงาน ' + r.employee.code + ' แล้ว', 'ok', r.employee.name);
-        return r;
-      });
-    },
-  });
-}
+/* modalEmployee อยู่ใน ui-payroll.js */
 
 function modalAsset(code) {
   const a = code ? DB.assets.find((x) => x.code === code) : null;

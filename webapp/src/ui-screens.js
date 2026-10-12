@@ -1272,62 +1272,7 @@ function scDeprec() {
   });
 }
 
-/* ===================================================================
-   เงินเดือน
-   =================================================================== */
-function scPayroll() {
-  const run = DB.docs.payRun.find((r) => r.period === STATE.period && r.status !== 'void');
-  return card({
-    title:'งวดจ่ายเงินเดือน', sub: thPeriod(STATE.period),
-    actions: run ? btn('entry:' + run.entryNo, 'ดูใบสำคัญ') + btn('voidrun:payroll:' + run.period, 'ยกเลิกงวดนี้', 'danger')
-                 : btn('run:payroll', 'ทำเงินเดือนงวดนี้', periodIsOpen() ? 'primary' : 'disabled'),
-    body: voidedRunsNote('payRun') + (run
-      ? kpi([
-          { label:'พนักงาน', value: run.count + ' คน' },
-          { label:'เงินได้รวม', value: fmt(run.gross) },
-          { label:'ภาษีหัก ณ ที่จ่าย', value: fmt(run.pit), sub:'นำส่งในแบบ ภ.ง.ด.1' },
-          { label:'ประกันสังคมนำส่ง', value: fmt(run.ssoEmp + run.ssoEr), sub:'ลูกจ้าง+นายจ้าง ฝ่ายละ ' + fmt(run.ssoEmp) },
-          { label:'จ่ายสุทธิ', value: fmt(run.net) },
-        ])
-        + tbl({
-          cols:[{t:'รหัส'},{t:'ชื่อ'},{t:'แผนก'},{t:'เงินเดือน',a:'r'},{t:'ค่าล่วงเวลา',a:'r'},{t:'รวมเงินได้',a:'r'},
-            {t:'ภาษีหัก',a:'r'},{t:'ประกันสังคม',a:'r'},{t:'กองทุนสำรองฯ',a:'r'},{t:'รับสุทธิ',a:'r'}],
-          rows: run.slips.map((s) => [{mono:s.code}, s.name, s.dept, {n:s.salary}, {n:s.ot}, {n:s.gross},
-            {n:s.pit}, {n:s.sso}, {n:s.pvd}, {n:s.net}]),
-          foot: ['','','รวม', {n:run.gross - run.slips.reduce((a,s)=>a+s.ot,0)},
-            {n:run.slips.reduce((a,s)=>a+s.ot,0)}, {n:run.gross}, {n:run.pit}, {n:run.ssoEmp}, {n:run.pvdEmp}, {n:run.net}],
-        })
-      : '<div class="empty">ยังไม่ได้ทำเงินเดือนงวดนี้'
-        + '<div style="margin-top:12px">' + btn('run:payroll', 'ทำเงินเดือนเดี๋ยวนี้', 'primary') + '</div></div>'),
-    foot: run
-      ? 'ฐานค่าจ้างประกันสังคมสูงสุด ' + fmt(run.ssoCeiling) + ' บาท เงินสมทบสูงสุด ' + fmt(run.ssoMax)
-        + ' บาทต่อคนต่อเดือน (มีผลตั้งแต่ 1 มกราคม 2569) — ระบบเลือกอัตราตามวันที่จ่ายเงิน ไม่ใช่วันที่ทำรายการ'
-      : 'ภาษีหัก ณ ที่จ่ายคำนวณจากเงินได้ทั้งปีตามอัตราก้าวหน้าแล้วเฉลี่ยเป็นรายเดือน ตามวิธีของกรมสรรพากร',
-  });
-}
-
-function scEmployees() {
-  const list = DB.employees.filter((e) => hit(e.code) || hit(e.name) || hit(e.dept));
-  const sso = ssoRate(pEnd());
-  return card({
-    title:'ทะเบียนพนักงาน', sub: DB.employees.filter((e) => e.active).length + ' คนที่ยังทำงานอยู่',
-    actions: btn('emp:new', '+ เพิ่มพนักงาน', 'primary'),
-    filters: searchBox('ค้นหาชื่อ รหัส หรือแผนก'),
-    body: tbl({
-      cols:[{t:'รหัส'},{t:'ชื่อ-สกุล'},{t:'แผนก'},{t:'วันเริ่มงาน'},{t:'เงินเดือน',a:'r'},{t:'ชั่วโมงล่วงเวลา',a:'r'},
-        {t:'กองทุนสำรองฯ',a:'r'},{t:'ฐานประกันสังคม',a:'r'},{t:'สถานะ'}],
-      rows: list.map((e) => [{mono:e.code}, e.name, e.dept, thDateNum(e.hired), {n:e.salary},
-        e.otHours ? {c:String(e.otHours)} : {dim:'—'},
-        e.pvdRate ? {c:e.pvdRate + '%'} : {dim:'ไม่เข้าร่วม'},
-        {n: Math.min(Math.max(e.salary, sso.floor), sso.ceiling)},
-        e.active ? {st:['paid','ทำงานอยู่']} : {st:['late','พ้นสภาพ']}]),
-      rowAttr: (r) => 'class="row-link" data-act="emp:edit:' + r[0].mono + '"',
-      empty:'ยังไม่มีพนักงานในทะเบียน ต้องเพิ่มก่อนทำเงินเดือนงวดแรก',
-      emptyAction: btn('emp:new', 'เพิ่มพนักงานคนแรก', 'primary'),
-    }),
-    foot:'กดที่แถวเพื่อแก้ไข · ข้อมูลพนักงานเป็นข้อมูลส่วนบุคคลตาม พ.ร.บ.คุ้มครองข้อมูลส่วนบุคคล ระบบเต็มจำกัดสิทธิ์การเข้าถึงเป็นรายบทบาทและบันทึกทุกครั้งที่มีการเปิดดู',
-  });
-}
+/* เงินเดือนและทะเบียนพนักงาน (scPayroll scEmployees) อยู่ใน ui-payroll.js */
 
 /* ===================================================================
    โครงการและงบประมาณ

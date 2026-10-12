@@ -183,46 +183,6 @@ function saveItem(input) {
   return { item: rec, created: true };
 }
 
-/** เพิ่มหรือแก้ไขพนักงาน — ต้องมีก่อนทำเงินเดือนงวดแรก */
-function saveEmployee(input) {
-  const name = String(input.name || '').trim();
-  if (!name) throw new DomainError('EMPLOYEE_NAME_REQUIRED', 'ต้องกรอกชื่อพนักงาน');
-  const nationalId = String(input.nationalId || '').replace(/[^0-9]/g, '');
-  if (nationalId && !validTaxId(nationalId)) {
-    throw new DomainError('NATIONAL_ID_INVALID',
-      'เลขประจำตัวประชาชน ' + nationalId + ' ไม่ผ่านการตรวจหลักที่ 13',
-      'ใช้ตรวจตอนยื่น ภ.ง.ด.1 และขึ้นทะเบียนประกันสังคม');
-  }
-  const salary = M(input.salary || '0');
-  if (salary < 0) throw new DomainError('SALARY_NEGATIVE', 'เงินเดือนติดลบไม่ได้');
-  const pvdRate = Number(input.pvdRate || 0) || 0;
-  if (pvdRate < 0 || pvdRate > 15) {
-    throw new DomainError('PVD_RATE_RANGE',
-      'อัตราสะสมกองทุนสำรองเลี้ยงชีพต้องอยู่ระหว่าง 0 ถึง 15 เปอร์เซ็นต์');
-  }
-  const existing = input.code ? DB.employees.find((x) => x.code === input.code) : null;
-  if (input.code && !existing) throw new DomainError('EMPLOYEE_NOT_FOUND', 'ไม่พบพนักงานรหัส ' + input.code);
-
-  const rec = {
-    code: existing ? existing.code : nextRegCode('EMP', DB.employees),
-    name: name, dept: String(input.dept || '').trim() || 'ไม่ระบุ',
-    salary: salary, otHours: Math.max(0, Number(input.otHours || 0) || 0),
-    pvdRate: pvdRate, deductions: M(input.deductions || '0'),
-    nationalId: nationalId || null,
-    ssoNumber: String(input.ssoNumber || '').trim() || null,
-    hired: input.hired || null,
-    active: input.active !== false,
-  };
-  if (existing) {
-    Object.keys(rec).forEach((k) => { existing[k] = rec[k]; });
-    audit('employee', rec.code, 'update', null, { name: rec.name, salary: fmt(rec.salary) });
-    return { employee: existing, created: false };
-  }
-  DB.employees.push(rec);
-  audit('employee', rec.code, 'create', null, { name: rec.name, dept: rec.dept });
-  return { employee: rec, created: true };
-}
-
 /** เพิ่มหรือแก้ไขทรัพย์สินถาวร — ที่คิดค่าเสื่อมไปแล้วห้ามแก้ราคาทุนกับวันที่ */
 function saveAsset(input) {
   const name = String(input.name || '').trim();
@@ -947,81 +907,7 @@ function runDepreciation(period) {
   return run;
 }
 
-/* ---------- เงินเดือน ---------- */
-function computePit(annualIncome, deductions) {
-  const expense = Math.min(pct(annualIncome, 50), M('100000'));
-  const net = Math.max(0, annualIncome - expense - deductions);
-  let tax = 0;
-  PIT_BRACKETS.forEach(function (b) {
-    if (net <= b.lo) return;
-    const top = b.hi === null ? net : Math.min(net, b.hi);
-    tax += pct(top - b.lo, b.rate);
-  });
-  return { expense, net, tax: round2(tax) };
-}
-
-function runPayroll(period) {
-  const already = DB.docs.payRun.find((r) => r.period === period && r.status !== 'void');
-  if (already) {
-    throw new DomainError('PAYROLL_ALREADY_RUN',
-      'ทำเงินเดือนงวด ' + thPeriod(period) + ' ไปแล้ว (' + already.entryNo + ')');
-  }
-  const payDate = endOfMonth(period + '-01');
-  const sso = ssoRate(payDate);
-  const slips = [];
-  let gross = 0, pit = 0, ssoEmp = 0, ssoEr = 0, pvdEmp = 0, pvdEr = 0, net = 0;
-
-  DB.employees.filter((e) => e.active).forEach(function (e) {
-    const salary = e.salary;
-    const ot = e.otHours ? round2(mulQty(divRound(divRound(salary, 30), 8), e.otHours * 1.5)) : 0;
-    const g = salary + ot;
-
-    const wageBase = Math.min(Math.max(salary, sso.floor), sso.ceiling);
-    const s = Math.min(round2(pct(wageBase, sso.pct)), sso.max);
-    const pv = e.pvdRate ? round2(pct(salary, e.pvdRate)) : 0;
-
-    const annual = salary * 12 + ot * 12;
-    const ded = M('60000') + (e.deductions || 0) + Math.min(s * 12, sso.max * 12);
-    const p = computePit(annual, ded);
-    const monthlyPit = round2(divRound(p.tax, 12));
-
-    const n = g - monthlyPit - s - pv;
-    slips.push({ code: e.code, name: e.name, dept: e.dept, salary, ot, gross: g,
-      pit: monthlyPit, sso: s, ssoBase: wageBase, pvd: pv, net: n });
-
-    gross += g; pit += monthlyPit; ssoEmp += s; ssoEr += s; pvdEmp += pv;
-    pvdEr += pv; net += n;
-  });
-
-  if (!slips.length) throw new DomainError('NO_EMPLOYEES', 'ไม่มีพนักงานที่ยังทำงานอยู่');
-
-  const je = post({
-    type: 'payroll', date: payDate, desc: 'เงินเดือนงวด ' + thPeriod(period),
-    src: 'payroll', srcId: period,
-    lines: [
-      { acc: salaryAccount(), dr: gross, memo: 'เงินเดือนและค่าล่วงเวลา' },
-      { acc: accBySub('sso_expense'), dr: ssoEr, memo: 'เงินสมทบประกันสังคมส่วนนายจ้าง' },
-      { acc: accBySub('pvd_expense'), dr: pvdEr, memo: 'เงินสมทบกองทุนสำรองฯ ส่วนนายจ้าง' },
-      { acc: accBySub('wht_payable_pnd1'), cr: pit },
-      { acc: accBySub('sso_payable'), cr: ssoEmp + ssoEr },
-      { acc: accBySub('pvd_payable'), cr: pvdEmp + pvdEr },
-      { acc: accBySub('bank'), cr: net },
-    ],
-  });
-
-  const run = { period, date: payDate, count: slips.length, gross, pit,
-    ssoEmp, ssoEr, pvdEmp, pvdEr, net, slips, entryNo: je.no,
-    ssoCeiling: sso.ceiling, ssoMax: sso.max };
-  DB.docs.payRun.unshift(run);
-  DB.taxTx.push({
-    kind: 'wht', period, date: payDate, docNo: je.no, docType: 'payroll',
-    partnerName: 'พนักงาน ' + slips.length + ' คน', taxId: null, branch: '00000',
-    base: gross, tax: pit, rate: null, channel: 'manual',
-    incomeType: 'เงินเดือน ม.40(1)', form: 'PND1', entryNo: je.no, filingId: null,
-  });
-  audit('payroll', period, 'run', null, { count: slips.length, net: fmt(net) });
-  return run;
-}
+/* เงินเดือน ภาษีเงินได้ และทะเบียนพนักงาน อยู่ใน payroll.js */
 
 /* ---------- ปิดภาษีมูลค่าเพิ่มรายเดือน (ภ.พ.30) ---------- */
 function fileVat(period) {
@@ -2124,6 +2010,8 @@ const RUN_KINDS = {
   payroll:      { label:'เงินเดือนงวด', coll:'payRun' },
 };
 function runCheck(kind, period) {
+  /* งวดเงินเดือนมีได้หลายรอบต่อเดือน (งวดปกติ โบนัส เงินชดเชย) และต้องคืนแผ่นงานให้แก้ — ตรวจและยกเลิกที่ payroll.js */
+  if (kind === 'payroll') return payRunCheck(period);
   const cfg = RUN_KINDS[kind];
   if (!cfg) throw new DomainError('RUN_KIND_UNKNOWN', 'ยกเลิกงวดประเภทนี้ไม่ได้');
   const run = DB.docs[cfg.coll].find((r) => r.period === period && r.status !== 'void');
@@ -2147,18 +2035,12 @@ function runCheck(kind, period) {
         'บันทึกรายการปรับปรุงในสมุดรายวันทั่วไปแทน');
     }
   }
-  if (kind === 'payroll') {
-    const filed = DB.taxTx.find((t) => t.kind === 'wht' && t.docType === 'payroll' && t.entryNo === run.entryNo && !t.void && t.filingId);
-    if (filed) {
-      throw new DomainError('TAX_ALREADY_FILED', 'ยื่น ภ.ง.ด.1 งวด ' + thPeriod(filed.period) + ' ไปแล้ว ยกเลิกงวดเงินเดือนไม่ได้',
-        'ยื่นแบบเพิ่มเติมกับกรมสรรพากร แล้วบันทึกปรับปรุงในงวดปัจจุบัน');
-    }
-  }
   const e = DB.entries.find((x) => x.no === run.entryNo);
   if (!e || e.status !== 'posted') throw new DomainError('ALREADY_REVERSED', 'ใบสำคัญของงวดนี้ถูกกลับรายการไปแล้ว');
   return run;
 }
 function voidRun(kind, period, reason) {
+  if (kind === 'payroll') return voidPayRun(period, reason);
   if (!reason || String(reason).trim().length < 5) {
     throw new DomainError('REASON_REQUIRED', 'การยกเลิกงวดต้องระบุเหตุผล อย่างน้อย 5 ตัวอักษร');
   }
@@ -2172,13 +2054,6 @@ function voidRun(kind, period, reason) {
         const a = DB.assets.find((x) => x.code === r.code);
         a.accumBook -= r.book;
         a.accumTax -= r.tax;
-      });
-    }
-    if (kind === 'payroll') {
-      DB.taxTx.forEach(function (t) {
-        if (t.kind !== 'wht' || t.docType !== 'payroll' || t.entryNo !== run.entryNo || t.void) return;
-        t.orig = { base: t.base, tax: t.tax };
-        t.base = 0; t.tax = 0; t.void = true; t.voidReason = why;
       });
     }
     run.status = 'void';
@@ -2362,7 +2237,6 @@ function salaryAccount() {
    =================================================================== */
 savePartner = transactional(savePartner);
 saveItem = transactional(saveItem);
-saveEmployee = transactional(saveEmployee);
 saveAsset = transactional(saveAsset);
 saveCompany = transactional(saveCompany);
 issueInvoice = transactional(issueInvoice);
@@ -2376,7 +2250,6 @@ convertTradeDoc = transactional(convertTradeDoc);
 recordBill = transactional(recordBill);
 payBill = transactional(payBill);
 runDepreciation = transactional(runDepreciation);
-runPayroll = transactional(runPayroll);
 fileVat = transactional(fileVat);
 fileWht = transactional(fileWht);
 closePeriod = transactional(closePeriod);
