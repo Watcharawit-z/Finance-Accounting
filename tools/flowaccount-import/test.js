@@ -140,7 +140,9 @@ ok('ใบเพิ่มหนี้ที่เก็บเงินครบ�
 
 /* โหลดเครื่องบัญชีจริงแล้วนำเข้าเข้าไปในบริษัทเปล่า */
 const webapp = path.join(__dirname, '..', '..', 'webapp', 'src');
-const src = ['engine.js', 'operations.js', 'seed.js', 'import.js']
+/* โหลดทุกไฟล์ระบบงาน (ไม่ใช่หน้าจอ) ตามลำดับเดียวกับ build.js — ระบบย่อยที่แยกไฟล์ (เช่นเงินเดือนใน payroll.js) จะได้มาครบ */
+const { ORDER } = require(path.join(webapp, '..', 'build.js'));
+const src = ORDER.filter((f) => !/^ui-|^sync\.js$/.test(f))
   .map((f) => fs.readFileSync(path.join(webapp, f), 'utf8')).join('\n');
 const app = new Function(src + `
   return { DB, buildBlank, importPackage, reconciliationChecks, trialBalance, balanceSheet,

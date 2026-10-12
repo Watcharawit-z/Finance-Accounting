@@ -1310,173 +1310,11 @@ function scStockMoves() {
   });
 }
 
-/* ===================================================================
-   สินทรัพย์ถาวร
-   =================================================================== */
-function scAssets() {
-  const rows = DB.assets.filter((a) => hit(a.code) || hit(a.name));
-  const cost = DB.assets.reduce((s, a) => s + a.cost, 0);
-  const accum = DB.assets.reduce((s, a) => s + a.accumBook, 0);
-  return card({
-    title:'ทะเบียนทรัพย์สิน', sub: DB.assets.length + ' รายการ · แยกค่าเสื่อมทางบัญชีและทางภาษีคนละชุด',
-    actions: btn('asset:new', '+ เพิ่มทรัพย์สิน', 'primary'),
-    filters: searchBox('ค้นหารหัสหรือชื่อทรัพย์สิน'),
-    body: tbl({
-      cols:[{t:'รหัส'},{t:'ชื่อทรัพย์สิน'},{t:'ประเภทตามพระราชกฤษฎีกา 145'},{t:'วันเริ่มใช้'},{t:'ราคาทุน',a:'r'},
-        {t:'อายุบัญชี (ปี)',a:'r'},{t:'ค่าเสื่อมสะสม (บัญชี)',a:'r'},{t:'ราคาตามบัญชี',a:'r'},{t:'ค่าเสื่อมสะสม (ภาษี)',a:'r'}],
-      rows: rows.map(function (a) {
-        const t = TAX_DEPRECIATION[a.class];
-        const capped = t.costCap && a.cost > t.costCap;
-        return [{mono:a.code}, a.name,
-          t.label + ' ' + (t.rate ? t.rate + '%' : '') + (capped ? ' · จำกัดต้นทุน 1,000,000' : ''),
-          thDateNum(a.inService), {n:a.cost}, {c:String(a.bookYears)},
-          {n:a.accumBook}, {n:a.cost - a.accumBook}, {n:a.accumTax}];
-      }),
-      rowAttr: (r) => 'class="row-link" data-act="asset:edit:' + r[0].mono + '"',
-      foot: ['','','','รวม', {n:cost}, '', {n:accum}, {n:cost - accum}, {n:DB.assets.reduce((s,a)=>s+a.accumTax,0)}],
-      empty:'ยังไม่มีทรัพย์สินในทะเบียน — ระบบเชื่อมต่อของ FlowAccount ไม่เปิดให้ดึงส่วนนี้ ต้องกรอกเอง',
-      emptyAction: btn('asset:new', 'เพิ่มทรัพย์สินรายการแรก', 'primary'),
-    }),
-    foot:'กดที่แถวเพื่อแก้ไข · รถยนต์นั่งไม่เกิน 10 คน หักค่าเสื่อมทางภาษีได้จากต้นทุนไม่เกิน 1,000,000 บาท ส่วนที่เกินหักทางบัญชีได้แต่บวกกลับตอนคำนวณภาษี',
-  });
-}
-
-/** งวดที่ยกเลิกไปแล้วของเดือนนี้ — แสดงไว้ให้เห็นว่าเคยทำแล้วยกเลิก ไม่ใช่หายไปเฉย ๆ */
+/** งวดที่ยกเลิกไปแล้วของเดือนนี้ — แสดงไว้ให้เห็นว่าเคยทำแล้วยกเลิก ไม่ใช่หายไปเฉย ๆ (หน้าค่าเสื่อมราคาใช้) */
 function voidedRunsNote(coll) {
   const v = DB.docs[coll].filter((r) => r.period === STATE.period && r.status === 'void');
   return v.length ? '<div class="note">งวดนี้เคยทำแล้วยกเลิก ' + v.length + ' ครั้ง: '
     + v.map((r) => esc(r.entryNo) + ' (' + esc(r.voidReason || '') + ')').join(' · ') + '</div>' : '';
-}
-function scDeprec() {
-  const run = DB.docs.depreciation.find((d) => d.period === STATE.period && d.status !== 'void');
-  const history = DB.docs.depreciation.filter((d) => d.status !== 'void').slice(0, 12);
-  return card({
-    title:'ค่าเสื่อมราคาประจำงวด', sub: thPeriod(STATE.period),
-    actions: run ? btn('entry:' + run.entryNo, 'ดูใบสำคัญ') + btn('voidrun:depreciation:' + run.period, 'ยกเลิกงวดนี้', 'danger')
-                 : btn('run:deprec', 'ตั้งค่าเสื่อมราคางวดนี้', periodIsOpen() ? 'primary' : 'disabled'),
-    body: voidedRunsNote('depreciation') + (run
-      ? tbl({
-          cols:[{t:'รหัส'},{t:'ทรัพย์สิน'},{t:'ราคาทุน',a:'r'},{t:'ค่าเสื่อมทางบัญชี',a:'r'},{t:'ค่าเสื่อมทางภาษี',a:'r'},{t:'ผลต่าง',a:'r'},{t:'ราคาตามบัญชีคงเหลือ',a:'r'}],
-          rows: run.rows.map((r) => [{mono:r.code}, r.name, {n:r.cost}, {n:r.book}, {n:r.tax}, {n:r.diff}, {n:r.nbvBook}]),
-          foot: ['','','รวม', {n:run.bookTotal}, {n:run.taxTotal}, {n:run.diff}, ''],
-        })
-      : '<div class="empty">ยังไม่ได้ตั้งค่าเสื่อมราคางวดนี้ — เป็นรายการที่บล็อกการปิดงวด'
-        + '<div style="margin-top:12px">' + btn('run:deprec', 'ตั้งค่าเสื่อมราคาเดี๋ยวนี้', 'primary') + '</div></div>'),
-    foot: (run && run.diff !== 0
-        ? 'ผลต่างระหว่างบัญชีกับภาษี ' + fmt(run.diff) + ' บาทในงวดนี้ ต้องนำไปปรับปรุงในแบบ ภ.ง.ด.50 ปลายปี'
-        : 'ผลต่างบัญชี–ภาษีจะถูกสะสมไว้ให้ตลอดปีเพื่อใช้กรอกแบบ ภ.ง.ด.50')
-      + (history.length ? ' · ตั้งค่าเสื่อมมาแล้ว ' + history.length + ' งวด' : ''),
-  });
-}
-
-/* ===================================================================
-   เงินเดือน
-   =================================================================== */
-function scPayroll() {
-  const run = DB.docs.payRun.find((r) => r.period === STATE.period && r.status !== 'void');
-  return card({
-    title:'งวดจ่ายเงินเดือน', sub: thPeriod(STATE.period),
-    actions: run ? btn('entry:' + run.entryNo, 'ดูใบสำคัญ') + btn('voidrun:payroll:' + run.period, 'ยกเลิกงวดนี้', 'danger')
-                 : btn('run:payroll', 'ทำเงินเดือนงวดนี้', periodIsOpen() ? 'primary' : 'disabled'),
-    body: voidedRunsNote('payRun') + (run
-      ? kpi([
-          { label:'พนักงาน', value: run.count + ' คน' },
-          { label:'เงินได้รวม', value: fmt(run.gross) },
-          { label:'ภาษีหัก ณ ที่จ่าย', value: fmt(run.pit), sub:'นำส่งในแบบ ภ.ง.ด.1' },
-          { label:'ประกันสังคมนำส่ง', value: fmt(run.ssoEmp + run.ssoEr), sub:'ลูกจ้าง+นายจ้าง ฝ่ายละ ' + fmt(run.ssoEmp) },
-          { label:'จ่ายสุทธิ', value: fmt(run.net) },
-        ])
-        + tbl({
-          cols:[{t:'รหัส'},{t:'ชื่อ'},{t:'แผนก'},{t:'เงินเดือน',a:'r'},{t:'ค่าล่วงเวลา',a:'r'},{t:'รวมเงินได้',a:'r'},
-            {t:'ภาษีหัก',a:'r'},{t:'ประกันสังคม',a:'r'},{t:'กองทุนสำรองฯ',a:'r'},{t:'รับสุทธิ',a:'r'}],
-          rows: run.slips.map((s) => [{mono:s.code}, s.name, s.dept, {n:s.salary}, {n:s.ot}, {n:s.gross},
-            {n:s.pit}, {n:s.sso}, {n:s.pvd}, {n:s.net}]),
-          foot: ['','','รวม', {n:run.gross - run.slips.reduce((a,s)=>a+s.ot,0)},
-            {n:run.slips.reduce((a,s)=>a+s.ot,0)}, {n:run.gross}, {n:run.pit}, {n:run.ssoEmp}, {n:run.pvdEmp}, {n:run.net}],
-        })
-      : '<div class="empty">ยังไม่ได้ทำเงินเดือนงวดนี้'
-        + '<div style="margin-top:12px">' + btn('run:payroll', 'ทำเงินเดือนเดี๋ยวนี้', 'primary') + '</div></div>'),
-    foot: run
-      ? 'ฐานค่าจ้างประกันสังคมสูงสุด ' + fmt(run.ssoCeiling) + ' บาท เงินสมทบสูงสุด ' + fmt(run.ssoMax)
-        + ' บาทต่อคนต่อเดือน (มีผลตั้งแต่ 1 มกราคม 2569) — ระบบเลือกอัตราตามวันที่จ่ายเงิน ไม่ใช่วันที่ทำรายการ'
-      : 'ภาษีหัก ณ ที่จ่ายคำนวณจากเงินได้ทั้งปีตามอัตราก้าวหน้าแล้วเฉลี่ยเป็นรายเดือน ตามวิธีของกรมสรรพากร',
-  });
-}
-
-function scEmployees() {
-  const list = DB.employees.filter((e) => hit(e.code) || hit(e.name) || hit(e.dept));
-  const sso = ssoRate(pEnd());
-  return card({
-    title:'ทะเบียนพนักงาน', sub: DB.employees.filter((e) => e.active).length + ' คนที่ยังทำงานอยู่',
-    actions: btn('emp:new', '+ เพิ่มพนักงาน', 'primary'),
-    filters: searchBox('ค้นหาชื่อ รหัส หรือแผนก'),
-    body: tbl({
-      cols:[{t:'รหัส'},{t:'ชื่อ-สกุล'},{t:'แผนก'},{t:'วันเริ่มงาน'},{t:'เงินเดือน',a:'r'},{t:'ชั่วโมงล่วงเวลา',a:'r'},
-        {t:'กองทุนสำรองฯ',a:'r'},{t:'ฐานประกันสังคม',a:'r'},{t:'สถานะ'}],
-      rows: list.map((e) => [{mono:e.code}, e.name, e.dept, thDateNum(e.hired), {n:e.salary},
-        e.otHours ? {c:String(e.otHours)} : {dim:'—'},
-        e.pvdRate ? {c:e.pvdRate + '%'} : {dim:'ไม่เข้าร่วม'},
-        {n: Math.min(Math.max(e.salary, sso.floor), sso.ceiling)},
-        e.active ? {st:['paid','ทำงานอยู่']} : {st:['late','พ้นสภาพ']}]),
-      rowAttr: (r) => 'class="row-link" data-act="emp:edit:' + r[0].mono + '"',
-      empty:'ยังไม่มีพนักงานในทะเบียน ต้องเพิ่มก่อนทำเงินเดือนงวดแรก',
-      emptyAction: btn('emp:new', 'เพิ่มพนักงานคนแรก', 'primary'),
-    }),
-    foot:'กดที่แถวเพื่อแก้ไข · ข้อมูลพนักงานเป็นข้อมูลส่วนบุคคลตาม พ.ร.บ.คุ้มครองข้อมูลส่วนบุคคล ระบบเต็มจำกัดสิทธิ์การเข้าถึงเป็นรายบทบาทและบันทึกทุกครั้งที่มีการเปิดดู',
-  });
-}
-
-/* ===================================================================
-   โครงการและงบประมาณ
-   =================================================================== */
-function scProjects() {
-  const rows = DB.projects.map(function (p) {
-    const recognised = round2(pct(p.contract, p.percent));
-    const costToDate = round2(pct(p.budget, p.percent));
-    return { ...p, recognised, costToDate, margin: recognised - costToDate };
-  });
-  const cust = (c) => (DB.partners.find((x) => x.code === c) || {}).name || c;
-  return card({
-    title:'โครงการ', sub:'รับรู้รายได้ตามขั้นความสำเร็จของงาน (percentage of completion)',
-    body: tbl({
-      cols:[{t:'รหัสโครงการ'},{t:'ชื่องาน'},{t:'ลูกค้า'},{t:'มูลค่าสัญญา',a:'r'},{t:'งบต้นทุน',a:'r'},
-        {t:'ความคืบหน้า',a:'r'},{t:'รายได้ที่รับรู้',a:'r'},{t:'ต้นทุนตามขั้น',a:'r'},{t:'กำไรขั้นต้น',a:'r'}],
-      rows: rows.map((p) => [{mono:p.code}, p.name, cust(p.customer), {n:p.contract}, {n:p.budget},
-        {html:'<div class="bar"><i style="width:' + p.percent + '%"></i></div><span class="dim">' + p.percent + '%</span>'},
-        {n:p.recognised}, {n:p.costToDate}, {n:p.margin}]),
-      foot: ['','','รวม', {n:rows.reduce((s,p)=>s+p.contract,0)}, {n:rows.reduce((s,p)=>s+p.budget,0)},
-        '', {n:rows.reduce((s,p)=>s+p.recognised,0)}, {n:rows.reduce((s,p)=>s+p.costToDate,0)},
-        {n:rows.reduce((s,p)=>s+p.margin,0)}],
-    }),
-    foot:'ตัวเลขในหน้านี้คำนวณจากมูลค่าสัญญา งบต้นทุน และขั้นความสำเร็จที่บันทึกไว้ การผูกต้นทุนจริงรายใบเสร็จเข้าโครงการอยู่ในแผนระยะถัดไป',
-  });
-}
-
-function scBudget() {
-  const from = pStart(), to = pEnd();
-  const yFrom = yStart();
-  const months = Number(STATE.period.slice(5, 7));
-  const rows = DB.budget.map(function (b) {
-    const actual = Math.abs(balanceOf(b.account, to, from));
-    const ytdActual = Math.abs(balanceOf(b.account, to, yFrom));
-    const ytdBudget = b.monthly * months;
-    return { ...b, actual, variance: b.monthly - actual, ytdActual, ytdBudget, ytdVariance: ytdBudget - ytdActual };
-  });
-  const sum = (f) => rows.reduce((s, r) => s + r[f], 0);
-  return card({
-    title:'งบประมาณเทียบใช้จริง', sub: thPeriod(STATE.period) + ' และสะสม ' + months + ' เดือน',
-    body: tbl({
-      cols:[{t:'รหัส'},{t:'รายการ'},{t:'งบเดือนนี้',a:'r'},{t:'ใช้จริงเดือนนี้',a:'r'},{t:'ผลต่าง',a:'r'},
-        {t:'งบสะสม',a:'r'},{t:'ใช้จริงสะสม',a:'r'},{t:'ผลต่างสะสม',a:'r'}],
-      rows: rows.map((r) => [{mono:r.account}, r.name, {n:r.monthly}, {n:r.actual},
-        {n:r.variance, cls: r.variance < 0 ? 'bad' : 'good'},
-        {n:r.ytdBudget}, {n:r.ytdActual},
-        {n:r.ytdVariance, cls: r.ytdVariance < 0 ? 'bad' : 'good'}]),
-      foot: ['','รวม', {n:sum('monthly')}, {n:sum('actual')}, {n:sum('variance')},
-        {n:sum('ytdBudget')}, {n:sum('ytdActual')}, {n:sum('ytdVariance')}],
-    }),
-    foot:'ผลต่างเป็นบวกคือใช้ต่ำกว่างบ เป็นลบคือใช้เกินงบ ตัวเลขใช้จริงดึงจากบัญชีแยกประเภทโดยตรง ไม่ได้กรอกซ้ำ',
-  });
 }
 
 /* ===================================================================
@@ -2143,9 +1981,7 @@ const SCREENS = {
   vatout: () => vatRegister('vat_output'), vatin: () => vatRegister('vat_input'),
   pp30: scPp30, pnd: scPnd, whtcert: scWhtCert, taxcal: scTaxCal,
   items: scItems, stockmoves: scStockMoves, stockadj: scStockAdj, stockcard: scStockCard,
-  assets: scAssets, deprec: scDeprec,
   payroll: scPayroll, employees: scEmployees,
-  projects: scProjects, budget: scBudget,
   bs: scBalanceSheet, pl: scIncomeStatement,
   debitnotes: scDebitNotes, cashsales: scCashSales,
   quotations: () => tradeDocScreen('quotation'),
