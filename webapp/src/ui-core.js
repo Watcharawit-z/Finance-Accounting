@@ -398,6 +398,7 @@ function navGroups() {
       ['quotations', 'ใบเสนอราคา', quoteOpen || null],
       ['salesorders', 'ใบสั่งขาย', soOpen || null],
       ['invoices', 'ใบกำกับภาษี', null],
+      ['cashsales', 'ขายเงินสด', null],
       ['billingnotes', 'ใบวางบิล', bnOpen || null],
       ['receipts', 'ใบเสร็จรับเงิน', null],
       ['creditnotes', 'ใบลดหนี้', null],

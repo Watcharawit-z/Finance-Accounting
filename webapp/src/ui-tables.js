@@ -40,11 +40,18 @@ function setEra(e) {
 /* ---------- ตัวกรองสถานะของแต่ละหน้า ----------
    [รหัส, ชื่อ, เงื่อนไข] · ไม่มีเงื่อนไข = ทั้งหมด */
 const notVoid = (d) => !isVoid(d);
-const tradeLive = (kind) => (d) => ['issued', 'approved', 'partially_received'].indexOf(tradeDocStatus(kind, d)) >= 0;
+const tradeLive = (kind) => (d) => ['issued', 'approved', 'partially_received', 'partially_invoiced'].indexOf(tradeDocStatus(kind, d)) >= 0;
+/* ใบกำกับ: ตัวกรองทุกตัวดูเฉพาะงวดที่เลือก ยกเว้น "ค้างชำระทุกเดือน" ที่รวมใบค้างจากงวดก่อน ๆ ด้วย
+   เดิมรายการแสดงแค่เดือนปัจจุบัน ใบที่ยังไม่ได้เก็บเงินของเดือนก่อนจึงมองไม่เห็นจากหน้านี้ */
+const inPeriod = (d) => periodOf(d.date) === STATE.period;
 const LIST_CHIPS = {
-  invoices: [['all', 'ทั้งหมด'], ['open', 'ค้างรับ', (d) => invOutstanding(d) > 0],
-    ['overdue', 'เกินกำหนด', (d) => invOutstanding(d) > 0 && d.due < TODAY],
-    ['paid', 'รับครบ', (d) => notVoid(d) && invOutstanding(d) <= 0], ['void', 'ยกเลิก', isVoid]],
+  invoices: [['all', 'ทั้งหมด', inPeriod], ['open', 'ค้างรับ', (d) => inPeriod(d) && invOutstanding(d) > 0],
+    ['overdue', 'เกินกำหนด', (d) => inPeriod(d) && invOutstanding(d) > 0 && d.due < TODAY],
+    ['paid', 'รับครบ', (d) => inPeriod(d) && notVoid(d) && invOutstanding(d) <= 0], ['void', 'ยกเลิก', (d) => inPeriod(d) && isVoid(d)],
+    ['allopen', 'ค้างชำระทุกเดือน', (d) => invOutstanding(d) > 0]],
+  cashsales: [['all', 'ทั้งหมด'], ['live', 'ใช้งาน', notVoid], ['void', 'ยกเลิก', isVoid]],
+  customers: [['all', 'ทั้งหมด'], ['active', 'ใช้งานอยู่', (p) => p.active !== false], ['inactive', 'เลิกใช้งาน', (p) => p.active === false]],
+  vendors: [['all', 'ทั้งหมด'], ['active', 'ใช้งานอยู่', (p) => p.active !== false], ['inactive', 'เลิกใช้งาน', (p) => p.active === false]],
   bills: [['all', 'ทั้งหมด'], ['open', 'ค้างจ่าย', (d) => billOutstanding(d) > 0],
     ['overdue', 'เกินกำหนด', (d) => billOutstanding(d) > 0 && d.due < TODAY],
     ['paid', 'จ่ายครบ', (d) => notVoid(d) && billOutstanding(d) <= 0], ['void', 'ยกเลิก', isVoid]],
@@ -63,6 +70,7 @@ const LIST_CHIPS = {
     ['closed', 'แปลงแล้ว', (d) => d.status === 'closed'], ['expired', 'หมดอายุ', (d) => tradeDocStatus('quotation', d) === 'expired'],
     ['dead', 'ยกเลิก/ปฏิเสธ', (d) => d.status === 'cancelled' || d.status === 'rejected']],
   salesorders: [['all', 'ทั้งหมด'], ['live', 'รอออกใบกำกับ', tradeLive('salesOrder')],
+    ['partial', 'ออกใบกำกับบางส่วน', (d) => d.status === 'partially_invoiced'],
     ['closed', 'ออกใบกำกับแล้ว', (d) => d.status === 'closed'], ['dead', 'ยกเลิก', (d) => d.status === 'cancelled' || d.status === 'rejected']],
   purchaseorders: [['all', 'ทั้งหมด'], ['live', 'รอรับของ', tradeLive('purchaseOrder')],
     ['partial', 'รับบางส่วน', (d) => d.status === 'partially_received'],
@@ -70,8 +78,8 @@ const LIST_CHIPS = {
 };
 STATE.chip = STATE.chip || {};
 function chipPass(screen, d) {
-  const key = STATE.chip[screen];
-  if (!key || key === 'all') return true;
+  /* "ทั้งหมด" มีเงื่อนไขได้ (เช่นใบกำกับ = ทั้งหมดของงวดนี้) จึงต้องผ่านตัวกรองเหมือนตัวอื่น */
+  const key = STATE.chip[screen] || 'all';
   const c = (LIST_CHIPS[screen] || []).find((x) => x[0] === key);
   return !c || !c[2] || c[2](d);
 }
@@ -145,6 +153,7 @@ const SCREEN_DOC = { invoices:'invoice', receipts:'receipt', creditnotes:'credit
   bills:'bill', payments:'payment', expenses:'expense', goodsreceipts:'goodsReceipt', whtcert:'whtCert',
   billingnotes:'billingNote', paymentprep:'paymentBatch', quotations:'quotation', salesorders:'salesOrder',
   purchaseorders:'purchaseOrder' };
+SCREEN_DOC.cashsales = 'cashSale';
 const DOC_SCREEN = {};
 Object.keys(SCREEN_DOC).forEach((k) => { DOC_SCREEN[SCREEN_DOC[k]] = k; });
 

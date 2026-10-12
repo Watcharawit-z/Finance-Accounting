@@ -846,7 +846,7 @@ const overflowInfo = (page) => page.evaluate(() => {
   await page.click('#nav [data-act="navg:เอกสารขาย"]');
   await page.waitForTimeout(120);
   ok('กดหัวกลุ่มแล้วกางรายการข้างใน',
-    (await page.$$('#nav .nav-i.child')).length === 7);
+    (await page.$$('#nav .nav-i.child')).length === 8);
   await page.click('#nav [data-act="navg:เอกสารขาย"]');
   await page.evaluate(() => { STATE.navGroupOpen = { 'รายงาน': true }; render(); });
   await page.waitForTimeout(150);
@@ -914,7 +914,7 @@ const overflowInfo = (page) => page.evaluate(() => {
   const buyMenu = await page.evaluate(() =>
     navGroups().find((g) => g.g === 'เอกสารซื้อ').items.map((i) => i[1]));
   ok('★ เมนูเอกสารขายเรียงตามวงจรจริง เสนอราคา → สั่งขาย → ใบกำกับ → วางบิล → ใบเสร็จ',
-    salesMenu.join('|') === 'ใบเสนอราคา|ใบสั่งขาย|ใบกำกับภาษี|ใบวางบิล|ใบเสร็จรับเงิน|ใบลดหนี้|ใบเพิ่มหนี้',
+    salesMenu.join('|') === 'ใบเสนอราคา|ใบสั่งขาย|ใบกำกับภาษี|ขายเงินสด|ใบวางบิล|ใบเสร็จรับเงิน|ใบลดหนี้|ใบเพิ่มหนี้',
     salesMenu.join(' → '));
   ok('เมนูเอกสารซื้อเรียงตามวงจรจริง สั่งซื้อ → รับสินค้า → ตั้งหนี้ → จ่าย',
     buyMenu.join('|') === 'ใบสั่งซื้อ|ใบรับสินค้า|ตั้งหนี้ผู้ขาย|ใบสำคัญจ่าย', buyMenu.join(' → '));

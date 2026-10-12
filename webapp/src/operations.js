@@ -12,8 +12,16 @@ function partnerByCode(code) {
 function snapshotPartner(p) {
   return {
     code: p.code, name: p.name, taxId: p.taxId, branch: p.branch,
-    entityType: p.entityType, address: p.address, capturedAt: new Date().toISOString(),
+    entityType: p.entityType, vatRegistered: partnerVatRegistered(p),
+    address: p.address, capturedAt: new Date().toISOString(),
   };
+}
+
+/** คู่ค้าจดทะเบียนภาษีมูลค่าเพิ่มหรือไม่ — ข้อมูลรุ่นก่อนไม่มีช่องนี้ ถือว่านิติบุคคลจดทะเบียน บุคคลธรรมดาไม่ได้จด
+    ใช้ตัดสินว่าใบกำกับต้องมีเลขผู้เสียภาษีและสาขาของผู้ซื้อหรือไม่ */
+function partnerVatRegistered(p) {
+  if (p.vatRegistered === true || p.vatRegistered === false) return p.vatRegistered;
+  return p.entityType !== 'individual';
 }
 
 /* ---------- คำนวณ VAT ระดับเอกสาร (ปัดเศษครั้งเดียว) ---------- */
@@ -33,11 +41,15 @@ function computeVat(lines, date) {
 /* ---------- ตรวจตาม ม.86/4 ก่อนออกเลข ---------- */
 function assertTaxInvoiceComplete(snap, lines) {
   const missing = [];
+  /* ชื่อและที่อยู่ผู้ซื้อต้องมีเสมอ แต่เลขผู้เสียภาษีกับสำนักงานใหญ่/สาขา บังคับเฉพาะผู้ซื้อที่จดทะเบียน
+     ภาษีมูลค่าเพิ่ม (ประกาศอธิบดีกรมสรรพากร ฉบับที่ 199) — ขายให้บุคคลธรรมดาที่ไม่ได้จดทะเบียน
+     ถ้าบังคับครบทุกช่อง ใบกำกับจะออกไม่ได้เลยทั้งที่กฎหมายไม่ได้กำหนด */
+  const registered = partnerVatRegistered(snap);
   if (!snap.name) missing.push('ชื่อผู้ซื้อ');
   if (!snap.address) missing.push('ที่อยู่ผู้ซื้อ');
-  if (!snap.branch) missing.push('สำนักงานใหญ่หรือสาขาของผู้ซื้อ');
-  if (!snap.taxId) missing.push('เลขประจำตัวผู้เสียภาษีของผู้ซื้อ');
-  else if (!validTaxId(snap.taxId)) {
+  if (registered && !snap.branch) missing.push('สำนักงานใหญ่หรือสาขาของผู้ซื้อ');
+  if (registered && !snap.taxId) missing.push('เลขประจำตัวผู้เสียภาษีของผู้ซื้อ');
+  else if (snap.taxId && !validTaxId(snap.taxId)) {
     throw new DomainError('TAX_ID_INVALID',
       'เลขประจำตัวผู้เสียภาษีของผู้ซื้อ (' + snap.taxId + ') ไม่ผ่านการตรวจสอบหลักที่ 13',
       'ตรวจสอบเลขกับหนังสือรับรองของลูกค้า');
@@ -106,11 +118,20 @@ function savePartner(input) {
       'เลขประจำตัวผู้เสียภาษี ' + taxId + ' ไม่ผ่านการตรวจหลักที่ 13',
       'ตรวจเลขกับหน้าใบกำกับภาษีของคู่ค้าอีกครั้ง หรือเว้นว่างไว้ก่อน');
   }
-  const branch = assertBranch(input.branch, entityType);
   const existing = input.code ? DB.partners.find((x) => x.code === input.code) : null;
   if (input.code && !existing) {
     throw new DomainError('PARTNER_NOT_FOUND', 'ไม่พบคู่ค้ารหัส ' + input.code);
   }
+  /* ไม่ส่งมา = คงค่าเดิมไว้ — แก้ชื่อหรือเครดิตแล้วต้องไม่เผลอเปิดใช้งานรายที่ปิดไว้ หรือเปลี่ยนสถานะ VAT เอง */
+  const given = (v) => v !== undefined && v !== null && v !== '';
+  const vatRegistered = given(input.vatRegistered) ? input.vatRegistered === true || input.vatRegistered === 'yes'
+    : existing && typeof existing.vatRegistered === 'boolean' && existing.entityType === entityType ? existing.vatRegistered
+    : entityType !== 'individual';
+  const active = given(input.active) ? input.active !== false && input.active !== 'no'
+    : existing ? existing.active !== false : true;
+  /* บุคคลธรรมดาที่ไม่ได้จดทะเบียนภาษีมูลค่าเพิ่มไม่มีสาขา — ใบกำกับไม่ต้องระบุ
+     ส่วนบุคคลธรรมดาที่จดทะเบียนแล้ว (ร้านค้าเจ้าของคนเดียว) ต้องมีสาขาเหมือนนิติบุคคล */
+  const branch = entityType === 'individual' && !vatRegistered ? null : assertBranch(input.branch, 'juristic');
   /* กันสร้างคู่ค้าซ้ำด้วยเลขผู้เสียภาษีเดียวกัน เป็นความผิดพลาดที่เจอบ่อยที่สุด
      เพราะทำให้ยอดค้างของรายเดียวกันแตกเป็นสองราย แล้วกระทบยอดไม่ได้ */
   if (taxId) {
@@ -126,23 +147,54 @@ function savePartner(input) {
   const rec = {
     code: existing ? existing.code : nextRegCode(kind === 'vendor' ? 'VEN' : 'CUS', DB.partners),
     name: name, taxId: taxId || null, branch: branch,
-    entityType: entityType, kind: kind,
+    entityType: entityType, vatRegistered: vatRegistered, kind: kind,
     address: String(input.address || '').trim(),
     phone: String(input.phone || '').trim(),
     termDays: Math.max(0, Number(input.termDays || 0) || 0),
     whtCode: kind === 'vendor' ? (input.whtCode || null) : null,
     creditLimit: M(input.creditLimit || '0'),
-    active: input.active !== false,
+    active: active,
   };
   if (existing) {
-    const before = { name: existing.name, taxId: existing.taxId, branch: existing.branch };
+    const before = { name: existing.name, taxId: existing.taxId, branch: existing.branch, active: existing.active !== false };
     Object.keys(rec).forEach((k) => { existing[k] = rec[k]; });
-    audit('partner', rec.code, 'update', before, { name: rec.name, taxId: rec.taxId, branch: rec.branch });
+    audit('partner', rec.code, 'update', before, { name: rec.name, taxId: rec.taxId, branch: rec.branch, active: rec.active });
     return { partner: existing, created: false };
   }
   DB.partners.push(rec);
   audit('partner', rec.code, 'create', null, { name: rec.name, taxId: rec.taxId, kind: kind });
   return { partner: rec, created: true };
+}
+
+/** เอกสารที่อ้างถึงคู่ค้ารายนี้ — คืนเลขที่เอกสาร (ไม่ซ้ำ) */
+function partnerUsage(code) {
+  const out = [];
+  const add = (x) => { if (out.indexOf(x) < 0) out.push(x); };
+  Object.keys(DB.docs).forEach(function (k) {
+    (DB.docs[k] || []).forEach(function (d) {
+      if (!d || typeof d !== 'object') return;
+      const inItems = Array.isArray(d.items) && d.items.some((x) => x && x.partnerCode === code);
+      if (d.partnerCode === code || d.partner === code || inItems) add(d.no || k);
+    });
+  });
+  DB.entries.forEach((e) => { if (e.lines.some((l) => l.partner === code)) add(e.no); });
+  (DB.projects || []).forEach((p) => { if (p.customer === code) add(p.code); });
+  return out;
+}
+/** ลบคู่ค้าได้เฉพาะรายที่ไม่เคยถูกใช้ — เอกสารเก่าและใบสำคัญต้องอ้างกลับมาที่ทะเบียนได้เสมอ
+    รายที่ใช้แล้วให้ตั้งเลิกใช้งานแทน จะหายจากตัวเลือกในเอกสารใหม่แต่ยังอยู่ในรายงานเดิม */
+function deletePartner(code, reason) {
+  const p = partnerByCode(code);
+  const used = partnerUsage(code);
+  if (used.length) {
+    throw new DomainError('PARTNER_IN_USE',
+      p.name + ' ถูกใช้ในเอกสารแล้ว (' + used.slice(0, 3).join(', ') + (used.length > 3 ? ' และอีก ' + (used.length - 3) + ' รายการ' : '')
+        + ') ลบไม่ได้',
+      'ตั้งสถานะเป็น "เลิกใช้งาน" แทน รายชื่อจะไม่ขึ้นในเอกสารใหม่ แต่ยังอยู่ในรายงานและเอกสารเดิม');
+  }
+  DB.partners.splice(DB.partners.indexOf(p), 1);
+  audit('partner', code, 'delete', { name: p.name, taxId: p.taxId, kind: p.kind }, null, reason || null);
+  return p;
 }
 
 /** เพิ่มหรือแก้ไขสินค้า/บริการ — จำนวนคงเหลือแก้ตรงนี้ไม่ได้ ต้องมาจากเอกสาร */
@@ -275,6 +327,31 @@ function saveAsset(input) {
   return { asset: rec, created: true };
 }
 
+/* ---------- บัญชีรายได้ของแต่ละบรรทัด ----------
+   เดิมบรรทัดที่พิมพ์เองโดยไม่เลือกสินค้าลงรายได้จากการขายทุกครั้ง ค่าที่ปรึกษาจึงไปปนกับยอดขายสินค้า
+   ตอนนี้เลือกบัญชีรายได้ได้ทีละบรรทัด ไม่เลือก = ตามชนิดสินค้า (บริการ → รายได้ค่าบริการ · สินค้า → รายได้จากการขาย) */
+/* บัญชีรายได้ที่ระบบลงให้เองจากงานอื่น ไม่เปิดให้เลือกเป็นรายได้ของเอกสารขาย */
+const REVENUE_SYSTEM_SUBS = ['sales_return', 'sales_discount', 'fx_gain', 'gain_on_disposal', 'bad_debt_recovery', 'interest_income'];
+function revenueAccounts() {
+  return DB.accounts.filter((a) => a.postable && a.type === 'revenue' && REVENUE_SYSTEM_SUBS.indexOf(a.subType) < 0);
+}
+/** บัญชีรายได้ปริยาย — บริการลงรายได้ค่าบริการ นอกนั้นลงรายได้จากการขาย */
+function defaultRevenueAccount(itemCode, revenueSub) {
+  const it = itemCode ? DB.items.find((x) => x.code === itemCode) : null;
+  const sub = revenueSub || (it && it.type === 'service' ? 'service_revenue' : 'sales_revenue');
+  const accs = DB.accounts.filter((a) => a.postable && a.subType === sub);
+  const a = accs.find((x) => x.isDefault) || accs[0];
+  return a ? a.code : accBySub('sales_revenue');
+}
+function revenueLineAccount(l, i) {
+  if (!l.acc) return defaultRevenueAccount(l.itemCode, l.revenueSub);
+  if (!revenueAccounts().some((a) => a.code === l.acc)) {
+    throw new DomainError('REVENUE_ACCOUNT_INVALID', 'บรรทัดที่ ' + (i + 1) + ' บัญชี ' + l.acc + ' ใช้บันทึกรายได้จากการขายไม่ได้',
+      'เลือกบัญชีหมวดรายได้ เช่น รายได้จากการขาย หรือรายได้ค่าบริการ');
+  }
+  return l.acc;
+}
+
 /* ---------- ขาย: ออกใบกำกับภาษี ---------- */
 function issueInvoice(input) {
   const p = partnerByCode(input.partnerCode);
@@ -284,12 +361,13 @@ function issueInvoice(input) {
 
   const v = computeVat(lines, input.date);
   assertStockAvailable(lines);
+  const lineAcc = lines.map((l, i) => revenueLineAccount(l, i));
   const no = nextNo('invoice', input.date);
   const due = addDays(input.date, p.termDays || 0);
 
   const revLines = {};
-  lines.forEach(function (l) {
-    const a = accBySub(l.revenueSub || 'sales_revenue');
+  lines.forEach(function (l, i) {
+    const a = lineAcc[i];
     revLines[a] = (revLines[a] || 0) + round2(mulQty(M(l.price), l.qty));
   });
 
@@ -336,15 +414,17 @@ function issueInvoice(input) {
 
   const doc = {
     no, date: input.date, due, partnerCode: p.code, partnerName: snap.name,
-    snap, lines: lines.map((l) => ({
+    snap, lines: lines.map((l, i) => Object.assign({
       desc: l.desc, qty: Number(l.qty), price: M(l.price), uom: l.uom || '',
-      taxCode: l.taxCode || 'VAT7', itemCode: l.itemCode || null,
+      taxCode: l.taxCode || 'VAT7', itemCode: l.itemCode || null, acc: lineAcc[i],
       amount: round2(mulQty(M(l.price), l.qty)),
-    })),
+    }, l.soLine !== undefined && l.soLine !== null ? { soLine: Number(l.soLine) } : {})),
     base: v.std + v.zero + v.exempt, vat: v.vat, total: v.total,
     paid: 0, credited: 0, status: 'issued',
     entryNo: je.no, cogsEntryNo: cogsJe ? cogsJe.no : null,
     etax: 'accepted',
+    /* ใบสั่งขายที่ทยอยออกใบกำกับ — นับจำนวนที่ออกไปแล้วจากใบกำกับที่ยังไม่ยกเลิก */
+    soNo: input.soNo || null, fromDoc: input.fromDoc || null,
   };
   DB.docs.invoice.unshift(doc);
   audit('invoice', no, 'issue', null, { total: fmt(v.total), partner: snap.name });
@@ -546,6 +626,8 @@ function issueDebitNote(input) {
   /* ภาษีในใบเพิ่มหนี้ตามอัตราของรายการเดิม — ใบกำกับอัตรา 0% เพิ่มหนี้แล้วก็ยังเป็น 0% */
   const vat = code === 'VAT7' ? round2(pct(base, resolveRate('VAT7', inv.date).rate)) : 0;
   const total = base + vat;
+  /* เพิ่มหนี้ค่าบริการต้องเข้ารายได้ค่าบริการ ไม่ใช่รายได้จากการขายทุกครั้ง — ไม่เลือกใช้บัญชีหลักของใบกำกับเดิม */
+  const revAcc = input.acc ? revenueLineAccount({ acc: input.acc }, 0) : invoiceRevenueAccount(inv, code);
   const no = nextNo('debitNote', input.date);
 
   const je = post({
@@ -554,7 +636,7 @@ function issueDebitNote(input) {
     src: 'debitNote', srcId: no,
     lines: [
       { acc: accBySub('trade_receivable'), dr: total, partner: inv.partnerCode },
-      { acc: accBySub('sales_revenue'), cr: base },
+      { acc: revAcc, cr: base },
       { acc: accBySub('output_vat'), cr: vat },
     ],
   });
@@ -572,10 +654,20 @@ function issueDebitNote(input) {
 
   const doc = { no, date: input.date, invoiceNo: inv.no, partnerCode: inv.partnerCode,
     partnerName: inv.partnerName, reason: input.reason, reasonText: DN_REASONS[input.reason],
-    taxCode: code, base, vat, total, entryNo: je.no };
+    taxCode: code, base, vat, total, acc: revAcc, entryNo: je.no };
   DB.docs.debitNote.unshift(doc);
   audit('debitNote', no, 'issue', null, { ref: inv.no, total: fmt(total), reason: DN_REASONS[input.reason] });
   return doc;
+}
+/** บัญชีรายได้หลักของใบกำกับ (บัญชีที่ยอดรวมสูงสุดในอัตราภาษีนั้น) — ใบรุ่นก่อนที่ไม่ได้เก็บบัญชีไว้ เดาจากสินค้า */
+function invoiceRevenueAccount(inv, code) {
+  const ls = inv.lines.filter((l) => !code || (l.taxCode || 'VAT7') === code);
+  const tot = {};
+  (ls.length ? ls : inv.lines).forEach(function (l) {
+    const a = l.acc && DB.accounts.some((x) => x.code === l.acc) ? l.acc : defaultRevenueAccount(l.itemCode, null);
+    tot[a] = (tot[a] || 0) + l.amount;
+  });
+  return Object.keys(tot).sort((a, b) => tot[b] - tot[a])[0] || defaultRevenueAccount(null, null);
 }
 
 /* ===================================================================
@@ -602,7 +694,9 @@ function tradeDocStatus(kind, d, asOf) {
   return 'issued';
 }
 
-function issueTradeDoc(kind, input) {
+/** คู่ค้าและบรรทัดของเอกสารก่อนลงบัญชี — ใช้ทั้งตอนออกใหม่และตอนแก้ไข
+    บัญชีที่เลือกไว้ในบรรทัดตรวจตั้งแต่ตอนนี้ ไม่ต้องรอไปพังตอนแปลงเป็นใบกำกับหรือตั้งหนี้ */
+function tradeDocParts(kind, input) {
   const cfg = TRADE_DOCS[kind];
   if (!cfg) throw new DomainError('TRADE_DOC_KIND_UNKNOWN', 'ไม่รู้จักเอกสารประเภท ' + kind);
   const p = partnerByCode(input.partnerCode);
@@ -614,8 +708,22 @@ function issueTradeDoc(kind, input) {
   const lines = (input.lines || []).filter((l) => String(l.desc || '').trim() && M(l.price) !== 0);
   if (!lines.length) throw new DomainError('NO_LINES', 'ต้องมีรายการอย่างน้อย 1 บรรทัด');
   if (!input.date) throw new DomainError('DATE_REQUIRED', 'ต้องระบุวันที่เอกสาร');
-
+  const accs = lines.map(function (l, i) {
+    if (!l.acc) return null;
+    return cfg.side === 'customer' ? revenueLineAccount(l, i) : billLineAccount(l, i);
+  });
   const v = computeVat(lines, input.date);
+  return { cfg, p, v, rows: lines.map((l, i) => ({
+    desc: l.desc, qty: Number(l.qty), price: M(l.price), uom: l.uom || '',
+    taxCode: l.taxCode || 'VAT7', itemCode: l.itemCode || null, acc: accs[i],
+    expenseSub: l.expenseSub || null, revenueSub: l.revenueSub || null,
+    amount: round2(mulQty(M(l.price), l.qty)),
+  })) };
+}
+
+function issueTradeDoc(kind, input) {
+  const t = tradeDocParts(kind, input);
+  const cfg = t.cfg, p = t.p, v = t.v;
   const no = nextNo(kind, input.date);
   const validUntil = input.validUntil
     || (cfg.validDays ? addDays(input.date, cfg.validDays) : null);
@@ -623,18 +731,51 @@ function issueTradeDoc(kind, input) {
   const doc = {
     no, date: input.date, validUntil,
     partnerCode: p.code, partnerName: p.name, snap: snapshotPartner(p),
-    lines: lines.map((l) => ({
-      desc: l.desc, qty: Number(l.qty), price: M(l.price), uom: l.uom || '',
-      taxCode: l.taxCode || 'VAT7', itemCode: l.itemCode || null,
-      expenseSub: l.expenseSub || null, revenueSub: l.revenueSub || null,
-      amount: round2(mulQty(M(l.price), l.qty)),
-    })),
+    lines: t.rows,
     base: v.std + v.zero + v.exempt, vat: v.vat, total: v.total,
     note: input.note || '', status: 'issued', convertedTo: null, fromDoc: input.fromDoc || null,
   };
   DB.docs[kind].unshift(doc);
   audit(kind, no, 'issue', null, { partner: p.name, total: fmt(v.total) });
   return doc;
+}
+
+/** แก้ไขใบเสนอราคา/ใบสั่งขาย/ใบสั่งซื้อ — ได้เฉพาะใบที่ยังไม่ตอบรับ ไม่ได้แปลง และยังไม่ได้รับของ/ออกใบกำกับ
+    ใบที่ลูกค้าตอบรับหรือผู้ขายยืนยันแล้วคือข้อตกลงที่อีกฝ่ายเห็นแล้ว แก้เงียบ ๆ ไม่ได้ ต้องยกเลิกแล้วออกใหม่
+    เลขที่เดิมคงไว้ ใบไม่มีผลทางบัญชีจึงแก้ได้โดยไม่ต้องกลับรายการ แต่บันทึกร่องรอยการแก้ทุกครั้ง */
+function updateTradeDoc(kind, no, input) {
+  const cfg = TRADE_DOCS[kind];
+  if (!cfg) throw new DomainError('TRADE_DOC_KIND_UNKNOWN', 'ไม่รู้จักเอกสารประเภท ' + kind);
+  const d = tradeDocFind(kind, no);
+  if (d.status !== 'issued') {
+    const why = { approved: (kind === 'purchaseOrder' ? 'ผู้ขายยืนยัน' : 'ลูกค้าตอบรับ') + 'แล้ว',
+      closed: 'แปลงเป็น ' + d.convertedTo + ' แล้ว', cancelled: 'ถูกยกเลิกแล้ว', rejected: 'ถูกปฏิเสธแล้ว',
+      partially_received: 'รับสินค้าไปบางส่วนแล้ว', partially_invoiced: 'ออกใบกำกับไปบางส่วนแล้ว' }[d.status] || d.status;
+    throw new DomainError('TRADE_DOC_NOT_EDITABLE', cfg.label + ' ' + no + ' ' + why + ' แก้ไขไม่ได้',
+      'ยกเลิกใบนี้แล้วออกใบใหม่แทน');
+  }
+  /* ช่องที่ไม่ส่งมาใช้ค่าเดิม — แก้แค่หมายเหตุหรือวันยืนราคาได้โดยไม่ต้องส่งบรรทัดทั้งหมดมาใหม่ */
+  const date = input.date || d.date;
+  const t = tradeDocParts(kind, { partnerCode: input.partnerCode || d.partnerCode, date,
+    lines: input.lines || d.lines.map((l) => ({ ...l, price: unM(l.price) })) });
+  const before = { partner: d.partnerName, total: fmt(d.total), lines: d.lines.length };
+  /* วันยืนราคา: ระบุมา = ใช้ตามนั้น · เปลี่ยนวันที่เอกสาร = นับใหม่จากวันที่ใหม่ · ไม่เปลี่ยน = คงเดิม */
+  const validUntil = !cfg.validDays ? null
+    : input.validUntil ? input.validUntil
+    : date !== d.date ? addDays(date, cfg.validDays) : d.validUntil;
+  if (validUntil && validUntil < date) {
+    throw new DomainError('TRADE_DOC_VALID_BEFORE_DATE', 'วันยืนราคาต้องไม่ก่อนวันที่เอกสาร');
+  }
+  d.date = date;
+  d.validUntil = validUntil;
+  d.partnerCode = t.p.code; d.partnerName = t.p.name; d.snap = snapshotPartner(t.p);
+  d.lines = t.rows;
+  d.base = t.v.std + t.v.zero + t.v.exempt; d.vat = t.v.vat; d.total = t.v.total;
+  if (input.note !== undefined) d.note = input.note || '';
+  d.revision = (d.revision || 0) + 1;
+  d.updatedAt = new Date().toISOString();
+  audit(kind, no, 'update', before, { partner: d.partnerName, total: fmt(d.total), lines: d.lines.length });
+  return d;
 }
 
 /** ตอบรับ / ปฏิเสธ / ยกเลิก — ใบที่แปลงไปแล้วห้ามแตะ ไม่งั้นเอกสารปลายทางจะกำพร้า */
@@ -654,13 +795,17 @@ function setTradeDocStatus(kind, no, status, reason) {
   if (d.status === 'partially_received' && status !== 'cancelled') {
     throw new DomainError('TRADE_DOC_STATUS_INVALID', 'ใบสั่งซื้อ ' + no + ' รับสินค้าไปบางส่วนแล้ว ยกเลิกส่วนที่เหลือได้อย่างเดียว');
   }
+  if (d.status === 'partially_invoiced' && status !== 'cancelled') {
+    throw new DomainError('TRADE_DOC_STATUS_INVALID', 'ใบสั่งขาย ' + no + ' ออกใบกำกับไปบางส่วนแล้ว ยกเลิกส่วนที่เหลือได้อย่างเดียว');
+  }
   d.status = status;
   if (reason) d.statusReason = reason;
   audit(kind, no, status, null, reason ? { reason } : null);
   return d;
 }
 
-/** แปลงเอกสารไปขั้นถัดไป — ใบเสนอราคา → ใบสั่งขาย → ใบกำกับภาษี, ใบสั่งซื้อ → ตั้งหนี้ */
+/** แปลงเอกสารไปขั้นถัดไป — ใบเสนอราคา → ใบสั่งขาย (หรือ → ใบกำกับภาษีตรง ๆ เมื่อ input.to = 'invoice')
+    ใบสั่งขาย → ใบกำกับภาษี (ส่วนที่ยังไม่ได้ออกทั้งหมด) · ใบสั่งซื้อ → ตั้งหนี้ */
 function convertTradeDoc(kind, no, input) {
   const cfg = TRADE_DOCS[kind];
   const d = tradeDocFind(kind, no);
@@ -678,31 +823,36 @@ function convertTradeDoc(kind, no, input) {
   }
   const opts = input || {};
   const date = opts.date || TODAY;
+  /* ใบสั่งขายออกใบกำกับเป็นงวด ๆ ได้ — แปลงทั้งใบคือออกส่วนที่ยังค้างทั้งหมดในใบเดียว */
+  if (cfg.next === 'invoice') return invoiceSalesOrder(no, { date });
   let made;
 
   /* บรรทัดที่เก็บไว้เป็นจำนวนเงินสเกลแล้ว ต้องแปลงกลับเป็นข้อความก่อนส่งต่อ
      ไม่งั้นฟังก์ชันปลายทางจะคูณสเกลซ้ำ */
   const carry = d.lines.map((l) => ({ ...l, price: unM(l.price) }));
 
-  if (cfg.next === 'salesOrder') {
+  if (kind === 'quotation' && opts.to === 'invoice') {
+    /* งานเล็กที่ไม่ต้องมีใบสั่งขาย — ลูกค้าตอบรับแล้วออกใบกำกับได้เลย */
+    made = issueInvoice({ partnerCode: d.partnerCode, date, lines: carry, fromDoc: d.no });
+  } else if (cfg.next === 'salesOrder') {
     made = issueTradeDoc('salesOrder', {
       partnerCode: d.partnerCode, date, lines: carry, note: d.note, fromDoc: d.no,
     });
-  } else if (cfg.next === 'invoice') {
-    made = issueInvoice({ partnerCode: d.partnerCode, date, lines: carry });
   } else {
     if (!opts.vendorNo) {
       throw new DomainError('VENDOR_INVOICE_NO_REQUIRED',
         'ต้องกรอกเลขที่ใบกำกับภาษีของผู้ขายก่อนตั้งหนี้',
         'ดูเลขที่จากใบกำกับที่ผู้ขายส่งมา');
     }
+    /* บัญชีของแต่ละบรรทัดตามที่เลือกไว้ในใบสั่งซื้อ (หรือที่แก้ตอนแปลง opts.lineAccs) — เดิมทุกบรรทัดลงบัญชีเดียวกัน
+       ค่าซ่อมกับค่าวัสดุในใบเดียวกันจึงปนกัน · opts.acc ใช้กับบรรทัดที่ไม่ได้เลือกบัญชีไว้ · สินค้าคงคลังเข้าบัญชีสินค้าเสมอ */
+    const pick = Array.isArray(opts.lineAccs) ? opts.lineAccs : [];
     made = recordBill({
       partnerCode: d.partnerCode, date, vendorNo: opts.vendorNo,
-      /* บัญชีที่เลือกตอนแปลงใช้กับรายการที่ไม่ใช่สินค้าคงคลัง — สินค้าคงคลังเข้าบัญชีสินค้าเสมอ */
-      lines: carry.map(function (l) {
+      lines: carry.map(function (l, i) {
         const it = l.itemCode ? DB.items.find((x) => x.code === l.itemCode) : null;
         const stock = it && it.type === 'stock';
-        return { ...l, acc: stock ? accBySub('inventory') : (opts.acc || l.acc || null),
+        return { ...l, acc: stock ? accBySub('inventory') : (pick[i] || l.acc || opts.acc || null),
           expenseSub: l.expenseSub || opts.expenseSub || 'admin_expense' };
       }),
       nonClaimableVat: !!opts.nonClaimableVat, whtCode: opts.whtCode || null,
@@ -712,6 +862,187 @@ function convertTradeDoc(kind, no, input) {
   d.convertedTo = made.no;
   audit(kind, no, 'convert', null, { to: made.no });
   return made;
+}
+
+/* ===================================================================
+   ใบสั่งขาย → ใบกำกับภาษีทีละงวด
+   ส่งของไม่ครบหรือเก็บเงินตามความคืบหน้าของงาน ออกใบกำกับเฉพาะส่วนที่ส่งมอบแล้ว
+   ใบสั่งขายยังเปิดอยู่จนกว่าจะออกครบทุกบรรทัด — ทำแบบเดียวกับการทยอยรับของตามใบสั่งซื้อ
+   =================================================================== */
+/** จำนวนที่ออกใบกำกับแล้วของแต่ละบรรทัด — นับจากใบกำกับที่ยังไม่ยกเลิก ไม่เก็บซ้ำไว้ในใบสั่งขาย */
+function soInvoiced(so) {
+  const got = so.lines.map(() => 0);
+  DB.docs.invoice.forEach(function (inv) {
+    if (inv.soNo !== so.no || inv.status === 'void') return;
+    inv.lines.forEach(function (l) {
+      if (l.soLine !== undefined && l.soLine !== null && l.soLine < got.length) got[l.soLine] = roundQty(got[l.soLine] + l.qty);
+    });
+  });
+  return got;
+}
+/** สถานะใบสั่งขายคิดจากใบกำกับจริง: ยังไม่ออก / ออกบางส่วน / ออกครบ (ปิด) */
+function syncSoStatus(so) {
+  const got = soInvoiced(so);
+  const invs = DB.docs.invoice.filter((i) => i.soNo === so.no && i.status !== 'void').map((i) => i.no).reverse();
+  so.invoiceNos = invs;
+  if (so.status === 'cancelled') return so;                 // ยกเลิกส่วนที่เหลือไปแล้ว คงสถานะไว้
+  const all = so.lines.every((l, i) => got[i] >= roundQty(l.qty));
+  if (invs.length && all) { so.status = 'closed'; so.convertedTo = invs.join(', '); }
+  else if (invs.length) { so.status = 'partially_invoiced'; so.convertedTo = null; }
+  else if (so.status === 'partially_invoiced' || so.status === 'closed') {
+    so.status = so.statusBeforeInvoice || 'approved'; so.convertedTo = null;
+  }
+  return so;
+}
+/** ออกใบกำกับจากใบสั่งขาย — input.lines = [{ line: ลำดับบรรทัดในใบสั่งขาย, qty }] · ไม่ระบุ = ส่วนที่ค้างทั้งหมด
+    จำนวนเป็นทศนิยมได้ (3 ตำแหน่ง) งานบริการเก็บเงินตามความคืบหน้าใส่ 0.3 = 30% ของบรรทัดนั้น */
+function invoiceSalesOrder(soNo, input) {
+  const so = tradeDocFind('salesOrder', soNo);
+  if (so.status === 'closed') {
+    throw new DomainError('TRADE_DOC_ALREADY_CONVERTED', 'ใบสั่งขาย ' + soNo + ' ออกใบกำกับครบแล้ว (' + so.convertedTo + ')');
+  }
+  if (so.status === 'cancelled' || so.status === 'rejected') {
+    throw new DomainError('TRADE_DOC_NOT_ACTIVE', 'ใบสั่งขาย ' + soNo + ' อยู่ในสถานะ ' + so.status + ' ออกใบกำกับไม่ได้');
+  }
+  const opts = input || {};
+  const got = soInvoiced(so);
+  const want = Array.isArray(opts.lines)
+    ? opts.lines.map((x) => ({ line: Number(x.line), qty: roundQty(x.qty || 0) }))
+    : so.lines.map((l, i) => ({ line: i, qty: roundQty(roundQty(l.qty) - got[i]) }));
+  const rows = [];
+  want.forEach(function (w) {
+    const l = so.lines[w.line];
+    if (!l) throw new DomainError('SO_LINE_INVALID', 'ไม่พบบรรทัดที่ ' + (w.line + 1) + ' ในใบสั่งขาย ' + soNo);
+    if (w.qty < 0) throw new DomainError('SO_QTY_INVALID', l.desc + ' จำนวนติดลบไม่ได้');
+    if (!(w.qty > 0)) return;
+    const left = roundQty(roundQty(l.qty) - got[w.line]);
+    if (w.qty > left) {
+      throw new DomainError('SO_OVER_INVOICE', l.desc + ' ออกใบกำกับ ' + w.qty + ' เกินที่สั่งและยังค้างอยู่ ' + left,
+        'ถ้าลูกค้าสั่งเพิ่ม ให้ออกใบสั่งขายใบใหม่ หรือออกใบกำกับแยกต่างหาก');
+    }
+    rows.push({ ...l, price: unM(l.price), qty: w.qty, soLine: w.line });
+  });
+  if (!rows.length) throw new DomainError('SO_QTY_INVALID', 'ต้องเลือกรายการที่จะออกใบกำกับอย่างน้อย 1 รายการ');
+  if (so.status !== 'partially_invoiced') so.statusBeforeInvoice = so.status;
+  const inv = issueInvoice({ partnerCode: so.partnerCode, date: opts.date || TODAY, lines: rows, soNo: so.no, fromDoc: so.no });
+  syncSoStatus(so);
+  audit('salesOrder', soNo, so.status === 'closed' ? 'convert' : 'partial_invoice', null, { to: inv.no });
+  return inv;
+}
+
+/* ===================================================================
+   ขายเงินสด — ใบกำกับภาษีอย่างย่อ (มาตรา 86/6)
+   ขายปลีกหน้าร้านให้ลูกค้าทั่วไป ไม่ต้องมีชื่อ ที่อยู่ หรือเลขผู้เสียภาษีของผู้ซื้อ
+   เงินเข้าทันทีจึงลงบัญชีครั้งเดียว: Dr เงินสด/ธนาคาร · Cr รายได้ · Cr ภาษีขาย — ไม่ผ่านลูกหนี้
+   ตัดสต๊อกและต้นทุนขายเหมือนใบกำกับ และเข้ารายงานภาษีขายเป็นใบกำกับอย่างย่อ
+   ผู้ซื้อที่จะนำภาษีซื้อไปใช้ต้องได้ใบกำกับเต็มรูป ใบอย่างย่อใช้ขอคืนภาษีซื้อไม่ได้
+   =================================================================== */
+/** ยอดของบิลขายเงินสด — ร้านค้าปลีกติดราคารวมภาษีเป็นปกติ (inclusive) จึงถอดภาษีออกจากยอดรวมครั้งเดียวทั้งบิล
+    แล้วแบ่งมูลค่าก่อนภาษีกลับไปแต่ละบรรทัดตามสัดส่วน บรรทัดสุดท้ายรับเศษ ผลรวมบรรทัดจึงเท่ายอดก่อนภาษีพอดี */
+function cashSaleAmounts(lines, date, inclusive) {
+  const gross = lines.map((l) => round2(mulQty(M(l.price), l.qty)));
+  const code = (l) => l.taxCode || 'VAT7';
+  const stdIdx = lines.map((l, i) => i).filter((i) => code(lines[i]) === 'VAT7');
+  const rate = stdIdx.length ? resolveRate('VAT7', date).rate : '0';
+  const stdGross = stdIdx.reduce((s, i) => s + gross[i], 0);
+  const base = gross.slice();
+  let std, vat;
+  if (inclusive && stdIdx.length) {
+    std = round2(mulDiv(stdGross, 100 * S, 100 * S + M(rate)));
+    vat = stdGross - std;
+    let left = std;
+    stdIdx.forEach(function (i, k) {
+      base[i] = k === stdIdx.length - 1 ? left : round2(mulDiv(std, gross[i], stdGross || 1));
+      left -= base[i];
+    });
+  } else {
+    std = stdGross;
+    vat = round2(pct(std, rate));
+  }
+  const sumOf = (c) => lines.reduce((s, l, i) => s + (code(l) === c ? base[i] : 0), 0);
+  const zero = sumOf('VAT0'), exempt = sumOf('EXEMPT');
+  return { base, gross: inclusive ? gross : base, std, zero, exempt, vat, total: std + zero + exempt + vat, rate };
+}
+
+function issueCashSale(input) {
+  if (!input.date) throw new DomainError('DATE_REQUIRED', 'ต้องระบุวันที่ขาย');
+  const lines = (input.lines || []).filter((l) => String(l.desc || '').trim() && M(l.price) !== 0);
+  if (!lines.length) throw new DomainError('NO_LINES', 'ต้องมีรายการอย่างน้อย 1 บรรทัด');
+  lines.forEach(function (l, i) {
+    if (!(Number(l.qty) > 0)) throw new DomainError('CASH_SALE_QTY_INVALID', 'บรรทัดที่ ' + (i + 1) + ' จำนวนต้องมากกว่าศูนย์');
+  });
+  /* ลูกค้าในทะเบียนไม่บังคับ — ใส่ไว้เพื่อดูยอดซื้อของลูกค้าประจำได้ แต่ไม่ต้องมีเลขผู้เสียภาษี */
+  const p = input.partnerCode ? partnerByCode(input.partnerCode) : null;
+  if (p && p.kind !== 'customer') {
+    throw new DomainError('PARTNER_WRONG_SIDE', 'ขายเงินสดต้องระบุลูกค้า แต่ ' + p.name + ' อยู่ในทะเบียนผู้ขาย');
+  }
+  const buyerName = String(input.buyerName || (p ? p.name : '') || '').trim();
+  const payTo = input.payTo || accBySub('cash');
+  const pa = acc(payTo);
+  if (!pa.postable || (pa.subType !== 'cash' && pa.subType !== 'bank')) {
+    throw new DomainError('CASH_SALE_PAYTO_INVALID', 'เงินที่รับต้องเข้าบัญชีเงินสดหรือเงินฝากธนาคาร',
+      'เลือกบัญชีเงินสดหรือบัญชีธนาคารที่รับเงินจริง');
+  }
+  const inclusive = input.vatInclusive !== false;
+  const a = cashSaleAmounts(lines, input.date, inclusive);
+  const lineAcc = lines.map((l, i) => revenueLineAccount(l, i));
+  assertStockAvailable(lines);
+  assertPostingOpen(input.date);
+  const no = nextNo('cashSale', input.date);
+
+  const revLines = {};
+  lines.forEach(function (l, i) { revLines[lineAcc[i]] = (revLines[lineAcc[i]] || 0) + a.base[i]; });
+  const je = post({
+    type: 'receipt', date: input.date,
+    desc: 'ขายเงินสด ' + no + (buyerName ? ' — ' + buyerName : ''),
+    src: 'cashSale', srcId: no,
+    lines: [{ acc: payTo, dr: a.total }]
+      .concat(Object.keys(revLines).map((x) => ({ acc: x, cr: revLines[x] })))
+      .concat(a.vat ? [{ acc: accBySub('output_vat'), cr: a.vat }] : []),
+  });
+
+  /* ตัดต้นทุนขายแบบเดียวกับใบกำกับ — ชิ้นสุดท้ายรับมูลค่าที่เหลือทั้งหมด */
+  let cogs = 0;
+  lines.forEach(function (l) {
+    const it = l.itemCode ? DB.items.find((x) => x.code === l.itemCode) : null;
+    if (!it || it.type !== 'stock') return;
+    const q = roundQty(l.qty);
+    const c = q === it.qty ? it.value : round2(mulQty(it.avgCost, q));
+    cogs += c;
+    it.qty = roundQty(it.qty - q);
+    it.value -= c;
+    DB.docs.stockMove.push({ date: input.date, item: it.code, dir: 'out', qty: q, cost: c, src: no, balance: it.qty });
+  });
+  const cogsJe = cogs > 0 ? post({
+    type: 'inventory', date: input.date, desc: 'ตัดต้นทุนขาย ' + no,
+    src: 'cashSale', srcId: no,
+    lines: [{ acc: accBySub('cogs'), dr: cogs }, { acc: accBySub('inventory'), cr: cogs }],
+  }) : null;
+
+  /* รายงานภาษีขายแสดงใบอย่างย่อแยกจากใบเต็มรูป ไม่มีเลขผู้เสียภาษีของผู้ซื้อ */
+  DB.taxTx.push({
+    kind: 'vat_output', period: periodOf(input.date), date: input.date,
+    docNo: no, docType: 'abbreviated',
+    partnerName: buyerName || 'ขายปลีก (ใบกำกับภาษีอย่างย่อ)', taxId: null, branch: null,
+    base: a.std, zero: a.zero, exempt: a.exempt, tax: a.vat,
+    entryNo: je.no, filingId: null,
+  });
+
+  const doc = {
+    no, date: input.date, partnerCode: p ? p.code : null, partnerName: buyerName || 'ลูกค้าทั่วไป',
+    buyerName: buyerName || null, vatInclusive: inclusive,
+    lines: lines.map((l, i) => ({
+      desc: l.desc, qty: Number(l.qty), price: M(l.price), uom: l.uom || '',
+      taxCode: l.taxCode || 'VAT7', itemCode: l.itemCode || null, acc: lineAcc[i],
+      amount: a.base[i], gross: a.gross[i],
+    })),
+    base: a.std + a.zero + a.exempt, vat: a.vat, total: a.total,
+    payTo, method: input.method || (pa.subType === 'cash' ? 'cash' : 'transfer'), note: input.note || '',
+    status: 'paid', entryNo: je.no, cogsEntryNo: cogsJe ? cogsJe.no : null,
+  };
+  DB.docs.cashSale.unshift(doc);
+  audit('cashSale', no, 'issue', null, { total: fmt(a.total), buyer: buyerName || 'ลูกค้าทั่วไป' });
+  return doc;
 }
 
 /* ---------- ซื้อ: ตั้งหนี้ผู้ขาย ---------- */
@@ -1959,6 +2290,7 @@ const VOIDABLE = {
   expense:      { label:'ค่าใช้จ่าย', src:'expense' },
   goodsReceipt: { label:'ใบรับสินค้า', src:'goodsReceipt' },
   customerRefund: { label:'ใบคืนเงินลูกค้า', src:'customerRefund' },
+  cashSale:     { label:'ใบกำกับภาษีอย่างย่อ', src:'cashSale' },
 };
 const liveDoc = (d) => !!d && d.status !== 'void';
 
@@ -1969,6 +2301,7 @@ function taxRowsOf(kind, d) {
     if (kind === 'invoice') return t.kind === 'vat_output' && t.docType === 'tax_invoice' && t.docNo === d.no;
     if (kind === 'creditNote') return t.kind === 'vat_output' && t.docType === 'credit_note' && t.docNo === d.no;
     if (kind === 'debitNote') return t.kind === 'vat_output' && t.docType === 'debit_note' && t.docNo === d.no;
+    if (kind === 'cashSale') return t.kind === 'vat_output' && t.docType === 'abbreviated' && t.docNo === d.no;
     if (kind === 'bill') return t.kind === 'vat_input' && t.entryNo === d.entryNo;
     if (kind === 'expense') return (t.kind === 'vat_input' && t.expenseNo === d.no) || (t.kind === 'wht' && t.docNo === d.no);
     if (kind === 'payment') return t.kind === 'wht' && t.docNo === d.no;
@@ -2055,7 +2388,8 @@ function voidPreview(kind, no) {
   if (tax.some((t) => t.kind !== 'wht')) out.push('ทะเบียนภาษี' + (kind === 'bill' || kind === 'expense' ? 'ซื้อ' : 'ขาย') + 'แสดงว่า "ยกเลิก" ยอดเป็นศูนย์');
   if (tax.some((t) => t.kind === 'wht')) out.push('ตัดรายการออกจากแบบ ภ.ง.ด. ของงวด');
   if (d.certNo) out.push('ยกเลิกหนังสือรับรอง 50 ทวิ เลขที่ ' + d.certNo);
-  if (kind === 'invoice' && d.cogsEntryNo) out.push('คืนสินค้าเข้าคลังตามที่ตัดออกไป');
+  if ((kind === 'invoice' || kind === 'cashSale') && d.cogsEntryNo) out.push('คืนสินค้าเข้าคลังตามที่ตัดออกไป');
+  if (kind === 'invoice' && d.soNo) out.push('ใบสั่งขาย ' + d.soNo + ' กลับมาค้างออกใบกำกับส่วนนี้');
   if ((kind === 'bill' && !d.grnNo) || kind === 'goodsReceipt' || kind === 'creditNote') {
     if (DB.docs.stockMove.some((m) => m.src === d.no && m.dir === 'in')) {
       out.push(kind === 'creditNote' ? 'นำสินค้าที่รับคืนออกจากคลัง และกลับต้นทุนขายส่วนนั้น' : 'นำสินค้าที่รับเข้าออกจากคลัง');
@@ -2112,7 +2446,14 @@ function voidDocument(kind, no, reason) {
     /* ตั้งสถานะยกเลิกก่อนปรับทะเบียนที่เกี่ยวข้อง — ตัวที่นับใหม่จากเอกสาร (เช่นยอดรับของตามใบสั่งซื้อ) จะได้ไม่นับใบนี้ */
     const before = d.status;
     d.status = 'void';
-    if (kind === 'invoice') { stockBack(no, 'out'); reopenTradeDoc('salesOrder', no); }
+    if (kind === 'invoice') {
+      stockBack(no, 'out');
+      /* ใบสั่งขายที่ทยอยออกใบกำกับ นับยอดที่ออกแล้วใหม่จากใบกำกับที่เหลือ · ใบรุ่นก่อนเปิดกลับทั้งใบ */
+      const so = d.soNo ? DB.docs.salesOrder.find((x) => x.no === d.soNo) : null;
+      if (so) syncSoStatus(so); else reopenTradeDoc('salesOrder', no);
+      reopenTradeDoc('quotation', no);
+    }
+    if (kind === 'cashSale') stockBack(no, 'out');
     if (kind === 'receipt') { inv.paid -= d.gross; syncInvStatus(inv); }
     if (kind === 'customerRefund') { inv.refunded = (inv.refunded || 0) - d.amount; syncInvStatus(inv); }
     if (kind === 'creditNote') { inv.credited -= d.total; stockBack(no, 'in'); syncInvStatus(inv); }
@@ -2527,6 +2868,10 @@ refundCustomer = transactional(refundCustomer);
 issueTradeDoc = transactional(issueTradeDoc);
 setTradeDocStatus = transactional(setTradeDocStatus);
 convertTradeDoc = transactional(convertTradeDoc);
+updateTradeDoc = transactional(updateTradeDoc);
+invoiceSalesOrder = transactional(invoiceSalesOrder);
+issueCashSale = transactional(issueCashSale);
+deletePartner = transactional(deletePartner);
 recordBill = transactional(recordBill);
 payBill = transactional(payBill);
 runDepreciation = transactional(runDepreciation);

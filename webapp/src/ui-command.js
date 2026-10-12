@@ -6,6 +6,7 @@
 const CREATE_MENU = [
   { s:'เอกสารขาย', icon:'sale', items:[
     ['new:quotation', 'ใบเสนอราคา'], ['new:salesorder', 'ใบสั่งขาย'], ['new:invoice', 'ใบกำกับภาษี'],
+    ['new:cashsale', 'ขายเงินสด (ใบกำกับอย่างย่อ)'],
     ['new:billingnote', 'ใบวางบิล'], ['new:receipt', 'ใบเสร็จรับเงิน'],
     ['new:creditnote', 'ใบลดหนี้'], ['new:debitnote', 'ใบเพิ่มหนี้'],
   ]},
@@ -40,6 +41,7 @@ const SCREEN_WORDS = {
   stockadj:'stock count ตรวจนับ นับสต๊อก ปรับปรุงสต๊อก ตัดสต๊อก ของเสีย เบิก ยอดยกมาสินค้า', stockcard:'stock card สต๊อกการ์ด สินค้าคงเหลือ รายงานสินค้าและวัตถุดิบ inventory',
   items:'สินค้า stock inventory สต๊อก', stockmoves:'stock movement เคลื่อนไหว',
 };
+SCREEN_WORDS.cashsales = 'pos หน้าร้าน ขายปลีก ใบกำกับภาษีอย่างย่อ เงินสด cash sale';
 
 /* ---------- เมนูสร้างเอกสาร ---------- */
 function openPop(anchor) {
@@ -115,6 +117,7 @@ function cmdkSources(q) {
   /* เอกสาร — ค้นจากเลขที่ เลขใบกำกับผู้ขาย และชื่อคู่ค้า */
   const DOCS = [
     ['invoice', 'ใบกำกับภาษี', (d) => 'open:invoices:' + d.no, 'sale'],
+    ['cashSale', 'ขายเงินสด', (d) => 'open:cashsales:' + d.no, 'sale'],
     ['billingNote', 'ใบวางบิล', (d) => 'open:billingnotes:' + d.no, 'sale'],
     ['receipt', 'ใบเสร็จรับเงิน', (d) => 'open:receipts:' + d.no, 'sale'],
     ['creditNote', 'ใบลดหนี้', (d) => 'open:creditnotes:' + d.no, 'sale'],

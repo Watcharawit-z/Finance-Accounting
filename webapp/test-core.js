@@ -129,6 +129,9 @@ console.log('\n=== 4. กิจการที่ไม่ได้จดทะ�
   const bill = ctx.recordBill({ partnerCode: ven.code, date: '2026-01-12', vendorNo: 'NV-1', lines: [{ desc: 'วัสดุ', qty: 1, price: '1000', expenseSub: 'admin_expense' }] });
   ok('★ ภาษีซื้อขอคืนไม่ได้ รวมเป็นค่าใช้จ่าย', ctx.balBySub(['input_vat'], '2026-01-31') === 0 && bill.total === M('1070'),
     'ภาษีซื้อ ' + ctx.fmt(ctx.balBySub(['input_vat'], '2026-01-31')));
+  const cs = ctx.issueCashSale({ date: '2026-01-20', lines: [{ desc: 'สินค้าหน้าร้าน', qty: 2, price: '107' }] });
+  ok('★ ขายเงินสดของกิจการที่ไม่จดทะเบียน ไม่ถอดภาษีออกจากราคา และไม่มีแถวภาษีขาย', cs.vat === 0 && cs.total === M('214') && cs.nonVat
+    && !D.taxTx.some((t) => t.kind === 'vat_output' && t.docNo === cs.no), ctx.fmt(cs.vat));
   const chk = ctx.closeChecklist('2026-01');
   ok('★ ไม่ต้องยื่น ภ.พ.30 ก่อนปิดงวด', !chk.items.some((i) => /ภ\.พ\.30/.test(i.label)) && chk.canClose,
     chk.items.filter((i) => i.blocking && !i.ok).map((i) => i.label).join(','));

@@ -20,11 +20,14 @@ function pHead(title, en, copy) {
 }
 function pParty(label, p) {
   p = p || {};
+  /* ผู้ซื้อบุคคลธรรมดาที่ไม่ได้จด VAT และไม่มีเลข — ไม่พิมพ์บรรทัดเลขผู้เสียภาษีเปล่า ๆ ให้ดูเหมือนกรอกไม่ครบ */
+  const bare = p.entityType === 'individual' && !p.taxId && !p.branch;
   return '<div class="p-box"><div class="lb">' + esc(label) + '</div>'
     + '<div><b>' + esc(p.name || '—') + '</b></div>'
     + (p.address ? '<div>' + esc(p.address) + '</div>' : '')
-    + '<div>เลขประจำตัวผู้เสียภาษี ' + esc(p.taxId || '—')
-    + (p.entityType === 'individual' && !p.branch ? '' : ' · ' + esc(branchLabel(p.branch))) + '</div></div>';
+    + (bare ? '' : '<div>เลขประจำตัวผู้เสียภาษี ' + esc(p.taxId || '—')
+      + (p.entityType === 'individual' && !p.branch ? '' : ' · ' + esc(branchLabel(p.branch))) + '</div>')
+    + '</div>';
 }
 function pInfo(rows) {
   return '<div class="p-box"><div class="p-kv">'
@@ -264,6 +267,37 @@ function adjustNote(d, copy, kind) {
     + pTotals(d.total, [['มูลค่าผลต่าง', pm(d.base)], ['ภาษีมูลค่าเพิ่ม 7%', pm(d.vat)], ['รวมทั้งสิ้น', pm(d.total), true]])
     + pSign(['ผู้รับเอกสาร', 'ผู้มีอำนาจลงนาม']), d.no, isVoid(d) ? 'ยกเลิก' : '');
 }
+
+/* ใบกำกับภาษีอย่างย่อ (ม.86/6): คำว่า "ใบกำกับภาษีอย่างย่อ" · ชื่อและเลขผู้เสียภาษีของผู้ขาย · เลขที่ · รายการ
+   · ราคาที่ระบุชัดว่ารวมภาษีมูลค่าเพิ่มแล้ว · วันที่ — ไม่ต้องมีข้อมูลผู้ซื้อ (พิมพ์ชื่อให้ถ้าลูกค้าขอ) */
+DOC_PRINT.cashSale = {
+  title:'ใบกำกับภาษีอย่างย่อ', copies:['ต้นฉบับ', 'สำเนา'],
+  find: (no) => DB.docs.cashSale.find((d) => d.no === no),
+  build: function (d, copy) {
+    const how = { cash:'เงินสด', transfer:'โอนเงิน/พร้อมเพย์', card:'บัตรเครดิต/เดบิต' }[d.method] || d.method;
+    const rows = d.lines.map((l, i) => [String(i + 1), l.desc + (l.taxCode === 'EXEMPT' ? ' (ยกเว้นภาษี)' : l.taxCode === 'VAT0' ? ' (อัตรา 0%)' : ''),
+      String(l.qty), l.uom || '', pm(l.price), pm(d.vatInclusive ? l.gross : l.amount)]);
+    const sums = d.vatInclusive
+      ? [['รวมเงิน (ราคารวมภาษีมูลค่าเพิ่มแล้ว)', pm(d.total), true], ['ภาษีมูลค่าเพิ่มที่รวมอยู่ในราคา', pm(d.vat)]]
+      : [['มูลค่าก่อนภาษี', pm(d.base)], ['ภาษีมูลค่าเพิ่ม 7%', pm(d.vat)], ['รวมทั้งสิ้น (รวมภาษีมูลค่าเพิ่มแล้ว)', pm(d.total), true]];
+    if (d.nonVat) {
+      return pSheet(pHead('ใบเสร็จรับเงิน', 'RECEIPT', copy)
+        + '<div class="p-meta">' + pInfo([['ผู้ซื้อ', d.buyerName || 'ลูกค้าทั่วไป'], ['ชำระโดย', how]])
+        + pInfo([['เลขที่', d.no], ['วันที่', thDate(d.date)]]) + '</div>'
+        + pTable(LINE_COLS, d.lines.map((l, i) => [String(i + 1), l.desc, String(l.qty), l.uom || '', pm(l.price), pm(l.amount)]), 6, PAGED)
+        + pTotals(d.total, [['รวมทั้งสิ้น', pm(d.total), true]])
+        + pSign(['ผู้รับเงิน']), d.no, isVoid(d) ? 'ยกเลิก' : '');
+    }
+    return pSheet(pHead('ใบกำกับภาษีอย่างย่อ', 'ABBREVIATED TAX INVOICE', copy)
+      + '<div class="p-meta">' + pInfo([['ผู้ซื้อ', d.buyerName || 'ลูกค้าทั่วไป'], ['ชำระโดย', how]])
+      + pInfo([['เลขที่', d.no], ['วันที่', thDate(d.date)]]) + '</div>'
+      + pTable(LINE_COLS, rows, 6, PAGED)
+      + pTotals(d.total, sums)
+      + '<div class="p-note">ราคาสินค้าและค่าบริการข้างต้น' + (d.vatInclusive ? 'รวม' : 'เมื่อรวม') + 'ภาษีมูลค่าเพิ่มแล้ว'
+      + ' · ใบกำกับภาษีอย่างย่อตามมาตรา 86/6 แห่งประมวลรัษฎากร ใช้ขอคืนภาษีซื้อไม่ได้</div>'
+      + pSign(['ผู้รับเงิน']), d.no, isVoid(d) ? 'ยกเลิก' : '');
+  },
+};
 
 function tradePrint(d, copy, kind) {
   const T = { quotation:['ใบเสนอราคา', 'QUOTATION', 'ลูกค้า', ['ผู้เสนอราคา', 'ผู้อนุมัติสั่งซื้อ (ลูกค้า)']],

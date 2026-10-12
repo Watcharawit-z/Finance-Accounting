@@ -52,6 +52,8 @@ function wrapNonVatPurchase(fn, inputAt) {
   };
 }
 issueInvoice = wrapNonVatSale(issueInvoice);
+/* ขายเงินสดของกิจการที่ไม่ได้จดทะเบียน: ราคาที่ตั้งคือราคาขาย ไม่มีภาษีให้ถอด พิมพ์เป็นใบเสร็จรับเงิน */
+issueCashSale = wrapNonVatSale(issueCashSale);
 issueCreditNote = wrapNonVatNote(issueCreditNote);
 issueDebitNote = wrapNonVatNote(issueDebitNote);
 recordBill = wrapNonVatPurchase(recordBill, 0);
