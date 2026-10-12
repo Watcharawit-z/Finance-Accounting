@@ -180,10 +180,11 @@ function blankState() {
       expense: [], whtCert: [], paymentBatch: [], customerRefund: [],
       cashSale: [],        // ขายเงินสด — ใบกำกับภาษีอย่างย่อ (ม.86/6)
       stockMove: [], stockAdj: [], payRun: [], depreciation: [], filing: [],
+      assetDisposal: [],   // ขาย/ตัดจำหน่ายทรัพย์สิน (assets.js)
     },
     seq: {},             // {'invoice|2026-07': 12}
-    budget: [],          // {account,period,amount}
-    projects: [],
+    budget: [],          // {account,period,amount} · รุ่นก่อน {account,name,monthly} = เท่ากันทุกเดือน
+    projects: [],        // {code,name,customer,contract,budget,start,end,percent,status} · เอกสารผูกด้วยช่อง project
     bankTxns: [],        // บรรทัดสเตทเมนต์ธนาคารรายบัญชี {id,acc,date,desc,ref,debit,credit,balance,matched,items,matchId} (bank.js)
     bankStmts: [],       // ยอดยกมา/ยอดคงเหลือปลายงวดตามสเตทเมนต์ {acc,period,opening,closing}
     bankBf: [],          // รายการค้าง ณ วันเริ่มกระทบยอด (เช็คค้างจ่าย เงินฝากระหว่างทาง)
@@ -366,6 +367,7 @@ const SEQ_PREFIX = {
   je_sales:'SA', je_purchase:'PU', je_receipt:'RV', je_payment:'PY',
   je_general:'JV', je_adjustment:'JV', je_payroll:'PR', je_asset:'AS',
   je_inventory:'IV', je_opening:'OB', je_closing:'CL',
+  assetSale:'FAS', assetWriteOff:'FAW', assetReceipt:'FAR',
 };
 /* ชนิดที่ใช้คำนำหน้าเดียวกันต้องนับด้วยตัวนับเดียวกัน — ใบสำคัญทั่วไปกับใบปรับปรุงใช้ JV ร่วมกัน
    เดิมนับแยกตามชนิด จึงได้ JV2601-00001 สองใบ (ค่าธรรมเนียมธนาคาร กับ ปิดภาษี ภ.พ.30) */
@@ -595,6 +597,7 @@ const ENTRY_FROM = {
   yearEnd:['การปิดบัญชีสิ้นปี', 'ไปที่หน้าปิดงวดของเดือนสุดท้ายของปีแล้วกดยกเลิกการปิดบัญชีสิ้นปี'],
   stockAdj:['ใบปรับปรุงสินค้า', 'เปิดใบปรับปรุงสินค้าที่หน้าสินค้า → ยอดยกมา ตรวจนับ ตัดจำหน่าย แล้วกดยกเลิก'],
   reversal:['การกลับรายการ', 'กลับรายการซ้อนไม่ได้ ให้บันทึกใบสำคัญใหม่แทน'],
+  assetDisposal:['การขาย/ตัดจำหน่ายทรัพย์สิน', 'เปิดเอกสารขาย/ตัดจำหน่ายที่หน้าทะเบียนทรัพย์สิน แล้วกดยกเลิกเอกสาร (หรือยกเลิกการรับชำระ) ระบบจะคืนทรัพย์สินเข้าทะเบียนให้ด้วย'],
 };
 
 function reverse(entryNo, reason, date, opts) {

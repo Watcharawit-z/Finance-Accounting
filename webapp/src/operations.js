@@ -297,25 +297,52 @@ function saveAsset(input) {
   const existing = input.code ? DB.assets.find((x) => x.code === input.code) : null;
   if (input.code && !existing) throw new DomainError('ASSET_NOT_FOUND', 'ไม่พบทรัพย์สินรหัส ' + input.code);
 
-  const depreciated = existing && DB.docs.depreciation
-    .some((d) => d.status !== 'void' && (d.rows || []).some((r) => r.code === existing.code));
-  if (depreciated && (cost !== existing.cost || inService !== existing.inService || cls !== existing.class)) {
-    throw new DomainError('ASSET_ALREADY_DEPRECIATED',
-      'ทรัพย์สินนี้คิดค่าเสื่อมไปแล้ว แก้ราคาทุน วันที่เริ่มใช้ หรือประเภทไม่ได้',
-      'ถ้าคีย์ผิดตั้งแต่แรก ให้กลับรายการค่าเสื่อมของงวดที่เกี่ยวข้องก่อน');
+  /* จำหน่ายต้องทำผ่านเอกสารขาย/ตัดจำหน่าย (assets.js) — เปลี่ยนสถานะเฉย ๆ ไม่ลงบัญชีอะไรเลย
+     ราคาทุนและค่าเสื่อมสะสมจะค้างอยู่ในงบตลอดไป และไม่มีกำไรขาดทุนจากการจำหน่าย */
+  if (input.status === 'disposed' && !(existing && existing.status === 'disposed')) {
+    throw new DomainError('ASSET_DISPOSE_USE_DOC', 'การจำหน่ายทรัพย์สินต้องบันทึกผ่านปุ่ม "ขาย/ตัดจำหน่าย"',
+      'ระบบจะคิดค่าเสื่อมถึงเดือนที่จำหน่าย ล้างราคาทุนกับค่าเสื่อมสะสม ลงกำไรขาดทุนและภาษีขายให้ในครั้งเดียว');
   }
-  const accumBook = M(input.accumBook || '0');
-  const accumTax = M(input.accumTax || '0');
+  if (existing && existing.disposalNo && input.status === 'in_use') {
+    throw new DomainError('ASSET_DISPOSED_LOCKED', 'ทรัพย์สินนี้จำหน่ายไปแล้วตาม ' + existing.disposalNo,
+      'ถ้าบันทึกจำหน่ายผิด ให้ยกเลิกเอกสาร ' + existing.disposalNo + ' ระบบจะคืนทรัพย์สินเข้าทะเบียนให้');
+  }
+  const accumBook = input.accumBook === undefined && existing ? existing.accumBook : M(String(input.accumBook || '0'));
+  const accumTax = input.accumTax === undefined && existing ? existing.accumTax : M(String(input.accumTax || '0'));
+  /* คิดค่าเสื่อมหรือจำหน่ายไปแล้ว ตัวเลขผูกกับใบสำคัญแล้ว — แก้ราคาทุนหรือค่าเสื่อมสะสมในทะเบียนจะไม่ตรงบัญชี */
+  const depreciated = existing && (!!existing.disposalNo || DB.docs.depreciation
+    .some((d) => d.status !== 'void' && (d.rows || []).some((r) => r.code === existing.code)));
+  if (depreciated && (cost !== existing.cost || inService !== existing.inService || cls !== existing.class
+      || accumBook !== existing.accumBook || accumTax !== existing.accumTax)) {
+    throw new DomainError('ASSET_ALREADY_DEPRECIATED',
+      'ทรัพย์สินนี้คิดค่าเสื่อม' + (existing.disposalNo ? 'และจำหน่าย' : '') + 'ไปแล้ว แก้ราคาทุน วันที่เริ่มใช้ ประเภท หรือค่าเสื่อมสะสมไม่ได้',
+      existing.disposalNo ? 'ยกเลิกเอกสาร ' + existing.disposalNo + ' ก่อนถ้าต้องแก้'
+        : 'ถ้าคีย์ผิดตั้งแต่แรก ให้ยกเลิกค่าเสื่อมของงวดที่เกี่ยวข้องก่อน');
+  }
   if (accumBook > cost) {
     throw new DomainError('ACCUM_EXCEEDS_COST',
       'ค่าเสื่อมสะสมทางบัญชี ' + fmt(accumBook) + ' เกินราคาทุน ' + fmt(cost));
+  }
+  if (accumBook < 0 || accumTax < 0) throw new DomainError('ACCUM_NEGATIVE', 'ค่าเสื่อมสะสมติดลบไม่ได้');
+  /* บัญชีแยกประเภทของทรัพย์สินตัวนี้ (ว่าง = บัญชีหลักของประเภท) ใช้ตอนตั้งค่าเสื่อม จำหน่าย และเทียบทะเบียนกับบัญชี */
+  const accountIn = input.account !== undefined ? input.account : existing ? existing.account : null;
+  const accumIn = input.accumAccount !== undefined ? input.accumAccount : existing ? existing.accumAccount : null;
+  if (existing && existing.disposalNo && ((accountIn || null) !== (existing.account || null)
+      || (accumIn || null) !== (existing.accumAccount || null))) {
+    throw new DomainError('ASSET_DISPOSED_LOCKED', 'ทรัพย์สินนี้จำหน่ายไปแล้วตาม ' + existing.disposalNo + ' เปลี่ยนบัญชีไม่ได้',
+      'ใบสำคัญของการจำหน่ายลงบัญชีเดิมไปแล้ว');
   }
   const rec = {
     code: existing ? existing.code : nextRegCode('FA', DB.assets),
     name: name, class: cls, inService: inService, cost: cost,
     bookYears: cls === 'LAND' ? 0 : bookYears,
     accumBook: accumBook, accumTax: accumTax,
-    status: input.status === 'disposed' ? 'disposed' : 'in_use',
+    account: accountIn ? assertAssetAccount(String(accountIn), cls) : null,
+    accumAccount: accumIn && cls !== 'LAND' ? assertAccumAccount(String(accumIn)) : null,
+    note: input.note !== undefined ? String(input.note || '').trim() : existing ? existing.note || '' : '',
+    /* ทะเบียนรุ่นก่อนที่ตั้ง "จำหน่ายแล้ว" เอง กลับมาเป็นใช้งานอยู่ได้ เพื่อบันทึกการจำหน่ายให้ถูกต้อง */
+    status: existing ? (existing.status === 'disposed' && !existing.disposalNo && input.status === 'in_use' ? 'in_use' : existing.status)
+      : 'in_use',
   };
   if (existing) {
     Object.keys(rec).forEach((k) => { existing[k] = rec[k]; });
@@ -1219,11 +1246,11 @@ function payBill(input) {
 }
 
 /* ---------- ค่าเสื่อมราคาประจำงวด ---------- */
-/** ทรัพย์สินในทะเบียนที่ต้องคิดค่าเสื่อมในงวดนี้ (ยังใช้งาน เริ่มใช้แล้ว ยังตัดไม่หมด ไม่ใช่ที่ดิน) */
+/** ทรัพย์สินในทะเบียนที่ต้องคิดค่าเสื่อมในงวดนี้ (ยังใช้งาน เริ่มใช้แล้ว ยังตัดไม่หมด ไม่ใช่ที่ดิน
+    และยังมีเดือนที่ไม่ได้คิดจนถึงงวดนี้ — ตัวที่คิดถึงงวดนี้แล้วไม่นับ) */
 function depreciableAssets(period) {
-  const endDate = endOfMonth(period + '-01');
-  return DB.assets.filter((a) => a.class !== 'LAND' && a.status === 'in_use' && a.inService <= endDate
-    && a.cost - a.accumBook > 0);
+  const due = new Set(depreciationPlan(period).map((r) => r.code));
+  return DB.assets.filter((a) => due.has(a.code));
 }
 function runDepreciation(period) {
   const already = DB.docs.depreciation.find((d) => d.period === period && d.status !== 'void');
@@ -1233,38 +1260,20 @@ function runDepreciation(period) {
       'ยกเลิกงวดเดิมที่หน้าค่าเสื่อมราคาก่อน ถ้าต้องการคำนวณใหม่');
   }
   const endDate = endOfMonth(period + '-01');
-  let bookTotal = 0, taxTotal = 0;
-  const rows = [];
-
-  DB.assets.forEach(function (a) {
-    if (a.class === 'LAND' || a.status !== 'in_use') return;
-    if (a.inService > endDate) return;
-    const bookRemaining = a.cost - a.accumBook;
-    if (bookRemaining <= 0) return;
-    const bookMonthly = Math.min(divRound(divRound(a.cost, a.bookYears), 12), bookRemaining);
-
-    const t = TAX_DEPRECIATION[a.class];
-    const taxBase = t.costCap ? Math.min(a.cost, t.costCap) : a.cost;
-    const taxRemaining = taxBase - a.accumTax;
-    const taxMonthly = Math.max(0, Math.min(divRound(pct(taxBase, t.rate), 12), taxRemaining));
-
-    bookTotal += bookMonthly;
-    taxTotal += taxMonthly;
-    rows.push({ code: a.code, name: a.name, class: a.class, cost: a.cost,
-      book: bookMonthly, tax: taxMonthly, diff: bookMonthly - taxMonthly,
-      nbvBook: a.cost - a.accumBook - bookMonthly, nbvTax: taxBase - a.accumTax - taxMonthly });
-  });
+  /* ★ คิดทุกเดือนที่ยังไม่ได้คิด ตั้งแต่เดือนที่เริ่มใช้ (หรือเดือนถัดจากที่คิดล่าสุด) ถึงงวดนี้ รวมในใบเดียว
+     เดิมคิดทีละหนึ่งเดือนเสมอ ทรัพย์สินที่ลงทะเบียนช้าหรืองวดที่ข้ามไปจึงขาดค่าเสื่อมถาวร (ดู depreciationPlan ใน assets.js) */
+  const rows = depreciationPlan(period, true);
+  const bookTotal = rows.reduce((s, r) => s + r.book, 0);
+  const taxTotal = rows.reduce((s, r) => s + r.tax, 0);
 
   if (bookTotal === 0) {
     throw new DomainError('NO_DEPRECIABLE_ASSETS', 'ไม่มีทรัพย์สินที่ต้องคิดค่าเสื่อมในงวดนี้');
   }
   const je = post({
-    type: 'asset', date: endDate, desc: 'ค่าเสื่อมราคาประจำงวด ' + thPeriod(period),
+    type: 'asset', date: endDate,
+    desc: 'ค่าเสื่อมราคาประจำงวด ' + thPeriod(period) + (rows.some((r) => r.months > 1) ? ' (รวมเดือนที่ยังไม่ได้คิด)' : ''),
     src: 'depreciation', srcId: period,
-    lines: [
-      { acc: accBySub('depreciation'), dr: bookTotal },
-      { acc: accBySub('accum_depreciation'), cr: bookTotal },
-    ],
+    lines: depreciationLines(rows),
   });
   /* ทะเบียนทรัพย์สินขยับหลังลงบัญชีสำเร็จเท่านั้น — ถ้างวดปิดอยู่ ค่าเสื่อมสะสมต้องไม่เพิ่มทั้งที่ไม่มีใบสำคัญ */
   rows.forEach(function (r) {
