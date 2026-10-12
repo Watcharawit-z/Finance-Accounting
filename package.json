@@ -13,6 +13,7 @@
     "build": "npm run build --workspace @financii/api",
     "start": "node apps/api/scripts/migrate.js && node apps/api/dist/main.js",
     "migrate": "node apps/api/scripts/migrate.js",
-    "test": "node webapp/test.js && node tools/flowaccount-import/test.js"
+    "test": "node webapp/test.js && node webapp/test-core.js && node webapp/test-sales.js && node webapp/test-settle.js && node webapp/test-bank.js && node webapp/test-payroll.js && node webapp/test-assets.js && node tools/flowaccount-import/test.js",
+    "test:ui": "node webapp/uitest.js && node webapp/uitest-core.js && node webapp/uitest-sales.js && node webapp/uitest-settle.js && node webapp/uitest-bank.js && node webapp/uitest-payroll.js && node webapp/uitest-assets.js"
   }
 }

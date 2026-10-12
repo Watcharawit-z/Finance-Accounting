@@ -56,6 +56,25 @@ issueInvoice = wrapNonVatSale(issueInvoice);
 issueCashSale = wrapNonVatSale(issueCashSale);
 issueCreditNote = wrapNonVatNote(issueCreditNote);
 issueDebitNote = wrapNonVatNote(issueDebitNote);
+/* เงินมัดจำรับของกิจการที่ไม่ได้จดทะเบียน: ไม่มีภาษีขาย ไม่ใช่ใบกำกับภาษี — หักในใบแจ้งหนี้ใบสุดท้ายได้ตามปกติ */
+receiveCustomerDeposit = (function (fn) {
+  return function (input) {
+    if (isVatRegistered()) return fn.apply(this, arguments);
+    if (input && (input.taxCode === 'VAT7' || input.taxCode === 'VAT0')) {
+      throw new DomainError('NOT_VAT_REGISTERED', 'กิจการไม่ได้จดทะเบียนภาษีมูลค่าเพิ่ม เรียกเก็บภาษีจากเงินมัดจำไม่ได้');
+    }
+    const doc = fn.call(this, Object.assign({}, input, { taxCode: input && input.taxCode === 'NONE' ? 'NONE' : 'EXEMPT' }));
+    if (doc && doc.no) { dropVatOutputRows(doc.no); doc.nonVat = true; }
+    return doc;
+  };
+})(receiveCustomerDeposit);
+/* เงินมัดจำจ่าย: ขอคืนภาษีซื้อไม่ได้ ภาษีที่ผู้ขายเรียกเก็บรวมเป็นต้นทุนตอนตั้งหนี้ใบสุดท้าย */
+payVendorDeposit = (function (fn) {
+  return function (input) {
+    if (isVatRegistered()) return fn.apply(this, arguments);
+    return fn.call(this, Object.assign({}, input, { taxCode: 'NONE' }));
+  };
+})(payVendorDeposit);
 recordBill = wrapNonVatPurchase(recordBill, 0);
 recordExpense = wrapNonVatPurchase(recordExpense, 0);
 /* ใบแจ้งหนี้ของกิจการที่ไม่ได้จดทะเบียนไม่ใช่ใบกำกับภาษี ไม่ต้องมีรายการครบตามมาตรา 86/4 (ลูกค้าไม่มีเลขผู้เสียภาษีก็ออกได้) */

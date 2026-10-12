@@ -130,8 +130,8 @@ const overflowInfo = (page) => page.evaluate(() => {
   await page.waitForSelector('#modal.show');
   await page.selectOption('[name="partner"]', 'VEN-0012');
   await page.fill('[name="vendorNo"]', 'TEST-9001');
-  await page.fill('[name="desc"]', 'ค่าเช่าสำนักงานเดือนกรกฎาคม');
-  await page.fill('[name="price"]', '60000');
+  await page.fill('[name="b0_desc"]', 'ค่าเช่าสำนักงานเดือนกรกฎาคม');
+  await page.fill('[name="b0_price"]', '60000');
   await page.selectOption('[name="wht"]', 'WHT_RENT');
   await page.click('[data-act="modal:submit"]');
   await closed(page);
@@ -142,8 +142,8 @@ const overflowInfo = (page) => page.evaluate(() => {
   await page.waitForSelector('#modal.show');
   await page.selectOption('[name="partner"]', 'VEN-0012');
   await page.fill('[name="vendorNo"]', 'TEST-9001');
-  await page.fill('[name="desc"]', 'รายการซ้ำ');
-  await page.fill('[name="price"]', '60000');
+  await page.fill('[name="b0_desc"]', 'รายการซ้ำ');
+  await page.fill('[name="b0_price"]', '60000');
   await page.click('[data-act="modal:submit"]');
   await page.waitForTimeout(300);
   const dupBlocked = await page.evaluate(() =>
@@ -846,7 +846,7 @@ const overflowInfo = (page) => page.evaluate(() => {
   await page.click('#nav [data-act="navg:เอกสารขาย"]');
   await page.waitForTimeout(120);
   ok('กดหัวกลุ่มแล้วกางรายการข้างใน',
-    (await page.$$('#nav .nav-i.child')).length === 8);
+    (await page.$$('#nav .nav-i.child')).length === 10);
   await page.click('#nav [data-act="navg:เอกสารขาย"]');
   await page.evaluate(() => { STATE.navGroupOpen = { 'รายงาน': true }; render(); });
   await page.waitForTimeout(150);
@@ -914,10 +914,10 @@ const overflowInfo = (page) => page.evaluate(() => {
   const buyMenu = await page.evaluate(() =>
     navGroups().find((g) => g.g === 'เอกสารซื้อ').items.map((i) => i[1]));
   ok('★ เมนูเอกสารขายเรียงตามวงจรจริง เสนอราคา → สั่งขาย → ใบกำกับ → วางบิล → ใบเสร็จ',
-    salesMenu.join('|') === 'ใบเสนอราคา|ใบสั่งขาย|ใบกำกับภาษี|ขายเงินสด|ใบวางบิล|ใบเสร็จรับเงิน|ใบลดหนี้|ใบเพิ่มหนี้',
+    salesMenu.join('|') === 'ใบเสนอราคา|ใบสั่งขาย|ใบกำกับภาษี|ขายเงินสด|ใบวางบิล|ใบเสร็จรับเงิน|เงินมัดจำรับ|ใบลดหนี้|ใบเพิ่มหนี้|หักกลบ · ตัดหนี้สูญ',
     salesMenu.join(' → '));
   ok('เมนูเอกสารซื้อเรียงตามวงจรจริง สั่งซื้อ → รับสินค้า → ตั้งหนี้ → จ่าย',
-    buyMenu.join('|') === 'ใบสั่งซื้อ|ใบรับสินค้า|ตั้งหนี้ผู้ขาย|ใบสำคัญจ่าย', buyMenu.join(' → '));
+    buyMenu.join('|') === 'ใบสั่งซื้อ|ใบรับสินค้า|ตั้งหนี้ผู้ขาย|ใบสำคัญจ่าย|เงินมัดจำจ่าย|ใบลดหนี้จากผู้ขาย', buyMenu.join(' → '));
 
   /* ทุกหน้าจอในเมนูต้องเปิดได้จริง ไม่ใช่มีชื่ออยู่ในเมนูเฉย ๆ */
   const screensOk = await page.evaluate(() => {
@@ -1370,7 +1370,7 @@ const overflowInfo = (page) => page.evaluate(() => {
     steps: document.querySelectorAll('.flow a').length,
     je: Array.from(document.querySelectorAll('.je-chip')).map((e) => e.textContent).join(' | '),
     crumb: document.getElementById('crumb').textContent }));
-  ok('★ ทุกหน้าบอกว่าอยู่ตรงไหนของวงจรเอกสาร', ctxInfo.on.indexOf('ใบกำกับภาษี') === 0 && ctxInfo.steps === 7,
+  ok('★ ทุกหน้าบอกว่าอยู่ตรงไหนของวงจรเอกสาร', ctxInfo.on.indexOf('ใบกำกับภาษี') === 0 && ctxInfo.steps === 9,
     ctxInfo.steps + ' ขั้น · อยู่ที่ ' + ctxInfo.on);
   ok('★ ทุกหน้าบอกผลทางบัญชีเป็นเดบิต/เครดิต', /Dr.*ลูกหนี้การค้า/.test(ctxInfo.je) && /Cr.*ภาษีขาย/.test(ctxInfo.je), ctxInfo.je);
   ok('แถบบนบอกเส้นทาง หมวด / หน้า', ctxInfo.crumb.replace(/\s/g, '') === 'เอกสารขาย/ใบกำกับภาษี', ctxInfo.crumb);
@@ -1593,9 +1593,9 @@ const overflowInfo = (page) => page.evaluate(() => {
     part.st === 'partially_received' && part.got === 20 && part.btn && part.txt, JSON.stringify(part));
   await page.evaluate(() => { STATE.screen = 'bills'; STATE.sel = null; render(); });
   await page.click('#main [data-act="new:bill"]');
-  await page.waitForSelector('#modal.show [name="acc"]');
-  const accOpt = await page.evaluate(() => ({ def: document.querySelector('#modal [name="acc"]').value,
-    has5311: [...document.querySelectorAll('#modal [name="acc"] option')].some((o) => o.value === '5321') }));
+  await page.waitForSelector('#modal.show [name="b0_acc"]');
+  const accOpt = await page.evaluate(() => ({ def: document.querySelector('#modal [name="b0_acc"]').value,
+    has5311: [...document.querySelectorAll('#modal [name="b0_acc"] option')].some((o) => o.value === '5321') }));
   ok('★ ฟอร์มตั้งหนี้ให้เลือกบัญชีค่าใช้จ่ายเจาะจง ค่าเริ่มต้นเป็นค่าใช้จ่ายเบ็ดเตล็ด ไม่ใช่บัญชีเงินเดือน', accOpt.def === '5358' && accOpt.has5311, accOpt.def);
   await page.keyboard.press('Escape');
 

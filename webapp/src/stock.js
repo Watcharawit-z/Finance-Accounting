@@ -243,7 +243,7 @@ function stockSrcLabel(src) {
   const s = String(src || '');
   const voided = / \(ยกเลิก\)$/.test(s);
   const no = s.replace(/ \(ยกเลิก\)$/, '');
-  const kinds = [['invoice', 'ขาย'], ['cashSale', 'ขายเงินสด'], ['creditNote', 'รับคืนจากลูกค้า'], ['bill', 'ซื้อ'], ['goodsReceipt', 'รับสินค้า']];
+  const kinds = [['invoice', 'ขาย'], ['cashSale', 'ขายเงินสด'], ['creditNote', 'รับคืนจากลูกค้า'], ['bill', 'ซื้อ'], ['goodsReceipt', 'รับสินค้า'], ['vendorCreditNote', 'ส่งคืนผู้ขาย']];
   let label = null;
   kinds.forEach(function (k) { if (!label && (DB.docs[k[0]] || []).some((d) => d.no === no)) label = k[1]; });
   if (!label) {

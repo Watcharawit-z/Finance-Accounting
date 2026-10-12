@@ -132,6 +132,12 @@ console.log('\n=== 4. กิจการที่ไม่ได้จดทะ�
   const cs = ctx.issueCashSale({ date: '2026-01-20', lines: [{ desc: 'สินค้าหน้าร้าน', qty: 2, price: '107' }] });
   ok('★ ขายเงินสดของกิจการที่ไม่จดทะเบียน ไม่ถอดภาษีออกจากราคา และไม่มีแถวภาษีขาย', cs.vat === 0 && cs.total === M('214') && cs.nonVat
     && !D.taxTx.some((t) => t.kind === 'vat_output' && t.docNo === cs.no), ctx.fmt(cs.vat));
+  throws('เงินมัดจำเรียกเก็บภาษีไม่ได้', () => ctx.receiveCustomerDeposit({ partnerCode: cust.code, date: '2026-01-21', base: '500', taxCode: 'VAT7' }), 'NOT_VAT_REGISTERED');
+  const dep = ctx.receiveCustomerDeposit({ partnerCode: cust.code, date: '2026-01-21', base: '500' });
+  ok('เงินมัดจำรับไม่มีภาษีขาย ไม่มีแถวในรายงานภาษีขาย', dep.vat === 0 && dep.total === M('500')
+    && !D.taxTx.some((t) => t.kind === 'vat_output' && t.docNo === dep.no));
+  const vd = ctx.payVendorDeposit({ partnerCode: ven.code, date: '2026-01-22', base: '800', taxCode: 'VAT7', vendorNo: 'X-1' });
+  ok('เงินมัดจำจ่ายไม่ขอคืนภาษีซื้อ', vd.vat === 0 && ctx.balBySub(['input_vat'], '2026-01-31') === 0);
   const chk = ctx.closeChecklist('2026-01');
   ok('★ ไม่ต้องยื่น ภ.พ.30 ก่อนปิดงวด', !chk.items.some((i) => /ภ\.พ\.30/.test(i.label)) && chk.canClose,
     chk.items.filter((i) => i.blocking && !i.ok).map((i) => i.label).join(','));
