@@ -1002,11 +1002,32 @@ function modalPayBatch(no) {
    บันทึกรายการในสมุดรายวัน (ใบสำคัญ) — แต่ละเล่มมีกติกาของตัวเอง
    =================================================================== */
 const JV_ROWS = 6;
+/* จำนวนบรรทัดของใบสำคัญที่เปิดอยู่ — เริ่ม 6 บรรทัด กดเพิ่มได้ไม่จำกัด (ใบปรับปรุงสิ้นปีมักมีหลายสิบบรรทัด) */
+const jvCount = () => Number(val('jcount')) || JV_ROWS;
+let JV_ACCS = [];
+function jvRowHtml(i, presetAcc) {
+  return '<tr><td><select name="j' + i + '_acc">'
+    + JV_ACCS.map((o) => '<option value="' + esc(o[0]) + '"' + (presetAcc === o[0] ? ' selected' : '') + '>' + esc(o[1]) + '</option>').join('')
+    + '</select></td><td><input name="j' + i + '_memo"></td>'
+    + '<td><input name="j' + i + '_dr" class="r jvamt"></td><td><input name="j' + i + '_cr" class="r jvamt"></td></tr>';
+}
+function addJvRows(n) {
+  const body = document.querySelector('#jvLines tbody');
+  const cnt = document.querySelector('[name="jcount"]');
+  if (!body || !cnt) return;
+  let c = Number(cnt.value) || JV_ROWS;
+  for (let k = 0; k < n; k++) body.insertAdjacentHTML('beforeend', jvRowHtml(c++, ''));
+  cnt.value = String(c);
+}
+EXTRA_DISPATCH.push(function (head) {
+  if (head === 'jvrows') { addJvRows(5); return true; }
+  return false;
+});
 function refreshJvTotals() {
   const el = document.getElementById('jvTot');
   if (!el) return;
   let dr = 0, cr = 0;
-  for (let i = 0; i < JV_ROWS; i++) { dr += M(val('j' + i + '_dr')); cr += M(val('j' + i + '_cr')); }
+  for (let i = 0; i < jvCount(); i++) { dr += M(val('j' + i + '_dr')); cr += M(val('j' + i + '_cr')); }
   const diff = dr - cr;
   el.innerHTML = '<span>เดบิตรวม <b>' + fmt(dr) + '</b></span><span>เครดิตรวม <b>' + fmt(cr) + '</b></span>'
     + (dr === 0 && cr === 0 ? '' : diff === 0 ? '<span class="good">สมดุล</span>'
@@ -1016,8 +1037,10 @@ function refreshJvTotals() {
 function modalJournalVoucher(book) {
   const cfg = JOURNAL_BOOKS[book];
   if (!cfg) return;
-  const accs = [['', '— เลือกบัญชี —']].concat(DB.accounts
-    .filter((a) => a.postable && !CONTROL_SUBS[a.subType]).map((a) => [a.code, a.code + ' ' + a.name]));
+  /* บัญชีคุมเลือกไม่ได้ ยกเว้นภาษีหัก ณ ที่จ่ายค้างนำส่งในเล่มจ่าย — ใช้นำส่งยอดที่ยกมาจากระบบเดิม (ระบบตรวจยอดให้) */
+  JV_ACCS = [['', '— เลือกบัญชี —']].concat(DB.accounts
+    .filter((a) => a.postable && (!CONTROL_SUBS[a.subType] || (book === 'payment' && WHT_SUB_FORM_OF[a.subType])))
+    .map((a) => [a.code, a.code + ' ' + a.name]));
   let bank = '';
   try { bank = accBySub('bank'); } catch (e) { bank = ''; }
   /* เติมบัญชีธนาคารให้ในบรรทัดที่เล่มนั้นต้องมี — รับ: เดบิตธนาคาร · จ่าย: เครดิตธนาคาร */
@@ -1030,12 +1053,7 @@ function modalJournalVoucher(book) {
     receipt: 'เงินเข้าที่ไม่มีเอกสารขายรองรับ เช่น ดอกเบี้ยรับ เงินกู้ยืม — รับชำระจากลูกค้าใช้ใบเสร็จรับเงิน',
   };
   let rows = '';
-  for (let i = 0; i < JV_ROWS; i++) {
-    rows += '<tr><td><select name="j' + i + '_acc">'
-      + accs.map((o) => '<option value="' + esc(o[0]) + '"' + (preset[i] === o[0] ? ' selected' : '') + '>' + esc(o[1]) + '</option>').join('')
-      + '</select></td><td><input name="j' + i + '_memo"></td>'
-      + '<td><input name="j' + i + '_dr" class="r jvamt"></td><td><input name="j' + i + '_cr" class="r jvamt"></td></tr>';
-  }
+  for (let i = 0; i < JV_ROWS; i++) rows += jvRowHtml(i, preset[i]);
   modal({
     title:'สร้าง' + cfg.voucher + ' — ' + cfg.label,
     sub: SUB[book],
@@ -1043,15 +1061,17 @@ function modalJournalVoucher(book) {
       + field({ name:'date', label:'วันที่', type:'date', value: defaultDate() })
       + field({ name:'ref', label:'เลขที่เอกสารอ้างอิง (ถ้ามี)', placeholder:'เช่น เลขที่ใบเสร็จของธนาคาร' })
       + field({ name:'desc', label:'คำอธิบายรายการ', wide:true, placeholder:'ผู้สอบบัญชีอ่านแล้วต้องเข้าใจว่าเป็นรายการอะไร' })
-      + '</div><div class="scroll"><table class="lines"><thead><tr><th>บัญชี</th><th>คำอธิบายบรรทัด</th>'
+      + '</div><div class="scroll"><table class="lines" id="jvLines"><thead><tr><th>บัญชี</th><th>คำอธิบายบรรทัด</th>'
       + '<th class="r">เดบิต</th><th class="r">เครดิต</th></tr></thead><tbody>' + rows + '</tbody></table></div>'
-      + '<div class="jv-tot" id="jvTot"></div>',
+      + '<input type="hidden" name="jcount" value="' + JV_ROWS + '">'
+      + '<div class="jv-tot" id="jvTot"></div><div>' + btn('jvrows', '+ เพิ่มบรรทัด') + '</div>',
     submitLabel:'ลงบัญชีและออกเลขที่',
-    note:'บัญชีคุมไม่อยู่ในรายการให้เลือก เพราะต้องเกิดจากเอกสารเท่านั้น',
+    note: book === 'payment' ? 'บัญชีคุมไม่อยู่ในรายการให้เลือก ยกเว้นภาษีหัก ณ ที่จ่ายค้างนำส่งที่ยกมาจากระบบเดิม'
+      : 'บัญชีคุมไม่อยู่ในรายการให้เลือก เพราะต้องเกิดจากเอกสารเท่านั้น',
     onSubmit: function () {
       submitAction(function () {
         const lines = [];
-        for (let i = 0; i < JV_ROWS; i++) {
+        for (let i = 0; i < jvCount(); i++) {
           lines.push({ acc: val('j' + i + '_acc'), memo: val('j' + i + '_memo'),
             dr: val('j' + i + '_dr'), cr: val('j' + i + '_cr') });
         }
@@ -1923,6 +1943,13 @@ async function handleFile(file) {
     if (stk.ok) {
       STATE.imp = { name: file.name, rows: rows, kind: 'stock', stock: stk, headerRow: stk.headerRow,
         dates: readFileDates(rows, stk.headerRow), stockDate: null };
+      render();
+      return;
+    }
+    /* ไฟล์ยอดค้างรายใบ (คู่ค้า เลขที่เอกสาร ยอดค้าง ไม่มีเดบิต/เครดิต) — ตั้งลูกหนี้/เจ้าหนี้ยกมารายใบ */
+    const oiAt = openItemsFileAt(rows);
+    if (oiAt >= 0) {
+      STATE.imp = { name: file.name, rows: rows.slice(oiAt), kind: 'openItems', oiKind: guessOpenItemKind(rows[oiAt]), oiDate: null, oiMode: null };
       render();
       return;
     }

@@ -1168,6 +1168,8 @@ function closeChecklist(period) {
   rec.checks.forEach((c) => items.push({
     label: c.label, ok: c.ok,
     detail: c.ok ? 'ตรงกัน' : 'ต่างกัน ' + fmt(c.control - c.sub) + ' บาท' + (c.why ? ' — ' + c.why : ''), blocking: true,
+    action: c.ok ? undefined : c.code === 'AR_SUBLEDGER' || c.code === 'AP_SUBLEDGER' ? 'openitems'
+      : c.code === 'INVENTORY_SUBLEDGER' ? 'stockadj' : undefined,
   }));
   /* ค่าเสื่อมบังคับเฉพาะงวดที่มีทรัพย์สินในทะเบียนต้องคิดจริง — บริษัทที่ไม่มีทรัพย์สินต้องปิดงวดได้
      ส่วนทรัพย์สินที่ยกยอดมาแต่ยังไม่ลงทะเบียน ระบบคิดค่าเสื่อมให้ไม่ได้ ให้บันทึกเองด้วยใบสำคัญทั่วไป */
@@ -1830,6 +1832,14 @@ const CONTROL_SUBS = {
   wht_payable_pnd53: 'ภาษีหัก ณ ที่จ่ายต้องมาจากค่าใช้จ่ายหรือการจ่ายชำระที่ออก 50 ทวิ',
 };
 const isCashAcc = (code) => CASH_SUB.indexOf(acc(code).subType) >= 0;
+const WHT_SUB_FORM_OF = { wht_payable_pnd1: 'PND1', wht_payable_pnd3: 'PND3', wht_payable_pnd53: 'PND53' };
+/** ยอดค้างนำส่งที่ไม่ได้มาจากเอกสารในระบบ (ยกมาจากระบบเดิม) = ยอดในบัญชี − ภาษีจากเอกสารที่ยังไม่ได้ยื่น */
+function openingWhtRoom(sub, asOf) {
+  const form = WHT_SUB_FORM_OF[sub];
+  const pending = DB.taxTx.filter((t) => t.kind === 'wht' && t.form === form && t.channel === 'manual' && !t.void
+    && !t.filingId && t.date <= asOf).reduce((s, t) => s + t.tax, 0);
+  return Math.max(0, -balBySub([sub], asOf) - pending);
+}
 
 function postJournalVoucher(input) {
   const book = JOURNAL_BOOKS[input.book] ? input.book : null;
@@ -1841,8 +1851,18 @@ function postJournalVoucher(input) {
     .map((l) => ({ acc: l.acc, dr: M(String(l.dr || '')), cr: M(String(l.cr || '')),
       memo: String(l.memo || '').trim() || null }))
     .filter((l) => l.acc && (l.dr !== 0 || l.cr !== 0));
+  const whtRoom = {};
   lines.forEach(function (l, i) {
     const a = acc(l.acc);
+    /* ภาษีหัก ณ ที่จ่ายค้างนำส่งที่ยกมาจากระบบเดิม ไม่มีแถวในทะเบียนภาษีให้ยื่นผ่านหน้าแบบ ภ.ง.ด.
+       จ่ายด้วยสมุดรายวันจ่ายได้ ไม่เกินยอดค้างส่วนที่ไม่ได้มาจากเอกสารในระบบ */
+    if (book === 'payment' && WHT_SUB_FORM_OF[a.subType] && l.dr > 0 && !l.cr) {
+      if (whtRoom[a.subType] === undefined) whtRoom[a.subType] = openingWhtRoom(a.subType, input.date);
+      whtRoom[a.subType] -= l.dr;
+      if (whtRoom[a.subType] >= 0) return;
+      throw new DomainError('WHT_REMIT_EXCEEDS_OPENING', 'จ่าย ' + a.name + ' เกินยอดค้างนำส่งที่ยกมา',
+        'ภาษีที่หักจากเอกสารในระบบ ให้นำส่งที่หน้าแบบ ภ.ง.ด. ระบบจะลงบัญชีให้');
+    }
     if (CONTROL_SUBS[a.subType]) {
       throw new DomainError('CONTROL_ACCOUNT_MANUAL',
         'บัญชี ' + a.code + ' ' + a.name + ' เป็นบัญชีคุม บันทึกด้วยมือไม่ได้', CONTROL_SUBS[a.subType]);

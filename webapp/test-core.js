@@ -134,4 +134,105 @@ console.log('\n=== 4. กิจการที่ไม่ได้จดทะ�
     chk.items.filter((i) => i.blocking && !i.ok).map((i) => i.label).join(','));
 }
 
+console.log('\n=== 5. ผังบัญชี: เพิ่ม แก้ชื่อ เปลี่ยนหมวด ตั้งบัญชีหลัก ลบ ===');
+{
+  ctx.buildBlank({ name: 'บริษัท ทดสอบผังบัญชี จำกัด', year: 2026 });
+  const D = ctx.DB;
+  const bank0 = ctx.accBySub('bank');
+  const kb = ctx.saveAccount({ code: '1112.02', name: 'ธนาคารกสิกรไทย ออมทรัพย์', subType: 'bank' });
+  ok('เพิ่มบัญชีธนาคารที่สองได้ หมวดสินทรัพย์ ลงรายการได้', kb.type === 'asset' && kb.postable && kb.custom && ctx.accBySub('bank') === bank0);
+  throws('รหัสซ้ำ', () => ctx.saveAccount({ code: '1112.02', name: 'ซ้ำ', subType: 'bank' }), 'ACCOUNT_CODE_DUPLICATE');
+  throws('หมวดที่ไม่มีอยู่', () => ctx.saveAccount({ code: '9999', name: 'x', subType: 'nope' }), 'SUBTYPE_UNKNOWN');
+  ctx.saveAccount({ code: '1112.02', name: 'ธนาคารกสิกรไทย ออมทรัพย์ (หลัก)', edit: true, makeDefault: true });
+  ok('★ ตั้งเป็นบัญชีหลัก เอกสารใหม่ลงบัญชีนี้', ctx.accBySub('bank') === '1112.02' && ctx.acc('1112.02').name.indexOf('(หลัก)') > 0);
+  const ad = ctx.saveAccount({ code: '5321.01', name: 'ค่าโฆษณาออนไลน์', subType: 'admin_expense' });
+  ctx.saveAccount({ code: '5321.01', name: 'ค่าโฆษณาออนไลน์', subType: 'selling_expense', edit: true });
+  ok('บัญชีที่ยังไม่มีรายการเปลี่ยนหมวดได้', ctx.acc('5321.01').subType === 'selling_expense' && ad.type === 'expense');
+  ctx.post({ type: 'general', date: '2026-01-05', desc: 'ทดสอบ', lines: [{ acc: '5321.01', dr: M('100') }, { acc: '1112.02', cr: M('100') }] });
+  throws('★ บัญชีที่มีรายการแล้วเปลี่ยนหมวดไม่ได้ (งบงวดที่ปิดจะเปลี่ยน)', () => ctx.saveAccount({ code: '5321.01', name: 'x', subType: 'admin_expense', edit: true }), 'ACCOUNT_IN_USE');
+  throws('บัญชีที่มีรายการลบไม่ได้', () => ctx.deleteAccount('5321.01'), 'ACCOUNT_IN_USE');
+  throws('บัญชีมาตรฐานลบไม่ได้', () => ctx.deleteAccount(bank0), 'ACCOUNT_BUILTIN');
+  const ar = D.accounts.find((a) => a.subType === 'trade_receivable');
+  throws('บัญชีเดียวของหมวดที่ระบบใช้ ย้ายหมวดไม่ได้', () => ctx.saveAccount({ code: ar.code, name: ar.name, subType: 'other_receivable', edit: true }), 'ACCOUNT_SOLE_OF_TYPE');
+  const tmp = ctx.saveAccount({ code: '5999', name: 'ทดลอง', subType: 'admin_expense' });
+  ctx.deleteAccount('5999');
+  ok('ลบบัญชีที่เพิ่มเองและยังไม่ได้ใช้ได้', tmp && !D.accounts.some((a) => a.code === '5999'));
+}
+
+console.log('\n=== 6. ลูกหนี้/เจ้าหนี้ยกมารายใบ ===');
+{
+  ctx.buildBlank({ name: 'บริษัท ทดสอบยกมารายใบ จำกัด', year: 2026 });
+  const D = ctx.DB;
+  /* ระบบเดิมตัดยอด 31 ธ.ค. 2568 (วันก่อนงวดแรก) — ต้องลงยอดยกมา 1 ม.ค. 2569 ได้ */
+  const tb = [
+    { code: '11122.01', name: 'เงินฝากธนาคาร', debit: M('200000'), credit: 0 },
+    { code: '11311', name: 'ลูกหนี้การค้า', debit: M('50000'), credit: 0 },
+    { code: '21311', name: 'เจ้าหนี้การค้า', debit: 0, credit: M('30000') },
+    { code: '21360', name: 'ภาษีหัก ณ ที่จ่ายค้างจ่าย', debit: 0, credit: M('1500') },
+    { code: '31110', name: 'ทุนจดทะเบียน', debit: 0, credit: M('218500') },
+  ];
+  const op = ctx.importOpeningBalances(tb, '2025-12-31', { '21360': '2146' });
+  ok('★ วันตัดยอดก่อนงวดแรก 1 วัน ลงยอดยกมาวันแรกของงวดแรกแทน', op.entry.date === '2026-01-01', op.entry.date);
+  const gap = ctx.openingItemsGap('ar', '2026-01-31');
+  ok('ยกยอดรวมมาแล้ว ยังไม่มีรายใบ: ลูกหนี้ต่างจากรายใบ 50,000', gap === M('50000') && !ctx.closeChecklist('2026-01').canClose);
+  const c1 = partner({ kind: 'customer', name: 'บริษัท เอ จำกัด', taxId: tid('010553600002'), address: 'กทม.' });
+  const c2 = partner({ kind: 'customer', name: 'บริษัท บี จำกัด', taxId: tid('010553600003'), address: 'กทม.' });
+  throws('★ ยอดรายใบเกินยอดยกมารวมถูกปฏิเสธ', () => ctx.saveOpeningItems({ kind: 'ar', date: '2026-01-01',
+    rows: [{ partnerCode: c1.code, docNo: 'INV-OLD-1', docDate: '2025-12-10', due: '2026-01-09', amount: '60000' }] }), 'OPEN_ITEM_EXCEEDS');
+  const nE = D.entries.length;
+  const r = ctx.saveOpeningItems({ kind: 'ar', date: '2026-01-01', rows: [
+    { partnerCode: c1.code, docNo: 'INV-OLD-1', docDate: '2025-12-10', due: '2026-01-09', amount: '30,000' },
+    { partnerCode: c2.code, docNo: 'INV-OLD-2', docDate: '2025-12-20', due: '2026-01-19', amount: '20000' }] });
+  const je = D.entries.find((e) => e.no === r.entry.no);
+  ok('★ แยกยอดยกมารวมเป็นรายใบ: ย้ายจากคู่ค้า "ยอดยกมา" ไปรายลูกค้า ไม่ลงบัญชีซ้ำ', D.entries.length === nE + 1
+    && ctx.balBySub(['trade_receivable'], '2026-01-31') === M('50000') && je.lines.some((l) => l.partner === 'OPENING' && l.cr === M('50000')));
+  ok('ลูกหนี้รายใบ = บัญชีคุม ปิดงวดผ่านข้อลูกหนี้', ctx.openingItemsGap('ar', '2026-01-31') === 0
+    && ctx.reconciliationChecks('2026-01-31').checks.find((c) => c.code === 'AR_SUBLEDGER').ok);
+  const inv1 = D.docs.invoice.find((d) => d.legacyNo === 'INV-OLD-1');
+  const ag = ctx.aging('ar', '2026-01-31');
+  ok('ใบค้างยกมาอยู่ในรายงานอายุหนี้ แยกตามลูกค้า ยอดรวม 50,000', ag.totals.total === M('50000') && ag.rows.some((x) => x.code === c1.code && x.total === M('30000')));
+  const rc = ctx.receivePayment({ invoiceNo: inv1.no, date: '2026-01-15', amount: '30000', method: 'transfer' });
+  ok('★ รับชำระใบที่ยกมาได้ทันที ใบปิดเป็นรับครบ', inv1.paid === M('30000') && ctx.invOutstanding(inv1) === 0 && !!rc.no);
+  throws('ยกเลิกชุดที่มีใบรับชำระแล้วไม่ได้', () => ctx.voidOpeningItems(r.batch, 'กรอกผิดชุด'), 'OPEN_ITEM_SETTLED');
+  throws('เลขที่เอกสารเดิมซ้ำ', () => ctx.saveOpeningItems({ kind: 'ar', date: '2026-01-01', mode: 'post',
+    rows: [{ partnerCode: c1.code, docNo: 'INV-OLD-1', amount: '100' }] }), 'OPEN_ITEM_DUPLICATE');
+
+  /* เจ้าหนี้จากไฟล์ — สร้างผู้ขายที่ยังไม่มีให้ */
+  const table = [['ชื่อผู้ขาย', 'เลขประจำตัวผู้เสียภาษี', 'เลขที่เอกสาร', 'วันที่', 'ครบกำหนด', 'ยอดค้าง'],
+    ['บริษัท วัสดุ จำกัด', tid('010553600004'), 'AP-77', '25/12/2568', '24/01/2569', '18,000.00'],
+    ['บริษัท ขนส่ง จำกัด', '', 'AP-78', '2025-12-28', '', '12000'],
+    ['รวม', '', '', '', '', '30,000.00']];
+  ok('จับได้ว่าเป็นไฟล์ยอดค้างรายใบ (ไม่ใช่งบทดลอง)', ctx.looksLikeOpenItems(table[0]) && !ctx.looksLikeOpenItems(['รหัสบัญชี', 'ชื่อบัญชี', 'เดบิต', 'เครดิต']));
+  const rd = ctx.readOpenItemsFile(table, 'ap');
+  ok('อ่านไฟล์: 2 ใบ ข้ามแถวรวม วันที่ พ.ศ. แปลงถูก สร้างผู้ขายใหม่ 2 ราย', rd.rows.length === 2 && rd.total === M('30000')
+    && rd.rows[0].docDate === '2025-12-25' && rd.rows[0].due === '2026-01-24' && rd.creating.length === 2, JSON.stringify(rd.skipped));
+  const ri = ctx.importOpeningItems(rd, 'ap', '2026-01-01', 'allocate');
+  ok('★ ตั้งเจ้าหนี้รายใบจากไฟล์ เจ้าหนี้รายใบ = บัญชีคุม', ri.count === 2 && ctx.openingItemsGap('ap', '2026-01-31') === 0
+    && D.partners.filter((p) => p.kind === 'vendor').length >= 2);
+  const b = D.docs.bill.find((d) => d.legacyNo === 'AP-78');
+  ctx.payBill({ billNo: b.no, date: '2026-01-20' });
+  ok('จ่ายชำระเจ้าหนี้ที่ยกมาได้', ctx.billOutstanding(b) === 0);
+
+  /* ลงบัญชีเป็นยอดยกมาใหม่ (ไม่มียอดรวมในบัญชี) แล้วยกเลิกทั้งชุด */
+  const r3 = ctx.saveOpeningItems({ kind: 'ar', date: '2026-01-01', mode: 'post',
+    rows: [{ partnerCode: c2.code, docNo: 'INV-OLD-9', amount: '5000' }] });
+  ok('ลงบัญชีเป็นยอดยกมาใหม่: Dr ลูกหนี้ / Cr บัญชีปรับปรุงยอดยกมา', ctx.balBySub(['trade_receivable'], '2026-01-31') === M('25000')
+    && ctx.balBySub(['opening_balance'], '2026-01-31') === -M('5000'));
+  ctx.voidOpeningItems(r3.batch, 'กรอกผิด ยกเลิกทั้งชุด');
+  ok('ยกเลิกทั้งชุด: กลับรายการและใบเป็นยกเลิก', ctx.balBySub(['opening_balance'], '2026-01-31') === 0
+    && D.docs.invoice.find((d) => d.legacyNo === 'INV-OLD-9').status === 'void' && ctx.openingItemsGap('ar', '2026-01-31') === 0);
+
+  console.log('\n=== 7. นำส่งภาษีหัก ณ ที่จ่ายที่ยกมาจากระบบเดิม ===');
+  const whtAcc = ctx.acc('2146');
+  const bank = ctx.accBySub('bank');
+  throws('นำส่งเกินยอดยกมาไม่ได้', () => ctx.postJournalVoucher({ book: 'payment', date: '2026-01-07', desc: 'นำส่ง ภ.ง.ด.53 ธ.ค. 2568',
+    lines: [{ acc: whtAcc.code, dr: '2000' }, { acc: bank, cr: '2000' }] }), 'WHT_REMIT_EXCEEDS_OPENING');
+  throws('สมุดรายวันทั่วไปยังลงบัญชีคุมไม่ได้', () => ctx.postJournalVoucher({ book: 'general', date: '2026-01-07', desc: 'ทดสอบ',
+    lines: [{ acc: whtAcc.code, dr: '1500' }, { acc: '3930', cr: '1500' }] }), 'CONTROL_ACCOUNT_MANUAL');
+  const jv = ctx.postJournalVoucher({ book: 'payment', date: '2026-01-07', desc: 'นำส่ง ภ.ง.ด.53 ธ.ค. 2568',
+    lines: [{ acc: whtAcc.code, dr: '1500' }, { acc: bank, cr: '1500' }] });
+  ok('★ จ่ายภาษีหัก ณ ที่จ่ายค้างนำส่งที่ยกมาด้วยสมุดรายวันจ่ายได้ ยอดค้างเป็นศูนย์', !!jv && ctx.balBySub(['wht_payable_pnd53'], '2026-01-31') === 0,
+    whtAcc.code + ' ' + whtAcc.subType);
+}
+
 done();

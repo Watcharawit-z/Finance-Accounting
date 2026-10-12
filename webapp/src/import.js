@@ -1109,6 +1109,13 @@ function importedEntry(srcId) {
   return DB.entries.find((e) => e.src === 'import' && e.srcId === srcId && e.status === 'posted');
 }
 
+/** ยอดสิ้นวันก่อนงวดแรก = ยอดยกมาต้นงวดแรก — วันก่อนหน้าไม่มีงวดในระบบ จึงลงวันแรกของงวดแรกแทน
+    (เช่น ระบบเดิมตัดยอด 31 ธ.ค. 2568 บริษัทเริ่มใช้ระบบงวด ม.ค. 2569) */
+function openingPostDate(date) {
+  const first = DB.periods.slice().sort((a, b) => (a.start < b.start ? -1 : 1))[0];
+  return first && date < first.start && addDays(date, 1) === first.start ? first.start : date;
+}
+
 /** ปีบัญชีของวันที่นี้เริ่มวันไหน — งวดเรียงต่อกันปีละ 12 งวดนับจากงวดแรกของบริษัท */
 function fyStartOf(date) {
   const fy = fiscalYearOf(date);
@@ -1321,6 +1328,8 @@ function runImport(tbRows, overrides, o) {
     opts: { checks: tbFileChecks(...), ack: ผู้ใช้ยืนยันข้อที่ต้องตรวจแล้ว, fileDate: วันที่ในหัวไฟล์ } */
 function importOpeningBalances(tbRows, date, overrides, opts) {
   opts = opts || {};
+  const shifted = openingPostDate(date);
+  if (shifted !== date) { opts = Object.assign({}, opts, { fileDate: opts.fileDate || date }); date = shifted; }
   return runImport(tbRows, overrides, {
     kind: 'opening', date: date, type: 'opening', srcId: 'opening|' + date,
     desc: 'ยอดยกมาจากระบบเดิม ณ ' + thDate(date),
@@ -1578,9 +1587,13 @@ function importPackage(pkg, overrides, opts) {
   }
   const docs = importOpenDocs(pkg, opening ? opening.entry.no : null);
   const warnings = (pkg.warnings || []).slice();
-  stockOpening(itemRows, pkg.cutoff, opening ? opening.entry.no : 'ยกมา ' + pkg.cutoff, warnings);
+  const cutoff = openingPostDate(pkg.cutoff);
+  if (cutoff !== pkg.cutoff) {
+    warnings.push('วันตัดยอด ' + thDate(pkg.cutoff) + ' อยู่ก่อนงวดแรกของระบบ ลงยอดยกมาวันที่ ' + thDate(cutoff) + ' แทน (ยอดสิ้นวันก่อนหน้า = ยอดยกมาต้นงวด)');
+  }
+  stockOpening(itemRows, cutoff, opening ? opening.entry.no : 'ยกมา ' + cutoff, warnings);
 
-  const asOf = pkg.cutoff;
+  const asOf = cutoff;
   const rec = reconciliationChecks(asOf);
   audit('import', 'package|' + pkg.cutoff, 'run', null, {
     partners: newPartners, items: newItems, employees: newEmployees,

@@ -482,6 +482,7 @@ function navGroups() {
     { g: 'ระบบ', icon: 'gear', items: [
       ['settings', 'ข้อมูลกิจการ', null],
       ['import', 'นำเข้าข้อมูลจากระบบเดิม', null],
+      ['openitems', 'ลูกหนี้/เจ้าหนี้ยกมารายใบ', null],
       ['audit', 'ร่องรอยการตรวจสอบ', null],
       ['about', 'เกี่ยวกับระบบนี้', null],
     ]},
@@ -637,7 +638,11 @@ function render() {
 
   const fn = SCREENS[STATE.screen] || SCREENS.dashboard;
   let html;
-  try { html = pageContext(STATE.screen) + fn(); }
+  /* หัวกระดาษเฉพาะตอนพิมพ์รายงานจากหน้าจอ — งบทดลอง/งบการเงินที่พิมพ์ออกไปต้องรู้ว่าเป็นของบริษัทไหน งวดไหน */
+  const printHead = '<div class="print-co"><b>' + esc(DB.company.name || '') + '</b>'
+    + (DB.company.taxId ? ' · เลขประจำตัวผู้เสียภาษี ' + esc(DB.company.taxId) : '')
+    + '<span>งวด ' + esc(thPeriod(STATE.period)) + ' · พิมพ์เมื่อ ' + esc(thDate(TODAY)) + '</span></div>';
+  try { html = printHead + pageContext(STATE.screen) + fn(); }
   catch (e) {
     console.error(e);
     html = card({ title:'เปิดหน้านี้ไม่ได้', body:'<div class="empty">' + esc(e.message) + '</div>' });

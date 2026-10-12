@@ -244,6 +244,8 @@ function scDashboard() {
     payroll: ['run:payroll', 'ทำเงินเดือน'],
     vat: ['go:pp30', 'ไปหน้า ภ.พ.30'],
     bank: ['go:bank', 'ไปกระทบยอด'],
+    openitems: ['go:openitems', 'ตั้งยอดยกมารายใบ'],
+    stockadj: ['go:stockadj', 'ตั้งยอดสินค้ายกมา'],
   };
 
   const AGE = [
@@ -385,6 +387,8 @@ function scClose() {
     vat: ['run:pp30', 'ยื่น ภ.พ.30 เดี๋ยวนี้'],
     bank: ['go:bank', 'ไปหน้ากระทบยอด'],
     yearend: ['yearend:close', 'ปิดบัญชีสิ้นปีเดี๋ยวนี้'],
+    openitems: ['go:openitems', 'ตั้งลูกหนี้/เจ้าหนี้ยกมารายใบ'],
+    stockadj: ['go:stockadj', 'ตั้งยอดสินค้ายกมา'],
   };
   const rows = chk.items.map(function (i) {
     const a = i.action && actMap[i.action];
@@ -999,14 +1003,16 @@ function scCoa() {
     if (!list.length) return;
     body += '<div class="sub-h">' + TYPE_TH[t] + ' — ' + list.length + ' บัญชี</div>'
       + tbl({
-        cols:[{t:'รหัส'},{t:'ชื่อบัญชี'},{t:'ประเภทย่อยที่ระบบใช้ผูก'},{t:'ลงรายการได้'},{t:'ยอด ณ ' + thDateNum(to),a:'r'}],
-        rows: list.map((a) => [{mono:a.code}, (a.postable ? '' : '▸ ') + a.name, {dim:a.subType},
-          a.postable ? {c:'ได้'} : {dim:'หัวข้อ'}, {n: a.postable ? balanceOf(a.code, to) : 0}]),
+        cols:[{t:'รหัส'},{t:'ชื่อบัญชี'},{t:'ประเภทย่อยที่ระบบใช้ผูก'},{t:'ลงรายการได้'},{t:'ยอด ณ ' + thDateNum(to),a:'r'},{t:''}],
+        rows: list.map((a) => [{mono:a.code}, (a.postable ? '' : '▸ ') + a.name + (a.isDefault ? ' · หลัก' : '') + (a.custom ? ' · เพิ่มเอง' : ''),
+          {dim:a.subType}, a.postable ? {c:'ได้'} : {dim:'หัวข้อ'}, {n: a.postable ? balanceOf(a.code, to) : 0},
+          {html: btn('acct:edit:' + a.code, 'แก้ไข')}]),
         rowAttr: (r, i) => (list[i].postable ? 'class="row-link" data-act="drill:' + list[i].code + '"' : ''),
       });
   });
   return card({
     title:'ผังบัญชี', sub: DB.accounts.length + ' บัญชี ครบทั้ง 5 หมวดตามที่กรมพัฒนาธุรกิจการค้ากำหนด',
+    actions: btn('acct:new', '+ เพิ่มบัญชี', 'primary'),
     filters: searchBox('ค้นหารหัสหรือชื่อบัญชี'),
     body: body || '<div class="empty">ไม่พบบัญชีที่ค้นหา</div>',
     foot:'คอลัมน์ "ประเภทย่อย" คือกุญแจที่ระบบใช้เลือกบัญชีอัตโนมัติเวลาออกเอกสาร ทำให้เปลี่ยนรหัสบัญชีได้โดยไม่ต้องแก้โค้ด',
@@ -1158,11 +1164,20 @@ function scTaxCal() {
     ['ภ.พ.30', 'ยื่นแบบภาษีมูลค่าเพิ่มประจำเดือน', nextMonthDay(p, 15), nextMonthDay(p, 23)],
     ['เงินสมทบประกันสังคม', 'นำส่งเงินสมทบผู้ประกันตนมาตรา 33', nextMonthDay(p, 15), nextMonthDay(p, 15)],
   ];
+  /* กำหนดรายปีนับจากรอบบัญชีของงวดที่ดูอยู่ — บริษัทที่รอบบัญชีไม่ตรงปีปฏิทินก็ได้วันที่ถูก */
+  const fy = fiscalYearOf(pEnd());
+  const monthEndAfter = (date, n) => {
+    let [y, m] = date.split('-').map(Number);
+    m += n; while (m > 12) { m -= 12; y += 1; }
+    return endOfMonth(y + '-' + String(m).padStart(2, '0') + '-01');
+  };
+  const fyEnd = fy ? fy.end : pEnd();
+  const halfEnd = fy && fy.periods[5] ? fy.periods[5].end : monthEndAfter(fyEnd, -6);
   const annual = [
-    ['ภ.ง.ด.51', 'ประมาณการกำไรสุทธิครึ่งรอบบัญชี — ประมาณต่ำกว่าจริงเกินร้อยละ 25 มีเงินเพิ่มร้อยละ 20', '2026-08-31'],
-    ['ภ.ง.ด.50', 'แบบแสดงรายการภาษีเงินได้นิติบุคคลประจำปี ภายใน 150 วันนับแต่วันสิ้นรอบบัญชี', '2027-05-30'],
-    ['งบการเงิน (DBD e-Filing)', 'นำส่งงบการเงินต่อกรมพัฒนาธุรกิจการค้าภายใน 5 เดือน', '2027-05-31'],
-    ['บอจ.5', 'สำเนาบัญชีรายชื่อผู้ถือหุ้น ภายใน 14 วันนับแต่วันประชุมสามัญ', '2027-05-14'],
+    ['ภ.ง.ด.51', 'ประมาณการกำไรสุทธิครึ่งรอบบัญชี — ประมาณต่ำกว่าจริงเกินร้อยละ 25 มีเงินเพิ่มร้อยละ 20', monthEndAfter(halfEnd, 2)],
+    ['ภ.ง.ด.50', 'แบบแสดงรายการภาษีเงินได้นิติบุคคลประจำปี ภายใน 150 วันนับแต่วันสิ้นรอบบัญชี', addDays(fyEnd, 150)],
+    ['งบการเงิน (DBD e-Filing)', 'นำส่งงบการเงินต่อกรมพัฒนาธุรกิจการค้าภายใน 5 เดือน', monthEndAfter(fyEnd, 5)],
+    ['บอจ.5', 'สำเนาบัญชีรายชื่อผู้ถือหุ้น ภายใน 14 วันนับแต่วันประชุมสามัญ (ประชุมภายใน 4 เดือน)', addDays(monthEndAfter(fyEnd, 4), 14)],
   ];
   const status = (form) => {
     const map = { 'ภ.ง.ด.1':'PND1', 'ภ.ง.ด.3':'PND3', 'ภ.ง.ด.53':'PND53', 'ภ.พ.30':'PP30' };
@@ -1178,7 +1193,7 @@ function scTaxCal() {
         cols:[{t:'แบบ'},{t:'เรื่อง'},{t:'ยื่นกระดาษภายใน'},{t:'ยื่นออนไลน์ภายใน'},{t:'สถานะ'}],
         rows: items.map((i) => [i[0], i[1], thDate(i[2]), thDate(i[3]), status(i[0])]),
       })
-      + '<div class="sub-h">รายปีของรอบบัญชี ' + DB.company.fiscalYear + '</div>'
+      + '<div class="sub-h">รายปีของรอบบัญชี ' + (fy ? fy.label : DB.company.fiscalYear) + '</div>'
       + tbl({
         cols:[{t:'แบบ'},{t:'เรื่อง'},{t:'กำหนดภายใน'}],
         rows: annual.map((i) => [i[0], i[1], thDate(i[2])]),
@@ -2161,6 +2176,7 @@ function scImport() {
 
   /* ---- ไฟล์ไม่ใช่งบทดลอง บอกให้ชัดว่าไฟล์ไหนที่ต้องใช้ ---- */
   if (IMP.kind === 'stock') return step1 + importStockCard(IMP) + history + blank;
+  if (IMP.kind === 'openItems') return step1 + importOpenItemsCard(IMP) + history + blank;
   if (IMP.kind === 'ledger' || IMP.kind === 'chart') {
     const isLedger = IMP.kind === 'ledger';
     return step1 + card({

@@ -711,8 +711,10 @@ td.peekable:hover,tr.peekable:hover td.num{color:var(--accent); text-decoration:
 
 /* ---------- พิมพ์ ---------- */
 @page{size:A4; margin:0}
+.print-co{display:none}
 @media print{
   html,body{background:#fff !important}
+  .print-co{display:flex; justify-content:space-between; gap:12px; font-size:12px; border-bottom:1px solid #000; padding-bottom:6px; margin-bottom:10px}
   .side,.top,.ctx,.card-h .btn,.card-h .chip,.card-h .ghost,.filters,#toast,#modal,#tip,#cmdk,#pop,#rowMenu,#peek{display:none !important}
   .scroll.tall{max-height:none; overflow:visible}
   .scroll.tall thead th,.scroll.tall tfoot td{position:static; box-shadow:none}
