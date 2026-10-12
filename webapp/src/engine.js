@@ -183,7 +183,10 @@ function blankState() {
     seq: {},             // {'invoice|2026-07': 12}
     budget: [],          // {account,period,amount}
     projects: [],
-    bankTxns: [],        // รายการเดินบัญชีที่ยังไม่กระทบยอด
+    bankTxns: [],        // บรรทัดสเตทเมนต์ธนาคารรายบัญชี {id,acc,date,desc,ref,debit,credit,balance,matched,items,matchId} (bank.js)
+    bankStmts: [],       // ยอดยกมา/ยอดคงเหลือปลายงวดตามสเตทเมนต์ {acc,period,opening,closing}
+    bankBf: [],          // รายการค้าง ณ วันเริ่มกระทบยอด (เช็คค้างจ่าย เงินฝากระหว่างทาง)
+    bankImports: [],     // ประวัติการนำเข้าไฟล์สเตทเมนต์ ใช้กันนำเข้าซ้ำและยกเลิกการนำเข้า
     audit: [],
     settings: { hardLockDate: null },
     isDemo: false,       // true = ข้อมูลตัวอย่างที่ระบบสร้างให้ ไม่ใช่ข้อมูลจริงของผู้ใช้
@@ -211,6 +214,8 @@ function loadState(obj) {
     DB.isDemo = !!(DB.company && DB.company.name === 'บริษัท ศรีวัฒนาการค้า จำกัด');
   }
   if (Array.isArray(DB.entries) && DB.entries.length) repairDuplicateEntryNos();
+  /* บรรทัดสเตทเมนต์จากรุ่นที่ยังไม่แยกบัญชีเงินฝาก ต้องได้บัญชีกำกับก่อนใช้งานกระทบยอดรายบัญชี */
+  if (Array.isArray(DB.bankTxns) && DB.bankTxns.length) bankMigrate();
   /* ผังบัญชีรุ่นก่อนให้ "เงินเดือนและค่าจ้าง" เป็นค่าใช้จ่ายบริหารทั่วไป ระบบจึงเลือกบัญชีนี้ทุกครั้งที่ต้องการ
      ค่าใช้จ่ายบริหาร ค่าเช่าและวัสดุสำนักงานไปลงบัญชีเงินเดือน — แยกประเภทให้บัญชีเงินเดือนโดยเฉพาะ */
   if (Array.isArray(DB.accounts) && !DB.accounts.some((a) => a.subType === 'salary_expense')) {
@@ -390,7 +395,7 @@ function repairDuplicateEntryNos() {
     if (e.src === 'filing') DB.docs.filing.forEach((f) => { if (f.form + '|' + f.period === e.srcId) swap(f, 'entryNo'); });
     if (e.src === 'reversal') DB.entries.forEach((x) => { if (x.no === e.srcId) swap(x, 'reversedBy'); });
     if (e.reversedBy) DB.entries.forEach((x) => { if (x.no === e.reversedBy && x.src === 'reversal') swap(x, 'srcId'); });
-    if (e.src === 'bank') DB.bankTxns.forEach((t) => { if (String(t.id) === String(e.srcId)) swap(t, 'matchedTo'); });
+    if (e.src === 'bank') bankRenameEntry(e.srcId, old, neu);
     if (e.src === 'depreciation') DB.docs.depreciation.forEach((r) => { if (r.period === e.srcId) swap(r, 'entryNo'); });
     if (e.src === 'payroll') {
       DB.docs.payRun.forEach((r) => { if (r.period === e.srcId) swap(r, 'entryNo'); });
@@ -581,9 +586,7 @@ function reverse(entryNo, reason, date, opts) {
   e.reason = reason.trim();
   /* ใบสำคัญที่จับคู่กับบรรทัดสเตทเมนต์ไว้ถูกกลับรายการ บรรทัดนั้นต้องกลับไปรอกระทบยอดใหม่
      ไม่งั้นเงินในธนาคารจะดูเหมือนมีเอกสารรองรับ ทั้งที่เอกสารถูกยกเลิกไปแล้ว */
-  DB.bankTxns.forEach(function (t) {
-    if (t.matchedTo === e.no) { t.matched = false; t.matchedTo = null; }
-  });
+  bankUnmatchEntry(e.no);
   audit('journal_entry', e.no, 'reverse', { status: 'posted' }, { status: 'reversed', by: rev.no }, reason);
   return rev;
 }

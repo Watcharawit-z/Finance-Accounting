@@ -72,7 +72,6 @@ const PAGE_INFO = {
   whtcert:      { d:'หนังสือรับรอง 50 ทวิ ทุกฉบับผูกกับการจ่ายเงินจริง ยื่นรวมในแบบ ภ.ง.ด.3/53 ภายในวันที่ 7 ของเดือนถัดไป',
                   je: NOJE('ลงบัญชีพร้อมรายการจ่ายเงิน') },
   paymentprep:  { d:'รวบเจ้าหนี้ที่ถึงกำหนดเป็นรอบจ่าย จัดทำ → อนุมัติ → จ่าย', je: NOJE('ลงบัญชีตอนกดจ่าย') },
-  bank:         { d:'เทียบยอดเงินฝากในระบบกับสเตทเมนต์ธนาคาร รายการที่ยังไม่มีบันทึกเข้าบัญชีได้จากหน้านี้' },
   cashflow:     { d:'เงินสดเข้าออกของงวด แยกกิจกรรมดำเนินงาน ลงทุน และจัดหาเงิน (วิธีทางตรง)' },
   jgeneral:     { d:'รายการที่ไม่มีเงินเข้าออก — ปรับปรุง ตั้งค้างจ่าย ค่าเสื่อม เงินเดือน กลับรายการ', book:'JV' },
   jpurchase:    { d:'ซื้อเงินเชื่อ — ใบรับสินค้าและตั้งหนี้ผู้ขายลงเล่มนี้ให้เอง', book:'PU' },
@@ -151,7 +150,7 @@ function flowCount(sc) {
     case 'payments': return per('payment');
     case 'expenses': return per('expense');
     case 'whtcert': return per('whtCert');
-    case 'bank': return done(!DB.bankTxns.some((t) => !t.matched && periodOf(t.date) <= STATE.period));
+    case 'bank': return done(bankCloseItem(STATE.period).ok);
     case 'deprec': return done(DB.docs.depreciation.some((d) => d.period === STATE.period && d.status !== 'void'));
     case 'payroll': return done(DB.docs.payRun.some((r) => r.period === STATE.period && r.status !== 'void'));
     case 'pp30': return done(DB.docs.filing.some((f) => f.form === 'PP30' && f.period === STATE.period));
@@ -752,33 +751,6 @@ function scPayments() {
 /* ===================================================================
    ธนาคารและเงินสด
    =================================================================== */
-function scBank() {
-  const unmatched = DB.bankTxns.filter((t) => !t.matched);
-  const matched = DB.bankTxns.filter((t) => t.matched);
-  const glBank = balBySub(['bank'], pEnd());
-  const stmtDelta = unmatched.reduce((s, t) => s + t.credit - t.debit, 0);
-  return card({
-      title:'กระทบยอดธนาคาร', sub:'บัญชีกระแสรายวัน ธนาคารกรุงเทพ เลขที่ 123-4-56789-0',
-      body: '<div class="reco">'
-        + '<div><span>ยอดตามบัญชีแยกประเภท ณ ' + thDate(pEnd()) + '</span><b>' + fmt(glBank) + '</b></div>'
-        + '<div><span>บวก/หัก รายการในสเตทเมนต์ที่ยังไม่ได้บันทึก</span><b>' + fmt(stmtDelta) + '</b></div>'
-        + '<div class="gt"><span>ยอดที่ควรตรงกับสเตทเมนต์</span><b>' + fmt(glBank + stmtDelta) + '</b></div>'
-        + '</div>'
-        + '<div class="sub-h">รายการในสเตทเมนต์ที่ยังไม่มีในระบบ (' + unmatched.length + ')</div>'
-        + tbl({
-          cols:[{t:'วันที่'},{t:'รายละเอียดจากธนาคาร'},{t:'อ้างอิง'},{t:'เงินออก',a:'r'},{t:'เงินเข้า',a:'r'},{t:'ระบบแนะนำ'},{t:'จัดการ',a:'r'}],
-          rows: unmatched.map((t) => [thDateNum(t.date), t.desc, {mono:t.ref}, {n:t.debit}, {n:t.credit},
-            {dim:t.suggest}, {html: btn('bank:book:' + t.id, 'บันทึกเข้าบัญชี', 'primary') + btn('bank:match:' + t.id, 'ทำเครื่องหมายว่าตรงแล้ว')}]),
-          empty:'กระทบยอดครบทุกรายการแล้ว',
-        })
-        + (matched.length ? '<div class="sub-h">กระทบยอดแล้ว (' + matched.length + ')</div>' + tbl({
-            cols:[{t:'วันที่'},{t:'รายละเอียด'},{t:'เงินออก',a:'r'},{t:'เงินเข้า',a:'r'},{t:'จับคู่กับ'}],
-            rows: matched.map((t) => [thDateNum(t.date), t.desc, {n:t.debit}, {n:t.credit}, {mono:t.matchedTo}]),
-          }) : ''),
-      foot:'การบันทึกจากสเตทเมนต์จะสร้างใบสำคัญทั่วไปให้ทันที และไม่มีทางแก้ตัวเลขย้อนหลังโดยไม่ทิ้งร่องรอย',
-    });
-}
-
 function scCashFlow() {
   const cf = cashFlow(pStart(), pEnd());
   const sec = (title, amount, detail) => {
@@ -2026,7 +1998,7 @@ const SCREENS = {
   ar: () => agingScreen('ar'), customers: () => partnerScreen('customer'),
   bills: scBills, payments: scPayments, ap: () => agingScreen('ap'),
   vendors: () => partnerScreen('vendor'),
-  bank: scBank, cashflow: scCashFlow,
+  cashflow: scCashFlow,
   journals: scJournals, ledger: scLedger, tb: scTrialBalance, coa: scCoa,
   vatout: () => vatRegister('vat_output'), vatin: () => vatRegister('vat_input'),
   pp30: scPp30, pnd: scPnd, whtcert: scWhtCert, taxcal: scTaxCal,

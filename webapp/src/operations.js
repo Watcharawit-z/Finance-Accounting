@@ -1137,9 +1137,7 @@ function closeChecklist(period) {
   const vat = DB.docs.filing.find((f) => f.form === 'PP30' && f.period === period);
   items.push({ label: 'ยื่นแบบ ภ.พ.30', ok: !!vat,
     detail: vat ? 'ชำระ ' + fmt(vat.payable) + ' บาท' : 'ยังไม่ได้ยื่น', blocking: true, action: 'vat' });
-  const unmatched = DB.bankTxns.filter((t) => !t.matched && periodOf(t.date) <= period).length;
-  items.push({ label: 'รายการธนาคารกระทบยอดครบ', ok: unmatched === 0,
-    detail: unmatched === 0 ? 'ครบ' : 'ค้าง ' + unmatched + ' รายการ', blocking: false, action: 'bank' });
+  items.push(bankCloseItem(period));
 
   return { period, items, canClose: items.filter((i) => i.blocking).every((i) => i.ok) };
 }
@@ -1166,31 +1164,6 @@ function reopenPeriod(period, reason) {
   p.status = 'open';
   audit('period', period, 'reopen', { status: 'closed' }, { status: 'open' }, reason.trim());
   return p;
-}
-
-/* ---------- กระทบยอดธนาคาร ---------- */
-function matchBankTxn(id, entryNo) {
-  const t = DB.bankTxns.find((x) => x.id === id);
-  if (!t) throw new DomainError('TXN_NOT_FOUND', 'ไม่พบรายการเดินบัญชีนี้');
-  t.matched = true;
-  t.matchedTo = entryNo || 'จับคู่ด้วยตนเอง';
-  audit('bank_txn', String(id), 'match', null, { to: t.matchedTo });
-  return t;
-}
-function bookBankTxn(id, accountCode, desc) {
-  const t = DB.bankTxns.find((x) => x.id === id);
-  if (!t) throw new DomainError('TXN_NOT_FOUND', 'ไม่พบรายการเดินบัญชีนี้');
-  if (t.matched) throw new DomainError('ALREADY_MATCHED', 'รายการนี้จับคู่แล้ว');
-  const je = post({
-    type: 'general', date: t.date, desc: desc || t.desc,
-    src: 'bank', srcId: String(id),
-    lines: t.credit > 0
-      ? [{ acc: accBySub('bank'), dr: t.credit }, { acc: accountCode, cr: t.credit }]
-      : [{ acc: accountCode, dr: t.debit }, { acc: accBySub('bank'), cr: t.debit }],
-  });
-  t.matched = true;
-  t.matchedTo = je.no;
-  return je;
 }
 
 /* ===================================================================
@@ -2381,8 +2354,6 @@ fileVat = transactional(fileVat);
 fileWht = transactional(fileWht);
 closePeriod = transactional(closePeriod);
 reopenPeriod = transactional(reopenPeriod);
-matchBankTxn = transactional(matchBankTxn);
-bookBankTxn = transactional(bookBankTxn);
 issueBillingNote = transactional(issueBillingNote);
 cancelBillingNote = transactional(cancelBillingNote);
 receiveBillingNote = transactional(receiveBillingNote);

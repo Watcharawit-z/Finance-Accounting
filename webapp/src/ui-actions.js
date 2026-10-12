@@ -1098,31 +1098,6 @@ function modalCompany() {
 }
 
 /* ---------- อื่น ๆ ---------- */
-function modalBankBook(id) {
-  const t = DB.bankTxns.find((x) => x.id === Number(id));
-  if (!t) return;
-  const guess = t.credit > 0 ? 'interest_income' : 'finance_cost';
-  let guessCode = '';
-  try { guessCode = accBySub(guess); } catch (e) { guessCode = ''; }
-  modal({
-    title:'บันทึกรายการจากสเตทเมนต์',
-    sub: thDate(t.date) + ' · ' + t.desc + ' · ' + (t.credit > 0 ? 'เงินเข้า ' + fmt(t.credit) : 'เงินออก ' + fmt(t.debit)),
-    body:'<div class="flds">'
-      + field({ name:'acc', label:'บันทึกคู่กับบัญชี', type:'select', wide:true,
-          value: guessCode, options: optAccounts() })
-      + field({ name:'desc', label:'คำอธิบายรายการ', wide:true, value: t.desc })
-      + '</div>',
-    submitLabel:'ลงบัญชีและกระทบยอด',
-    onSubmit: function () {
-      submitAction(function () {
-        const je = bookBankTxn(Number(id), val('acc'), val('desc'));
-        toast('ลงบัญชีเป็นใบสำคัญ ' + je.no + ' แล้ว', 'ok', 'รายการนี้กระทบยอดเรียบร้อย');
-        return je;
-      });
-    },
-  });
-}
-
 function modalReverse(no) {
   modal({
     title:'กลับรายการใบสำคัญ ' + no,
@@ -1437,16 +1412,6 @@ function dispatch(act) {
   if (head === 'void')    { modalVoid(rest[0], rest.slice(1).join(':')); return; }
   if (head === 'voidrun') { modalVoidRun(rest[0], rest[1]); return; }
   if (head === 'reopen')  { modalReopen(); return; }
-
-  if (head === 'bank') {
-    const [what, id] = rest;
-    if (what === 'book') modalBankBook(id);
-    if (what === 'match') runAction(function () {
-      matchBankTxn(Number(id));
-      toast('ทำเครื่องหมายว่ากระทบยอดแล้ว', 'ok');
-    });
-    return;
-  }
 
   if (head === 'run') {
     if (arg === 'deprec') return void runAction(function () {

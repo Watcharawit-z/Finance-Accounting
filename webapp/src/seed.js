@@ -569,14 +569,9 @@ function generateTransactions() {
     }
   });
 
-  // ---- รายการเดินบัญชีที่ยังไม่กระทบยอด (เดือน ก.ค.) ----
-  DB.bankTxns = [
-    { id:1, date:'2026-07-03', desc:'INTEREST RECEIVED', ref:'INT690703', debit:0, credit:M('1842'), matched:false, suggest:'ดอกเบี้ยรับ — ยังไม่มีรายการในระบบ' },
-    { id:2, date:'2026-07-08', desc:'FEE - REMITTANCE', ref:'FEE690708', debit:M('350'), credit:0, matched:false, suggest:'ค่าธรรมเนียมโอนเงิน — ยังไม่มีรายการในระบบ' },
-    { id:3, date:'2026-07-15', desc:'TRANSFER FROM 6890', ref:'TR690715', debit:0, credit:M('240000'), matched:false, suggest:'ไม่แน่ใจ — มีใบแจ้งหนี้ยอดใกล้เคียง 3 ใบ' },
-  ];
-
   julySamples();
+  // ---- สเตทเมนต์บัญชีเงินฝากหลักเดือน ก.ค. — ส่วนใหญ่จับคู่แล้ว เหลือ 3 รายการที่ธนาคารลงแต่บริษัทยังไม่ได้บันทึก ----
+  demoBankStatement();
 }
 
 /* ---------- ตัวอย่างเอกสารชุดใหม่ในงวดที่เปิดอยู่ ----------
