@@ -437,6 +437,7 @@ function invoiceDetail(no) {
       + (out < 0 ? btn('refund:' + d.no, 'คืนเงินลูกค้า ' + fmt(-out), 'primary') : '')
       + (!isVoid(d) && creditableBase(d) > 0 ? btn('cn:' + d.no, 'ออกใบลดหนี้') : '')
       + (d.status !== 'void' ? btn('dn:' + d.no, 'ออกใบเพิ่มหนี้') : '')
+      + settleInvoiceActions(d)
       + printBtn('invoice', d.no) + btn('entry:' + d.entryNo, 'ดูใบสำคัญ') + voidBtn('invoice', d) + btn('sel:', 'ปิด'),
     body: voidBanner(d)
       + '<div class="docgrid">'
@@ -452,7 +453,7 @@ function invoiceDetail(no) {
           rows: d.lines.map((l) => [l.desc, {n:M(String(l.qty))}, l.uom || '—', {n:l.price},
             l.taxCode === 'VAT7' ? 'VAT 7%' : l.taxCode === 'VAT0' ? 'อัตรา 0%' : 'ยกเว้น', {n:l.amount}]),
         })
-      + '<div class="totals">'
+      + '<div class="totals">' + settleInvoiceTotals(d, 'top')
       + '<div><span>มูลค่าก่อนภาษี</span><b>' + fmt(d.base) + '</b></div>'
       + '<div><span>ภาษีมูลค่าเพิ่ม 7%</span><b>' + fmt(d.vat) + '</b></div>'
       + '<div class="gt"><span>จำนวนเงินรวมทั้งสิ้น</span><b>' + fmt(d.total) + '</b></div>'
@@ -460,6 +461,7 @@ function invoiceDetail(no) {
       + (d.credited ? '<div><span>ลดหนี้แล้ว</span><b>' + fmt(d.credited) + '</b></div>' : '')
       + (d.debited ? '<div><span>เพิ่มหนี้แล้ว</span><b>' + fmt(d.debited) + '</b></div>' : '')
       + (d.refunded ? '<div><span>คืนเงินลูกค้าแล้ว</span><b>' + fmt(d.refunded) + '</b></div>' : '')
+      + settleInvoiceTotals(d, 'bottom')
       + '<div class="gt"><span>' + (out < 0 ? 'ลูกค้ามีเครดิต (ต้องคืน)' : 'คงเหลือ') + '</span><b>' + fmt(Math.abs(out)) + '</b></div>'
       + '</div>'
       + (rcs.length ? '<div class="sub-h">ใบเสร็จรับเงินที่อ้างถึงใบนี้</div>' + tbl({
@@ -478,7 +480,8 @@ function invoiceDetail(no) {
           cols:[{t:'เลขที่'},{t:'วันที่'},{t:'วิธี'},{t:'จำนวนเงิน',a:'r'},{t:'สถานะ'},{t:''}],
           rows: rfs.map((c) => [{mono:c.no}, thDateNum(c.date), PAY_METHOD[c.method] || c.method, {n:c.amount},
             statusPill(c.status || 'posted'), {html: isVoid(c) ? '' : btn('void:customerRefund:' + c.no, 'ยกเลิก', 'danger')}]),
-          rowAttr: (r, i) => isVoid(rfs[i]) ? 'class="is-void"' : '' }) : ''),
+          rowAttr: (r, i) => isVoid(rfs[i]) ? 'class="is-void"' : '' }) : '')
+      + settleInvoiceSection(d),
     foot: isVoid(d)
       ? 'ใบกำกับที่ยกเลิกยังอยู่ในรายงานภาษีขายด้วยยอดศูนย์ เลขที่จึงเรียงต่อเนื่องไม่ขาดช่วง · ถ้าต้องเก็บเงินจริงให้ออกใบกำกับใบใหม่'
       : 'ครบองค์ประกอบตามมาตรา 86/4 · ส่งกรมสรรพากรแบบ e-Tax Invoice แล้ว (จำลอง)'
@@ -527,10 +530,14 @@ function receiptDetail(no) {
   if (!d) return '';
   return simpleDocCard({ kind:'receipt', doc:d, title:'ใบเสร็จรับเงิน',
     sub:'รับวันที่ ' + thDate(d.date) + ' · ' + d.partnerName,
-    actions: btn('open:invoices:' + d.invoiceNo, 'ดูใบกำกับ ' + d.invoiceNo),
+    actions: btn('open:invoices:' + d.invoiceNo, 'ดูใบกำกับ ' + d.invoiceNo)
+      + (d.excess ? btn('open:deposits:' + d.no, 'ดูเครดิตรับเกิน') : ''),
     kv:[['อ้างใบกำกับภาษี', d.invoiceNo], d.billingNoteNo ? ['ตามใบวางบิล', d.billingNoteNo] : null,
-      ['วิธีรับเงิน', PAY_METHOD[d.method] || d.method], ['รับก่อนหัก', fmt(d.gross)],
-      ['ลูกค้าหัก ณ ที่จ่าย' + (d.whtRate ? ' ' + d.whtRate + '%' : ''), fmt(d.wht)], ['รับสุทธิ', fmt(d.net)],
+      ['วิธีรับเงิน', PAY_METHOD[d.method] || d.method],
+      d.bankAccount ? ['รับเข้าบัญชี', d.bankAccount + ' ' + acc(d.bankAccount).name] : null, ['รับก่อนหัก', fmt(d.gross)],
+      ['ลูกค้าหัก ณ ที่จ่าย' + (d.whtRate ? ' ' + d.whtRate + '%' : ''), fmt(d.wht)],
+      d.diff ? ['ปิดส่วนต่างเป็น' + ((RECEIPT_DIFF[d.diffType] || {}).label || ''), fmt(d.diff)] : null,
+      d.excess ? ['รับเกิน (เครดิตของลูกค้า)', fmt(d.excess)] : null, ['รับสุทธิ', fmt(d.net)],
       ['สถานะ', isVoid(d) ? 'ยกเลิก' : 'ลงบัญชีแล้ว']],
     foot: isVoid(d) ? 'ยอดคงค้างของใบกำกับ ' + d.invoiceNo + ' กลับไปเหมือนก่อนรับชำระแล้ว'
       : 'ยกเลิกใบเสร็จแล้ว ระบบกลับรายการ ณ วันที่เดิม และยอดคงค้างของใบกำกับกลับไปเหมือนเดิม',
@@ -660,18 +667,26 @@ function billDetail(no) {
     title:'ตั้งหนี้ผู้ขาย เลขที่ ' + d.no,
     sub:'ใบกำกับภาษีซื้อเลขที่ ' + d.vendorNo + ' · ' + d.partnerName + (d.grnNo ? ' · จากใบรับสินค้า ' + d.grnNo : ''),
     actions: (out > 0 ? btn('paybill:' + d.no, 'จ่ายชำระ', 'primary') : '')
+      + settleBillActions(d)
       + (d.grnNo ? btn('open:goodsreceipts:' + d.grnNo, 'ดูใบรับสินค้า') : '')
       + btn('entry:' + d.entryNo, 'ดูใบสำคัญ') + voidBtn('bill', d) + btn('sel:', 'ปิด'),
     body: voidBanner(d) + tbl({
-      cols:[{t:'รายการ'},{t:'บันทึกเข้าบัญชี'},{t:'จำนวน',a:'r'},{t:'ราคาต่อหน่วย',a:'r'},{t:'จำนวนเงิน',a:'r'}],
+      cols:[{t:'รายการ'},{t:'บันทึกเข้าบัญชี'},{t:'จำนวน',a:'r'},{t:'ราคาต่อหน่วย',a:'r'},{t:'ภาษี'},{t:'จำนวนเงิน',a:'r'}],
       rows: d.lines.map((l) => [l.desc, l.acc ? l.acc + ' ' + acc(l.acc).name : (d.grnNo ? 'พักรับสินค้า' : {dim:'—'}),
-        {n:M(String(l.qty))}, {n:l.price}, {n:l.amount}]),
+        {n:M(String(l.qty))}, {n:l.price}, TAX_CODE_LABEL[billLineCode(d, l)] || '—', {n:l.amount}]),
     })
     + '<div class="totals">'
+    + (d.depositBase ? '<div><span>รวมรายการ</span><b>' + fmt(d.base + d.depositBase) + '</b></div>'
+      + '<div><span>หักเงินมัดจำ</span><b>' + fmt(d.depositBase) + '</b></div>' : '')
     + '<div><span>มูลค่าก่อนภาษี</span><b>' + fmt(d.base) + '</b></div>'
     + '<div><span>ภาษีซื้อ' + (d.claimable ? ' (ขอคืนได้)' : ' (ต้องห้าม — บันทึกเป็นค่าใช้จ่าย)') + '</span><b>' + fmt(d.vat) + '</b></div>'
     + '<div class="gt"><span>รวมทั้งสิ้น</span><b>' + fmt(d.total) + '</b></div>'
-    + '<div class="gt"><span>คงเหลือต้องจ่าย</span><b>' + fmt(out) + '</b></div></div>'
+    + (d.paid ? '<div><span>จ่ายแล้ว</span><b>' + fmt(d.paid) + '</b></div>' : '')
+    + (d.credited ? '<div><span>ลดหนี้แล้ว</span><b>' + fmt(d.credited) + '</b></div>' : '')
+    + (d.settled ? '<div><span>หักกลบ/ปิดส่วนต่าง</span><b>' + fmt(d.settled) + '</b></div>' : '')
+    + '<div class="gt"><span>' + (out < 0 ? 'ผู้ขายเป็นหนี้เรา (เครดิต)' : 'คงเหลือต้องจ่าย') + '</span><b>' + fmt(Math.abs(out)) + '</b></div></div>'
+    + (d.whtCode ? '<div class="note">หักภาษี ณ ที่จ่ายตอนจ่าย: ' + esc(resolveRate(d.whtCode, d.date, { channel:'manual' }).label) + ' — เปลี่ยนหรือไม่หักได้ในฟอร์มจ่ายชำระ</div>' : '')
+    + settleBillSection(d)
     + (pays.length ? '<div class="sub-h">ใบสำคัญจ่ายที่อ้างถึงรายการนี้</div>' + tbl({
         cols:[{t:'เลขที่'},{t:'วันที่'},{t:'ช่องทาง'},{t:'ยอดก่อนหัก',a:'r'},{t:'หัก ณ ที่จ่าย',a:'r'},{t:'จ่ายสุทธิ',a:'r'},{t:'50 ทวิ'},{t:'สถานะ'}],
         rows: pays.map((p) => [{mono:p.no}, thDateNum(p.date),
@@ -686,14 +701,18 @@ function billDetail(no) {
 }
 
 function scBills() {
-  const base = DB.docs.bill.filter((d) => periodOf(d.date) === STATE.period && (hit(d.no) || hit(d.partnerName) || hit(d.vendorNo)));
-  const rows = base.filter((d) => chipPass('bills', d));
+  /* "ค้างชำระทุกเดือน" ดูหนี้ที่ยังค้างทุกเดือน ไม่ใช่เฉพาะเดือนที่เลือก — หนี้เดือนก่อนที่ยังไม่จ่ายจะได้ไม่หายจากสายตา */
+  const all = DB.docs.bill.filter((d) => hit(d.no) || hit(d.partnerName) || hit(d.vendorNo));
+  const allOpen = STATE.chip.bills === 'allopen';
+  const base = all.filter((d) => periodOf(d.date) === STATE.period);
+  const rows = allOpen ? all.filter((d) => billOutstanding(d) > 0).sort((a, b) => (a.due < b.due ? -1 : a.due > b.due ? 1 : 0))
+    : base.filter((d) => chipPass('bills', d));
   const t = liveOnly(rows).reduce((s, d) => ({b:s.b + d.base, v:s.v + d.vat, t:s.t + d.total}), {b:0,v:0,t:0});
   return (STATE.sel ? billDetail(STATE.sel) : '')
     + card({
-      title:'ตั้งหนี้ผู้ขาย', sub: thPeriod(STATE.period) + ' · ' + countNote(rows, 'รายการ'),
+      title:'ตั้งหนี้ผู้ขาย', sub: (allOpen ? 'ค้างชำระทุกเดือน เรียงตามวันครบกำหนด' : thPeriod(STATE.period)) + ' · ' + countNote(rows, 'รายการ'),
       actions: btn('new:bill', '+ บันทึกใบกำกับภาษีซื้อ', periodIsOpen() ? 'primary' : 'disabled'),
-      filters: listFilters('bills', 'ค้นหาผู้ขายหรือเลขที่ใบกำกับ', base),
+      filters: listFilters('bills', 'ค้นหาผู้ขายหรือเลขที่ใบกำกับ', base, all),
       body: tbl({
         cols:[{t:'เลขที่ระบบ'},{t:'วันที่'},{t:'ผู้ขาย'},{t:'ใบกำกับผู้ขาย'},{t:'ครบกำหนด'},{t:'ก่อนภาษี',a:'r'},{t:'ภาษีซื้อ',a:'r'},{t:'รวม',a:'r'},{t:'คงเหลือ',a:'r'},{t:'สถานะ'}],
         rows: rows.map((d) => [{mono:d.no}, thDateNum(d.date), d.partnerName, {mono:d.vendorNo}, thDateNum(d.due),
@@ -716,7 +735,11 @@ function paymentDetail(no) {
       + (d.certNo ? btn('open:whtcert:' + d.certNo, 'ดู 50 ทวิ ' + d.certNo) : ''),
     kv:[['อ้างรายการตั้งหนี้', d.billNo], d.batchNo ? ['ตามใบเตรียมจ่าย', d.batchNo] : null,
       ['ช่องทางนำส่งภาษี', d.channel === 'e_wht' ? 'e-Withholding Tax (ธนาคารนำส่ง)' : 'หักและนำส่งเอง'],
+      d.bankAccount ? ['จ่ายจากบัญชี', d.bankAccount + ' ' + acc(d.bankAccount).name] : null,
       ['ยอดก่อนหัก', fmt(d.gross)], ['หัก ณ ที่จ่าย' + (d.whtRate ? ' ' + d.whtRate + '%' : ''), fmt(d.wht)],
+      d.wht ? ['ฐานภาษีหัก ณ ที่จ่าย', fmt(d.whtBase)] : null,
+      d.diff ? ['ปิดส่วนต่างเป็น' + ((PAYMENT_DIFF[d.diffType] || {}).label || ''), fmt(d.diff)] : null,
+      d.fee ? ['ค่าธรรมเนียมโอน', fmt(d.fee)] : null,
       ['จ่ายสุทธิ', fmt(d.net)], ['หนังสือรับรอง 50 ทวิ', d.certNo || (d.wht ? 'ธนาคารออกให้' : '—')],
       ['สถานะ', isVoid(d) ? 'ยกเลิก' : 'ลงบัญชีแล้ว']],
     foot: isVoid(d) ? 'ยกเลิกแล้ว — ยอดค้างของ ' + d.billNo + ' กลับไปเหมือนก่อนจ่าย' + (d.certNo ? ' และ 50 ทวิ ' + d.certNo + ' ถูกยกเลิกด้วย' : '')
@@ -1819,16 +1842,18 @@ function whtCertDetail(no) {
   const c = DB.docs.whtCert.find((x) => x.no === no);
   if (!c) return '';
   const src = c.expenseNo ? ['expenses', c.expenseNo, 'ค่าใช้จ่าย']
-    : c.paymentNo ? ['payments', c.paymentNo, 'ใบสำคัญจ่าย'] : null;
+    : c.paymentNo ? ['payments', c.paymentNo, 'ใบสำคัญจ่าย']
+    : c.depositNo ? ['vdeposits', c.depositNo, 'ใบจ่ายเงินมัดจำ'] : null;
   const pv = c.paymentNo ? DB.docs.payment.find((x) => x.no === c.paymentNo) : null;
   return card({
     title:'หนังสือรับรองการหักภาษี ณ ที่จ่าย เลขที่ ' + c.no,
     sub:'ตามมาตรา 50 ทวิ แห่งประมวลรัษฎากร · ลงวันที่ ' + thDate(c.date),
     actions: (c.expenseNo ? btn('open:expenses:' + c.expenseNo, 'ดูค่าใช้จ่าย ' + c.expenseNo) : '')
+      + (c.depositNo ? btn('open:vdeposits:' + c.depositNo, 'ดูใบจ่ายเงินมัดจำ ' + c.depositNo) : '')
       + (pv ? btn('open:bills:' + pv.billNo, 'ดูรายการตั้งหนี้ ' + pv.billNo) : '')
       + printBtn('whtCert', c.no) + btn('sel:', 'ปิด'),
     body: (isVoid(c) ? '<div class="void-banner"><b>ยกเลิกแล้ว</b><span>เพราะยกเลิก'
-        + (c.expenseNo ? 'ค่าใช้จ่าย ' + esc(c.expenseNo) : 'ใบสำคัญจ่าย ' + esc(c.paymentNo || '')) + ' — ไม่เข้าแบบ ' + esc(c.form) + '</span></div>' : '')
+        + (src ? src[2] + ' ' + esc(src[1]) : '') + ' — ไม่เข้าแบบ ' + esc(c.form) + '</span></div>' : '')
       + '<div class="docgrid">'
       + '<div><div class="dim">ผู้มีหน้าที่หักภาษี ณ ที่จ่าย</div><b>' + esc(DB.company.name) + '</b>'
       + '<div>' + esc(DB.company.address) + '</div>'
@@ -1848,7 +1873,7 @@ function whtCertDetail(no) {
 
 function scWhtCert() {
   const base = DB.docs.whtCert.filter((c) => periodOf(c.date) === STATE.period
-    && (hit(c.no) || hit(c.partnerName) || hit(c.expenseNo || '') || hit(c.paymentNo || '')));
+    && (hit(c.no) || hit(c.partnerName) || hit(c.expenseNo || '') || hit(c.paymentNo || '') || hit(c.depositNo || '')));
   const rows = base.filter((d) => chipPass('whtcert', d));
   const ewht = DB.taxTx.filter((t) => t.kind === 'wht' && t.period === STATE.period && t.channel === 'e_wht' && !t.void);
   return (STATE.sel ? whtCertDetail(STATE.sel) : '')
@@ -1861,7 +1886,7 @@ function scWhtCert() {
         cols:[{t:'เลขที่'},{t:'วันที่'},{t:'ผู้ถูกหักภาษี'},{t:'เลขประจำตัวผู้เสียภาษี'},{t:'ยื่นในแบบ'},{t:'ประเภทเงินได้'},{t:'อัตรา',a:'r'},{t:'ฐานภาษี',a:'r'},{t:'ภาษีที่หัก',a:'r'},{t:'ออกจาก'}],
         rows: rows.map((c) => [{mono:c.no}, thDateNum(c.date), c.partnerName, {mono:c.taxId},
           c.form, c.incomeType, {c:c.rate + '%'}, {n:c.base}, {n:c.wht},
-          {mono: c.expenseNo || c.paymentNo || '—'}]),
+          {mono: c.expenseNo || c.paymentNo || c.depositNo || '—'}]),
         rowAttr: (r, i) => rowCls(rows[i]) + ' data-act="sel:' + r[0].mono + '"',
         foot: ['','','','','','','รวม', {n:liveOnly(rows).reduce((s, c) => s + c.base, 0)}, {n:liveOnly(rows).reduce((s, c) => s + c.wht, 0)}, ''],
         empty:'ไม่มีหนังสือรับรองที่ต้องออกในงวดนี้',

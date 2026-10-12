@@ -179,6 +179,7 @@ function blankState() {
       purchaseOrder: [], goodsReceipt: [], bill: [], payment: [],
       expense: [], whtCert: [], paymentBatch: [], customerRefund: [],
       stockMove: [], stockAdj: [], payRun: [], depreciation: [], filing: [],
+      customerDeposit: [], vendorDeposit: [], creditApply: [], badDebt: [], vendorCreditNote: [],
     },
     seq: {},             // {'invoice|2026-07': 12}
     budget: [],          // {account,period,amount}
@@ -347,6 +348,7 @@ const SEQ_PREFIX = {
   invoice:'INV', receipt:'RC', creditNote:'CN', debitNote:'DN', quotation:'QT', salesOrder:'SO',
   purchaseOrder:'PO', bill:'AP', payment:'PV', whtCert:'WT', stockCount:'SC', stockAdj:'ST',
   billingNote:'BN', goodsReceipt:'GR', expense:'EX', paymentBatch:'PB', customerRefund:'RF',
+  customerDeposit:'RA', vendorDeposit:'PA', creditApply:'OF', badDebt:'WO', vendorCreditNote:'VC',
   je_sales:'SA', je_purchase:'PU', je_receipt:'RV', je_payment:'PY',
   je_general:'JV', je_adjustment:'JV', je_payroll:'PR', je_asset:'AS',
   je_inventory:'IV', je_opening:'OB', je_closing:'CL',
@@ -552,6 +554,11 @@ const ENTRY_FROM = {
   import:['การนำเข้าข้อมูล', 'ยกเลิกที่หน้านำเข้าข้อมูลจากระบบเดิม'],
   stockAdj:['ใบปรับปรุงสินค้า', 'เปิดใบปรับปรุงสินค้าที่หน้าสินค้า → ยอดยกมา ตรวจนับ ตัดจำหน่าย แล้วกดยกเลิก'],
   reversal:['การกลับรายการ', 'กลับรายการซ้อนไม่ได้ ให้บันทึกใบสำคัญใหม่แทน'],
+  customerDeposit:['ใบรับเงินมัดจำ', 'เปิดใบรับเงินมัดจำแล้วกดยกเลิกเอกสาร'],
+  vendorDeposit:['ใบจ่ายเงินมัดจำ', 'เปิดใบจ่ายเงินมัดจำแล้วกดยกเลิกเอกสาร ระบบจะยกเลิก 50 ทวิ ให้ด้วย'],
+  creditApply:['ใบหักกลบเครดิต', 'เปิดใบหักกลบแล้วกดยกเลิกเอกสาร'],
+  badDebt:['การตัดหนี้สูญ', 'เปิดใบกำกับแล้วกดยกเลิกที่รายการตัดหนี้สูญ'],
+  vendorCreditNote:['ใบลดหนี้จากผู้ขาย', 'เปิดใบลดหนี้จากผู้ขายแล้วกดยกเลิกเอกสาร'],
 };
 
 function reverse(entryNo, reason, date, opts) {
@@ -879,12 +886,14 @@ function settledUpto(kind, docNo, asOf) {
     DB.docs.debitNote.forEach((c) => { if (live(c)) v -= c.total; });
     /* คืนเงินลูกค้าที่มีเครดิตเกิน ทำให้ยอดติดลบกลับขึ้นมาเป็นศูนย์ */
     (DB.docs.customerRefund || []).forEach((r) => { if (live(r)) v -= r.amount; });
-    return v;
+    return v + settleUptoSafe('ar', docNo, asOf);
   }
   let v = 0;
   DB.docs.payment.forEach((p) => { if (p.billNo === docNo && p.date <= asOf && p.status !== 'void') v += p.gross; });
-  return v;
+  return v + settleUptoSafe('ap', docNo, asOf);
 }
+/* ส่วนที่ปิดยอดด้วยเอกสารของระบบรับ–จ่ายชำระ (settle.js) — ชุดทดสอบที่โหลดเฉพาะเครื่องบัญชีหลักไม่มีไฟล์นั้น */
+const settleUptoSafe = (kind, docNo, asOf) => (typeof settleUpto === 'function' ? settleUpto(kind, docNo, asOf) : 0);
 /* bfPaid = ยอดที่ชำระไปแล้วก่อนวันตัดยอด ตอนย้ายข้อมูลเข้ามา
    ในระบบเราไม่มีใบเสร็จรองรับส่วนนั้น จึงต้องหักแยกจากใบเสร็จที่เกิดหลังย้าย
    ไม่งั้นถ้าใช้ d.paid ตรง ๆ จะถูกนับซ้ำเมื่อมีการรับชำระเพิ่มภายหลัง */
@@ -894,8 +903,10 @@ const outstandingAsOf = (kind, d, asOf) =>
 /* ยอดคงค้าง ณ ปัจจุบัน — เขียนไว้ที่เดียว หน้าจอและรายงานต้องเรียกตัวนี้เท่านั้น
    ไม่งั้นพอเพิ่มประเภทเอกสารใหม่ จะมีบางหน้าลืมนับแล้วตัวเลขเพี้ยนแบบหายาก */
 /* เอกสารที่ยกเลิกแล้วไม่มียอดค้าง — ใบสำคัญของมันถูกกลับรายการไปแล้ว */
-const invOutstanding = (d) => d.status === 'void' ? 0 : d.total + (d.debited || 0) + (d.refunded || 0) - d.paid - d.credited;
-const billOutstanding = (d) => d.status === 'void' ? 0 : d.total - d.paid;
+/* settled = ปิดยอดด้วยวิธีที่ไม่ใช่รับ/จ่ายเงิน (ส่วนต่างที่ปิดยอด หักกลบเครดิตหรือเงินมัดจำ ตัดหนี้สูญ) — ดู settle.js
+   credited ของรายการตั้งหนี้ = ใบลดหนี้จากผู้ขาย */
+const invOutstanding = (d) => d.status === 'void' ? 0 : d.total + (d.debited || 0) + (d.refunded || 0) - d.paid - d.credited - (d.settled || 0);
+const billOutstanding = (d) => d.status === 'void' ? 0 : d.total - d.paid - (d.credited || 0) - (d.settled || 0);
 
 /* ---------- อายุหนี้ ---------- */
 function aging(kind, asOf) {

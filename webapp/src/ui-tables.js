@@ -123,13 +123,15 @@ function modalSaveView() {
 }
 
 /** แถบตัวกรอง: ช่องค้นหา · ตัวกรองสถานะพร้อมจำนวน · มุมมองที่บันทึกไว้ */
-function listFilters(screen, ph, base) {
+function listFilters(screen, ph, base, wide) {
   const chips = LIST_CHIPS[screen] || [];
   const cur = STATE.chip[screen] || 'all';
   const views = savedViews().filter((v) => v.screen === screen);
   return (ph ? searchBox(ph) : '')
     + (chips.length ? '<div class="chips" role="group" aria-label="กรองตามสถานะ">' + chips.map(function (c) {
-      const n = c[2] ? base.filter(c[2]).length : base.length;
+      /* ตัวกรองที่ดูทุกเดือน (เช่น ค้างชำระทุกเดือน) นับจากเอกสารทุกเดือน ไม่ใช่เฉพาะเดือนที่เลือก */
+      const from = c[3] && c[3].allPeriods && wide ? wide : base;
+      const n = c[2] ? from.filter(c[2]).length : from.length;
       return '<button class="chip' + (c[0] === cur ? ' on' : '') + '" data-act="chip:' + screen + ':' + c[0] + '"'
         + (c[0] === cur ? ' aria-pressed="true"' : '') + '>' + esc(c[1]) + '<span class="chip-n">' + n + '</span></button>';
     }).join('') + '</div>' : '')

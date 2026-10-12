@@ -75,7 +75,14 @@ function vatSplit(lines) {
 }
 function vatSums(d) {
   const v = vatSplit(d.lines || []);
-  const out = [['รวมเงิน', pm(d.base)]];
+  /* หักเงินมัดจำ: แสดงรวมรายการ หักมัดจำ แล้วภาษีเฉพาะส่วนที่เหลือ — ภาษีของมัดจำออกใบกำกับไปแล้วตอนรับเงิน */
+  const dep = d.depositBase || 0;
+  (d.deposits || []).forEach((r) => { v[r.taxCode === 'VAT0' ? 'zero' : r.taxCode === 'EXEMPT' ? 'exempt' : 'std'] -= r.base; });
+  const out = [['รวมเงิน', pm(d.base + dep)]];
+  if (dep) {
+    out.push(['หัก เงินมัดจำ ' + d.deposits.map((r) => r.no).join(', '), pm(dep)]);
+    out.push(['มูลค่าหลังหักเงินมัดจำ', pm(d.base)]);
+  }
   if (v.zero) out.push(['มูลค่าอัตราร้อยละ 0', pm(v.zero)]);
   if (v.exempt) out.push(['มูลค่าที่ได้รับยกเว้น', pm(v.exempt)]);
   out.push(['มูลค่าที่เสียภาษี', pm(v.std)]);
@@ -119,9 +126,12 @@ const DOC_PRINT = {
         + '<div class="p-meta">' + pParty('ได้รับเงินจาก', inv.snap || { name: d.partnerName })
         + pInfo([['เลขที่', d.no], ['วันที่', thDate(d.date)], ['ชำระโดย', how], ['ใบวางบิล', d.billingNoteNo || '']]) + '</div>'
         + pTable([{ t:'ลำดับ', w:'11mm', c:1 }, { t:'รายการ' }, { t:'จำนวนเงิน', w:'34mm', n:1 }],
-          [['1', 'ชำระหนี้ตามใบกำกับภาษีเลขที่ ' + d.invoiceNo + (inv.date ? ' ลงวันที่ ' + thDate(inv.date) : ''), pm(d.gross)]], 6)
-        + pTotals(d.gross, [['จำนวนเงินที่ชำระ', pm(d.gross)],
+          [['1', 'ชำระหนี้ตามใบกำกับภาษีเลขที่ ' + d.invoiceNo + (inv.date ? ' ลงวันที่ ' + thDate(inv.date) : ''), pm(d.gross)]]
+            .concat(d.excess ? [['2', 'เงินรับเกินยอดใบกำกับ — เก็บเป็นเครดิตของลูกค้า ใช้หักใบถัดไปหรือขอคืนได้', pm(d.excess)]] : []), 6)
+        + pTotals(d.gross + (d.excess || 0), [['จำนวนเงินที่ชำระ', pm(d.gross + (d.excess || 0))],
           ['หัก ภาษีหัก ณ ที่จ่าย' + (d.whtRate ? ' ' + d.whtRate + '%' : ''), pm(d.wht)], ['รับสุทธิ', pm(d.net), true]])
+        + (d.diff ? '<div class="p-note">ส่วนต่าง ' + esc(fmt(d.diff)) + ' บาท ปิดยอดเป็น' + esc((RECEIPT_DIFF[d.diffType] || {}).label || '')
+          + ' — ใบกำกับ ' + esc(d.invoiceNo) + ' ชำระครบ</div>' : '')
         + '<div class="p-note">ใบเสร็จนี้จะสมบูรณ์เมื่อบริษัทได้รับเงินครบถ้วนแล้ว · กรณีชำระด้วยเช็ค ถือว่าชำระเมื่อเช็คผ่านบัญชีแล้ว</div>'
         + pSign(['ผู้รับเงิน', 'ผู้มีอำนาจลงนาม']), d.no, isVoid(d) ? 'ยกเลิก' : '');
     },

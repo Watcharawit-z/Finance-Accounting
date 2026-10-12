@@ -115,6 +115,7 @@ function statusPill(s) {
     cancelled:['late','ยกเลิก'], received:['open','รับเข้าคลังแล้ว'],
     pending_approval:['wait','รออนุมัติ'], credit_balance:['wait','ลูกค้ามีเครดิต รอคืนเงิน'],
     partially_received:['wait','รับสินค้าบางส่วน'],
+    written_off:['late','ตัดหนี้สูญ'], vendor_credit:['wait','ผู้ขายมีเครดิตให้เรา'],
   };
   const m = map[s] || ['draft', s];
   return { st: m };
@@ -391,8 +392,10 @@ function navGroups() {
       ['invoices', 'ใบกำกับภาษี', null],
       ['billingnotes', 'ใบวางบิล', bnOpen || null],
       ['receipts', 'ใบเสร็จรับเงิน', null],
+      ['deposits', 'เงินมัดจำรับ', null],
       ['creditnotes', 'ใบลดหนี้', null],
       ['debitnotes', 'ใบเพิ่มหนี้', null],
+      ['offsets', 'หักกลบ · ตัดหนี้สูญ', null],
     ]},
     /* วงจรรายจ่าย — ใบสั่งซื้อ → ใบรับสินค้า (ของเข้าคลัง) → ตั้งหนี้ (ใบกำกับมาถึง) → จ่าย */
     { g: 'เอกสารซื้อ', icon: 'buy', items: [
@@ -400,6 +403,8 @@ function navGroups() {
       ['goodsreceipts', 'ใบรับสินค้า', grnWaiting || null],
       ['bills', 'ตั้งหนี้ผู้ขาย', null],
       ['payments', 'ใบสำคัญจ่าย', null],
+      ['vdeposits', 'เงินมัดจำจ่าย', null],
+      ['vendorcns', 'ใบลดหนี้จากผู้ขาย', null],
     ]},
     /* ค่าใช้จ่ายที่มีหัก ณ ที่จ่าย ออก 50 ทวิ ให้เองในแถบหัก ณ ที่จ่าย — สองแถบนี้ผูกกัน */
     { g: 'ค่าใช้จ่าย', icon: 'receipt', items: [

@@ -83,13 +83,15 @@ function modalInvoice() {
       + field({ name:'partner', label:'ลูกค้า', type:'select', options: optCustomers() })
       + field({ name:'date', label:'วันที่ออกเอกสาร', type:'date', value: defaultDate(),
           hint:'ต้องอยู่ในงวดที่ยังเปิดอยู่ ระบบจะเลือกอัตราภาษีตามวันที่นี้' })
-      + '</div>' + lineEditor(4),
+      + '</div>' + lineEditor(4)
+      + '<div id="invDeps">' + depositPicker('ar', (optCustomers()[0] || [])[0]) + '</div>',
     submitLabel:'ลงบัญชีและออกเลขที่',
     note:'เลขที่เอกสารจะถูกจองเมื่อลงบัญชีสำเร็จเท่านั้น',
     onSubmit: function () {
       submitAction(function () {
         const doc = issueInvoice({
           partnerCode: val('partner'), date: val('date'), lines: collectLines(4),
+          deposits: collectDepositPicks(),
         });
         STATE.screen = 'invoices'; STATE.sel = doc.no;
         toast('ออกใบกำกับภาษี ' + doc.no + ' แล้ว', 'ok', 'รวมทั้งสิ้น ' + fmt(doc.total) + ' บาท');
@@ -124,30 +126,38 @@ function modalReceive(no) {
     title: inv ? 'รับชำระเงินจากใบกำกับ ' + no : 'ออกใบเสร็จรับเงิน',
     sub: inv ? inv.partnerName + ' · คงเหลือ ' + fmt(out) + ' บาท'
       : 'เลือกใบกำกับภาษีที่ลูกค้าชำระ ใบเสร็จต้องอ้างใบกำกับเสมอ',
-    body:'<div class="flds">'
+    body:'<div class="flds" data-rcform="' + esc(no || '') + '">'
       + (inv ? '' : field({ name:'invoiceNo', label:'อ้างใบกำกับภาษี', type:'select', wide:true, options: refs }))
       + field({ name:'amount', label:'จำนวนเงินที่รับ (ก่อนหักภาษี ณ ที่จ่าย)', value: inv ? fmt(out) : '',
           placeholder: inv ? '' : 'เว้นว่าง = รับเต็มยอดคงค้าง' })
       + field({ name:'date', label:'วันที่รับชำระ', type:'date', value: defaultDate() })
       + field({ name:'method', label:'วิธีรับชำระ', type:'select', value:'transfer',
           options:[['transfer','โอนเงินเข้าบัญชี'],['cheque','เช็ค'],['cash','เงินสด']] })
+      + cashAccField('in', 'transfer', 'รับเงินเข้าบัญชี')
       + field({ name:'wht', label:'ลูกค้าหักภาษี ณ ที่จ่ายหรือไม่', type:'select',
           options: optWht('ไม่ได้ถูกหัก'), hint:'ถ้าถูกหัก ระบบจะบันทึกเป็นสินทรัพย์รอเครดิตภาษีปลายปี' })
       + field({ name:'whtBase', label:'ฐานที่ลูกค้าหัก (ตาม 50 ทวิ)', placeholder:'เว้นว่าง = ให้ระบบคิด',
           hint: inv ? 'ระบบคิดจากค่าบริการก่อนภาษี ไม่รวมค่าสินค้า · รับเต็มยอดนี้ = ' + fmt(receiptServiceShare(inv, out)) + ' บาท'
             : 'ระบบคิดจากค่าบริการก่อนภาษีในยอดที่รับ ไม่รวมค่าสินค้า (ซื้อสินค้าไม่ต้องหัก ณ ที่จ่าย)' })
-      + '</div>',
+      + field({ name:'diffType', label:'ถ้ายอดที่รับไม่เท่ายอดคงค้าง', type:'select', wide:true, value:'', options: RECEIPT_DIFF_OPTS,
+          hint:'ลูกค้าโอนขาดเพราะค่าธรรมเนียมหรือส่วนลด ปิดยอดได้เลย ใบกำกับจะไม่ค้างเศษ · จ่ายเกินเก็บเป็นเครดิตใช้หักใบถัดไปหรือคืนเงินได้' })
+      + '</div><div class="jv-tot" id="rcSum"></div>',
     submitLabel:'รับชำระและลงบัญชี',
     onSubmit: function () {
       submitAction(function () {
         const r = receivePayment({ invoiceNo: no || val('invoiceNo'), amount: val('amount'), date: val('date'),
-          method: val('method'), whtCode: val('wht') || null, whtBase: val('wht') ? val('whtBase') : null });
+          method: val('method'), bankAccount: val('bankAccount'), whtCode: val('wht') || null,
+          whtBase: val('wht') ? val('whtBase') : null, diffType: val('diffType') || null });
+        rememberCashAcc('in', r.bankAccount);
         toast('บันทึกใบเสร็จ ' + r.no + ' แล้ว', 'ok',
-          'รับสุทธิ ' + fmt(r.net) + ' บาท' + (r.wht ? ' (ถูกหักไว้ ' + fmt(r.wht) + ')' : ''));
+          'รับสุทธิ ' + fmt(r.net) + ' บาท' + (r.wht ? ' (ถูกหักไว้ ' + fmt(r.wht) + ')' : '')
+          + (r.diff ? ' · ปิดส่วนต่าง ' + fmt(r.diff) + ' บาท' : '')
+          + (r.excess ? ' · เก็บเงินรับเกิน ' + fmt(r.excess) + ' บาทเป็นเครดิตของลูกค้า' : ''));
         return r;
       });
     },
   });
+  refreshReceiptSum();
 }
 
 /** ตัวเลือกอัตราภาษีของใบลดหนี้/เพิ่มหนี้ — แสดงเฉพาะใบกำกับที่มีหลายอัตรา */
@@ -560,46 +570,75 @@ function optBillAccounts() {
   const grp = (a) => a.subType === 'inventory' ? 'สินค้า' : a.type === 'asset' ? 'สินทรัพย์' : 'ค่าใช้จ่าย';
   return billAccounts().map((a) => [a.code, grp(a) + ' · ' + a.code + ' ' + a.name]);
 }
+/* ใบกำกับของผู้ขายหนึ่งใบมีได้หลายบรรทัด แต่ละบรรทัดลงบัญชีและอัตราภาษีของตัวเอง — บันทึกเป็นรายการตั้งหนี้เดียว
+   (เลขที่ใบกำกับเดียวกันห้ามบันทึกซ้ำ จึงต้องใส่ครบทุกบรรทัดในครั้งเดียว) */
+const BILL_ROWS = 3;
+const selOpts = (opts, v) => opts.map((o) => '<option value="' + esc(o[0]) + '"' + (o[0] === v ? ' selected' : '') + '>' + esc(o[1]) + '</option>').join('');
+const VAT_SHORT = [['VAT7','VAT 7%'], ['VAT0','อัตรา 0%'], ['EXEMPT','ยกเว้น']];
+function billRow(i) {
+  const accs = billAccounts().map((a) => [a.code, a.code + ' ' + a.name]);
+  const items = [['', '—']].concat(DB.items.filter((x) => x.type === 'stock').map((x) => [x.code, x.code + ' · ' + x.name]));
+  return '<tr><td><input name="b' + i + '_desc" style="min-width:130px" placeholder="' + (i === 0 ? 'เช่น ค่าเช่าสำนักงาน' : '') + '"></td>'
+    + '<td><select name="b' + i + '_acc" style="min-width:165px;max-width:200px">' + selOpts(accs, defaultAccountFor('admin_expense')) + '</select></td>'
+    + '<td><select name="b' + i + '_item" class="billitem" data-i="' + i + '" style="min-width:100px;max-width:140px">' + selOpts(items, '') + '</select></td>'
+    + '<td><input name="b' + i + '_qty" class="r" style="width:50px" value="' + (i === 0 ? '1' : '') + '"></td>'
+    + '<td><input name="b' + i + '_price" class="r" style="width:96px"></td>'
+    + '<td><select name="b' + i + '_tax" style="min-width:84px">' + selOpts(VAT_SHORT, 'VAT7') + '</select></td></tr>';
+}
+function collectBillLines() {
+  const out = [];
+  for (let i = 0; document.querySelector('[name="b' + i + '_desc"]'); i++) {
+    const desc = val('b' + i + '_desc').trim();
+    const price = val('b' + i + '_price');
+    const code = val('b' + i + '_item');
+    if (!desc && !code && !price) continue;
+    const it = DB.items.find((x) => x.code === code);
+    out.push({ desc: desc || (it ? it.name : ''), acc: val('b' + i + '_acc'), itemCode: it && it.type === 'stock' ? it.code : null,
+      qty: Number(val('b' + i + '_qty') || 1) || 1, price, taxCode: val('b' + i + '_tax') || 'VAT7' });
+  }
+  return out;
+}
 function modalBill() {
+  const vends = optVendors();
+  if (!needRefs(vends, 'ยังไม่มีผู้ขายในทะเบียน', 'เพิ่มผู้ขายที่เมนูผู้ติดต่อก่อน')) return;
+  const first = DB.partners.find((p) => p.code === vends[0][0]);
+  let rows = '';
+  for (let i = 0; i < BILL_ROWS; i++) rows += billRow(i);
   modal({
     title:'บันทึกใบกำกับภาษีซื้อ',
-    sub:'ระบบกันการบันทึกเลขที่ใบกำกับซ้ำของผู้ขายรายเดียวกัน',
-    body:'<div class="flds">'
-      + field({ name:'partner', label:'ผู้ขาย', type:'select', options: optVendors() })
+    sub:'ใบกำกับหนึ่งใบมีได้หลายบรรทัด แต่ละบรรทัดเลือกบัญชีและอัตราภาษีเอง · ระบบกันการบันทึกเลขที่ใบกำกับซ้ำของผู้ขายรายเดียวกัน',
+    body:'<div class="flds" data-billform="1">'
+      + field({ name:'partner', label:'ผู้ขาย', type:'select', options: vends })
       + field({ name:'vendorNo', label:'เลขที่ใบกำกับภาษีของผู้ขาย', placeholder:'เช่น IV6907-0245' })
       + field({ name:'date', label:'วันที่ตามใบกำกับ', type:'date', value: defaultDate() })
-      + field({ name:'acc', label:'บันทึกเข้าบัญชี', type:'select', wide:true, value: defaultAccountFor('admin_expense'),
-          options: optBillAccounts(), hint:'ซื้อสินค้าเข้าคลังให้เลือกบัญชีสินค้าคงเหลือแล้วเลือกสินค้าด้านล่าง' })
-      + field({ name:'item', label:'สินค้า (เฉพาะกรณีซื้อเข้าคลัง)', type:'select', options: optItems() })
-      + field({ name:'desc', label:'คำอธิบายรายการ', wide:true, placeholder:'เช่น ค่าเช่าสำนักงานเดือนกรกฎาคม' })
-      + field({ name:'qty', label:'จำนวน', value:'1' })
-      + field({ name:'price', label:'ราคาต่อหน่วย (ก่อนภาษี)' })
-      + field({ name:'tax', label:'ภาษีมูลค่าเพิ่ม', type:'select', options: optVat })
       + field({ name:'claim', label:'สิทธิภาษีซื้อ', type:'select', value:'yes',
           options:[['yes','ขอคืนได้'],['no','ภาษีซื้อต้องห้าม ตามมาตรา 82/5']] })
-      + field({ name:'wht', label:'ภาษีหัก ณ ที่จ่ายตอนจ่ายเงิน', type:'select', options: optWht() })
-      + '</div>',
+      + field({ name:'wht', label:'ภาษีหัก ณ ที่จ่ายตอนจ่ายเงิน', type:'select', value: first.whtCode || '', options: optWht(),
+          hint:'เติมจากทะเบียนผู้ขายให้ · ใบที่เป็นค่าสินค้าล้วนเลือก "ไม่หัก"' })
+      + '</div>'
+      + '<div class="sub-h">รายการตามใบกำกับ</div><div class="scroll"><table class="lines"><thead><tr>'
+      + '<th>รายการ</th><th>บันทึกเข้าบัญชี</th><th>สินค้า (ซื้อเข้าคลัง)</th><th class="r">จำนวน</th>'
+      + '<th class="r">ราคาต่อหน่วย (ก่อนภาษี)</th><th>ภาษี</th></tr></thead><tbody id="billRows">' + rows + '</tbody></table></div>'
+      + addRowBtn('bill')
+      + '<div id="billDeps">' + depositPicker('ap', first.code) + '</div>'
+      + '<div class="jv-tot" id="billSum"></div>',
     submitLabel:'ตั้งหนี้และลงบัญชี',
+    note:'ซื้อสินค้าเข้าคลัง: เลือกสินค้าในบรรทัดนั้น ระบบเปลี่ยนบัญชีเป็นสินค้าคงเหลือและรับเข้าคลังให้',
     onSubmit: function () {
       submitAction(function () {
-        const accCode = val('acc');
-        const itemCode = acc(accCode).subType === 'inventory' ? (val('item') || null) : null;
-        const it = DB.items.find((x) => x.code === itemCode);
         const b = recordBill({
           partnerCode: val('partner'), vendorNo: val('vendorNo').trim(), date: val('date'),
           nonClaimableVat: val('claim') === 'no', whtCode: val('wht') || null,
-          lines: [{
-            desc: val('desc').trim() || (it ? it.name : ''),
-            qty: Number(val('qty') || 1) || 1, price: val('price'),
-            taxCode: val('tax'), acc: accCode, itemCode: itemCode,
-          }],
+          lines: collectBillLines(), deposits: collectDepositPicks(),
         });
         STATE.screen = 'bills'; STATE.sel = b.no;
-        toast('ตั้งหนี้ ' + b.no + ' แล้ว', 'ok', 'รวมทั้งสิ้น ' + fmt(b.total) + ' บาท');
+        toast('ตั้งหนี้ ' + b.no + ' แล้ว', 'ok', b.lines.length + ' บรรทัด · รวมทั้งสิ้น ' + fmt(b.total) + ' บาท'
+          + (b.depositBase ? ' · หักเงินมัดจำ ' + fmt(b.depositBase) : ''));
         return b;
       });
     },
   });
+  refreshBillSum();
 }
 
 function modalPayBill(no) {
@@ -607,35 +646,50 @@ function modalPayBill(no) {
   if (no && !b) return;
   const refs = b ? [] : optOpenBills();
   if (!b && !needRefs(refs, 'ไม่มีเจ้าหนี้ค้างจ่าย', 'บันทึกตั้งหนี้ผู้ขายก่อน แล้วจึงจ่ายชำระ')) return;
-  const out = b ? b.total - b.paid : 0;
+  const out = b ? billOutstanding(b) : 0;
+  const codes = optWht().slice(1);
+  /* "none" ต้องส่งไปตรง ๆ — ค่าว่างแปลว่าใช้ประเภทที่ตั้งไว้ตอนตั้งหนี้ ผู้ใช้ที่เลือกไม่หักจะถูกหักอยู่ดี */
+  const whtOpts = (b ? [] : [['', '— ตามที่ตั้งไว้ในรายการตั้งหนี้ —']]).concat([['none', '— ไม่หักภาษี ณ ที่จ่าย —']], codes);
   modal({
     title: b ? 'จ่ายชำระ ' + no : 'จ่ายชำระเจ้าหนี้',
     sub: b ? b.partnerName + ' · คงเหลือ ' + fmt(out) + ' บาท'
       : 'เลือกรายการตั้งหนี้ที่จะจ่าย · จ่ายหลายรายพร้อมกันใช้เมนูเตรียมจ่ายเงิน',
-    body:'<div class="flds">'
+    body:'<div class="flds" data-pvform="' + esc(no || '') + '">'
       + (b ? '' : field({ name:'billNo', label:'อ้างรายการตั้งหนี้', type:'select', wide:true, options: refs }))
       + field({ name:'amount', label:'จำนวนเงินที่จ่าย (ก่อนหักภาษี ณ ที่จ่าย)', value: b ? fmt(out) : '',
           placeholder: b ? '' : 'เว้นว่าง = จ่ายเต็มยอดคงค้าง' })
       + field({ name:'date', label:'วันที่จ่าย', type:'date', value: defaultDate() })
+      + field({ name:'method', label:'วิธีจ่าย', type:'select', value:'transfer',
+          options:[['transfer','โอนเงิน'],['cheque','เช็ค'],['cash','เงินสด']] })
+      + cashAccField('out', 'transfer', 'จ่ายจากบัญชี')
       + field({ name:'wht', label:'ประเภทเงินได้ที่ต้องหักภาษี', type:'select',
-          value: b ? b.whtCode || '' : '', options: optWht(b ? null : '— ตามที่ตั้งไว้ในรายการตั้งหนี้ —'),
-          hint: b ? '' : 'ไม่เลือก = ใช้ประเภทที่บันทึกไว้ตอนตั้งหนี้' })
+          value: b ? b.whtCode || 'none' : '', options: whtOpts,
+          hint: b ? (b.whtCode ? 'ตั้งไว้ตอนตั้งหนี้ — เปลี่ยนได้ถ้าครั้งนี้ไม่ต้องหัก' : '') : 'ไม่เลือก = ใช้ประเภทที่บันทึกไว้ตอนตั้งหนี้' })
+      + field({ name:'whtBase', label:'ฐานภาษีหัก ณ ที่จ่าย', placeholder:'เว้นว่าง = ให้ระบบคิดจากมูลค่าก่อนภาษี',
+          hint:'ระบุเองได้ เช่น ค่าแรง 4,000 + ค่าอะไหล่ 6,000 หักเฉพาะ 4,000 · เงินที่จ่ายแทนไม่อยู่ในฐาน' })
       + field({ name:'channel', label:'ช่องทางนำส่งภาษี', type:'select', value:'manual', wide:true,
           options:[['manual','หักและนำส่งเอง — ระบบจะออกหนังสือรับรอง 50 ทวิ ให้'],
                    ['e_wht','e-Withholding Tax — ธนาคารนำส่งและออกหลักฐานให้']],
           hint:'ช่องทาง e-Withholding Tax ใช้อัตราลด 1% และระบบจะกันรายการนี้ออกจากแบบ ภ.ง.ด. อัตโนมัติ' })
-      + '</div>',
+      + field({ name:'diffType', label:'ถ้าจ่ายน้อยกว่ายอดคงค้าง', type:'select', value:'', options: PAYMENT_DIFF_OPTS })
+      + field({ name:'fee', label:'ค่าธรรมเนียมโอนที่บริษัทจ่ายเพิ่ม', placeholder:'0',
+          hint:'ลงค่าธรรมเนียมธนาคาร เงินออกจากบัญชีรวมค่าธรรมเนียม · ถ้าหักจากเงินที่ผู้ขายได้ ไม่ต้องกรอก' })
+      + '</div><div class="jv-tot" id="pvSum"></div>',
     submitLabel:'จ่ายและลงบัญชี',
     onSubmit: function () {
       submitAction(function () {
-        const p = payBill({ billNo: no || val('billNo'), amount: val('amount'), date: val('date'),
-          whtCode: val('wht') || null, channel: val('channel') });
+        const p = payBill({ billNo: no || val('billNo'), amount: val('amount'), date: val('date'), method: val('method'),
+          bankAccount: val('bankAccount'), whtCode: val('wht') || null, whtBase: val('wht') === 'none' ? null : val('whtBase'), channel: val('channel'),
+          diffType: val('diffType') || null, fee: val('fee') });
+        rememberCashAcc('out', p.bankAccount);
         toast('บันทึกใบสำคัญจ่าย ' + p.no + ' แล้ว', 'ok',
-          'จ่ายสุทธิ ' + fmt(p.net) + ' บาท' + (p.certNo ? ' · ออก 50 ทวิ เลขที่ ' + p.certNo : ''));
+          'จ่ายสุทธิ ' + fmt(p.net) + ' บาท' + (p.certNo ? ' · ออก 50 ทวิ เลขที่ ' + p.certNo : '')
+          + (p.diff ? ' · ปิดส่วนต่าง ' + fmt(p.diff) + ' บาท' : ''));
         return p;
       });
     },
   });
+  refreshPaySum();
 }
 
 /* ===================================================================
@@ -705,6 +759,7 @@ function modalReceiveBillingNote(no) {
       + field({ name:'date', label:'วันที่รับชำระ', type:'date', value: defaultDate() })
       + field({ name:'method', label:'วิธีรับชำระ', type:'select', value:'cheque',
           options:[['cheque','เช็ค'],['transfer','โอนเงินเข้าบัญชี'],['cash','เงินสด']] })
+      + cashAccField('in', 'cheque', 'รับเงินเข้าบัญชี')
       + field({ name:'wht', label:'ลูกค้าหักภาษี ณ ที่จ่ายหรือไม่', type:'select', wide:true,
           options: optWht('ไม่ได้ถูกหัก'), hint:'ใช้อัตราเดียวกันกับทุกใบกำกับในใบวางบิลนี้' })
       + '</div>'
@@ -713,7 +768,9 @@ function modalReceiveBillingNote(no) {
     submitLabel:'รับชำระทั้งหมดและลงบัญชี',
     onSubmit: function () {
       submitAction(function () {
-        const made = receiveBillingNote(no, { date: val('date'), method: val('method'), whtCode: val('wht') || null });
+        const made = receiveBillingNote(no, { date: val('date'), method: val('method'), whtCode: val('wht') || null,
+          bankAccount: val('bankAccount') });
+        rememberCashAcc('in', val('bankAccount'));
         toast('ออกใบเสร็จ ' + made.length + ' ใบแล้ว', 'ok',
           made.map((r) => r.no).join(', ') + ' · รับสุทธิ ' + fmt(made.reduce((s, r) => s + r.net, 0)) + ' บาท');
         return made;
@@ -834,22 +891,24 @@ function modalBillFromGrn(no) {
    จากแถบหัก ณ ที่จ่าย บังคับเลือกประเภทเงินได้ เพราะ 50 ทวิ ทุกใบต้องผูกกับการจ่ายเงินจริง
    =================================================================== */
 const EXP_ROWS = 3;
-function expenseLines() {
+function expenseRow(i) {
   const accs = [['', '— เลือกบัญชี —']].concat(expenseAccounts().map((a) => [a.code, a.code + ' ' + a.name]));
+  return '<tr><td><input name="e' + i + '_desc" placeholder="' + (i === 0 ? 'เช่น ค่าซ่อมเครื่องปรับอากาศ' : '') + '"></td>'
+    + '<td><select name="e' + i + '_acc">' + accs.map((o) => '<option value="' + esc(o[0]) + '">' + esc(o[1]) + '</option>').join('') + '</select></td>'
+    + '<td><input name="e' + i + '_qty" class="r" value="' + (i === 0 ? '1' : '') + '"></td>'
+    + '<td><input name="e' + i + '_price" class="r"></td>'
+    + '<td><select name="e' + i + '_tax">' + optVat.map((o) => '<option value="' + o[0] + '">' + esc(o[1]) + '</option>').join('') + '</select></td></tr>';
+}
+function expenseLines() {
   let h = '<div class="sub-h">รายการค่าใช้จ่าย</div><div class="scroll"><table class="lines"><thead><tr>'
-    + '<th>รายการ</th><th>บันทึกเข้าบัญชี</th><th class="r">จำนวน</th><th class="r">ราคาต่อหน่วย (ก่อนภาษี)</th><th>ภาษี</th></tr></thead><tbody>';
-  for (let i = 0; i < EXP_ROWS; i++) {
-    h += '<tr><td><input name="e' + i + '_desc" placeholder="' + (i === 0 ? 'เช่น ค่าซ่อมเครื่องปรับอากาศ' : '') + '"></td>'
-      + '<td><select name="e' + i + '_acc">' + accs.map((o) => '<option value="' + esc(o[0]) + '">' + esc(o[1]) + '</option>').join('') + '</select></td>'
-      + '<td><input name="e' + i + '_qty" class="r" value="' + (i === 0 ? '1' : '') + '"></td>'
-      + '<td><input name="e' + i + '_price" class="r"></td>'
-      + '<td><select name="e' + i + '_tax">' + optVat.map((o) => '<option value="' + o[0] + '">' + esc(o[1]) + '</option>').join('') + '</select></td></tr>';
-  }
-  return h + '</tbody></table></div><div class="jv-tot" id="expSum"></div>';
+    + '<th>รายการ</th><th>บันทึกเข้าบัญชี</th><th class="r">จำนวน</th><th class="r">ราคาต่อหน่วย (ก่อนภาษี)</th><th>ภาษี</th></tr></thead><tbody id="expRows">';
+  for (let i = 0; i < EXP_ROWS; i++) h += expenseRow(i);
+  return h + '</tbody></table></div>' + addRowBtn('exp') + '<div class="jv-tot" id="expSum"></div>';
 }
 function collectExpenseLines() {
   const out = [];
-  for (let i = 0; i < EXP_ROWS; i++) {
+  /* จำนวนบรรทัดไม่ตายตัว — ผู้ใช้กดเพิ่มบรรทัดได้ */
+  for (let i = 0; document.querySelector('[name="e' + i + '_desc"]'); i++) {
     const desc = val('e' + i + '_desc').trim();
     const price = val('e' + i + '_price');
     if (!desc && !price) continue;
@@ -869,7 +928,8 @@ function refreshExpenseSum() {
     const base = v.std + v.zero + v.exempt;
     let wht = 0;
     const code = val('wht');
-    if (code && base >= M('1000')) wht = round2(pct(base, resolveRate(code, date, { channel: val('channel') || 'manual' }).rate));
+    const wb = val('whtBase') ? M(val('whtBase')) : base;
+    if (code && base >= M('1000')) wht = round2(pct(wb, resolveRate(code, date, { channel: val('channel') || 'manual' }).rate));
     el.innerHTML = '<span>ก่อนภาษี <b>' + fmt(base) + '</b></span><span>ภาษีซื้อ <b>' + fmt(v.vat) + '</b></span>'
       + '<span>หัก ณ ที่จ่าย <b>' + fmt(wht) + '</b></span><span>จ่ายสุทธิ <b>' + fmt(v.total - wht) + '</b></span>';
   } catch (e) { el.textContent = ''; }
@@ -902,6 +962,8 @@ function modalExpense(opts) {
       + field({ name:'wht', label:'หักภาษี ณ ที่จ่าย (ประเภทเงินได้)', type:'select',
           value: first.whtCode || '', options: optWht(o.requireWht ? '— เลือกประเภทเงินได้ —' : null),
           hint:'เลือกผู้รับเงินแล้วระบบเติมประเภทที่ตั้งไว้ในทะเบียนให้' })
+      + field({ name:'whtBase', label:'ฐานภาษีหัก ณ ที่จ่าย', placeholder:'เว้นว่าง = ยอดก่อนภาษีทั้งหมด',
+          hint:'ระบุเองได้ เช่น ค่าบริการปนค่าอะไหล่ หักเฉพาะค่าบริการ · เงินที่จ่ายแทนไม่อยู่ในฐาน' })
       + (o.requireWht ? '' : field({ name:'channel', label:'ช่องทางนำส่งภาษี', type:'select', value:'manual',
           options:[['manual','หักและนำส่งเอง — ออก 50 ทวิ ให้'], ['e_wht','e-Withholding Tax — ธนาคารออกหลักฐานให้']] }))
       + field({ name:'note', label:'หมายเหตุ', wide:true })
@@ -913,7 +975,7 @@ function modalExpense(opts) {
         const e = recordExpense({
           partnerCode: val('expPartner'), date: val('date'), payFrom: val('payFrom'), method: val('method'),
           taxInvoiceNo: val('taxInvoiceNo'), nonClaimableVat: val('claim') === 'no',
-          whtCode: val('wht') || null, channel: o.requireWht ? 'manual' : val('channel'),
+          whtCode: val('wht') || null, whtBase: val('wht') ? val('whtBase') : null, channel: o.requireWht ? 'manual' : val('channel'),
           requireWht: !!o.requireWht, note: val('note'), lines: collectExpenseLines(),
         });
         if (o.requireWht && e.certNo) { STATE.screen = 'whtcert'; STATE.sel = e.certNo; }
