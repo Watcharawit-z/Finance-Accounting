@@ -303,6 +303,18 @@ function acc(code) {
   if (!a) throw new DomainError('ACCOUNT_NOT_FOUND', 'ไม่พบบัญชีรหัส ' + code);
   return a;
 }
+/** บัญชีของประเภทนี้ — ถ้าผังของบริษัทยังไม่มี (บริษัทที่สร้างก่อนเพิ่มประเภทนี้) สร้างให้ด้วยรหัสและชื่อที่กำหนด
+    ใช้กับบัญชีที่ระบบต้องลงเองแต่ผังรุ่นเก่าไม่มี ห้ามใช้แทนการให้ผู้ใช้เลือกบัญชี */
+function ensureAccount(subType, code, name, type) {
+  const a = DB.accounts.find((x) => x.subType === subType && x.postable);
+  if (a) return a.code;
+  let c = code;
+  for (let i = 1; DB.accounts.some((x) => x.code === c); i++) c = code + '-' + i;
+  DB.accounts.push({ code: c, name, type, subType, postable: true, requiresPartner: false, level: 3 });
+  DB.accounts.sort((x, y) => (x.code < y.code ? -1 : x.code > y.code ? 1 : 0));
+  audit('account', c, 'create', null, { name, subType }, 'ระบบสร้างบัญชีที่ต้องใช้แต่ผังบัญชีรุ่นเก่ายังไม่มี');
+  return c;
+}
 function accBySub(subType) {
   /* บัญชีหลักของประเภทนี้ (isDefault) มาก่อน — เช่นบัญชีลูกหนี้ที่ยกมาจากระบบเดิม เอกสารใหม่ต้องลงต่อบัญชีนั้น */
   const a = DB.accounts.find((x) => x.subType === subType && x.postable && x.isDefault)
