@@ -4477,6 +4477,30 @@ importOpeningStock = transactional(importOpeningStock);
 voidStockAdj = transactional(voidStockAdj);
 
 
+/* ===== settle.js ===== */
+/* ===================================================================
+   ระบบรับ–จ่ายชำระ: ส่วนต่างรับ/จ่าย เงินมัดจำรับ/จ่ายล่วงหน้า หักกลบเครดิต หนี้สูญ ใบลดหนี้จากผู้ขาย
+   =================================================================== */
+
+
+/* ===== bank.js ===== */
+/* ===================================================================
+   ระบบกระทบยอดธนาคาร: รายการเดินบัญชีรายบัญชี นำเข้าสเตทเมนต์ จับคู่กับใบสำคัญ
+   =================================================================== */
+
+
+/* ===== payroll.js ===== */
+/* ===================================================================
+   ระบบเงินเดือนส่วนขยาย: รายการเงินได้/เงินหักรายงวด ภ.ง.ด.1 รายคน ภ.ง.ด.1ก 50 ทวิ พนักงาน
+   =================================================================== */
+
+
+/* ===== assets.js ===== */
+/* ===================================================================
+   ระบบทรัพย์สินถาวรส่วนขยาย: ขาย/ตัดจำหน่าย ค่าเสื่อมย้อนหลัง · โครงการและงบประมาณ
+   =================================================================== */
+
+
 /* ===== seed.js ===== */
 /* ===================================================================
    ข้อมูลตัวอย่าง — บริษัทซื้อมาขายไปขนาดกลาง 6 เดือน
@@ -5303,6 +5327,15 @@ const STATE = {
   impResult: null,
 };
 const TODAY = '2026-07-31';
+
+/* ส่วนเสริมของแต่ละระบบ (ui-settle ui-bank ui-payroll ui-assets ...) ลงทะเบียนตัวรับเหตุการณ์ของตัวเองที่นี่
+   ไม่ต้องแก้ ui-actions.js · ตัวรับคืน true เมื่อจัดการเหตุการณ์นั้นแล้ว
+   EXTRA_DISPATCH: function (head, rest, arg) — ปุ่ม data-act="head:rest..."
+   EXTRA_CHANGE:   function (target, ev)       — ช่องเลือก/ช่องกรอกที่เปลี่ยนค่า
+   EXTRA_INPUT:    function (target, ev)       — พิมพ์ในช่องกรอก (คำนวณยอดสด) */
+const EXTRA_DISPATCH = [];
+const EXTRA_CHANGE = [];
+const EXTRA_INPUT = [];
 
 const esc = (s) => String(s === null || s === undefined ? '' : s)
   .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -12208,6 +12241,30 @@ function companyDispatch(arg, rest) {
 }
 
 
+/* ===== ui-settle.js ===== */
+/* ===================================================================
+   หน้าจอและแบบฟอร์มของระบบรับ–จ่ายชำระ (settle.js)
+   =================================================================== */
+
+
+/* ===== ui-bank.js ===== */
+/* ===================================================================
+   หน้าจอและแบบฟอร์มของระบบกระทบยอดธนาคาร (bank.js)
+   =================================================================== */
+
+
+/* ===== ui-payroll.js ===== */
+/* ===================================================================
+   หน้าจอ แบบฟอร์ม และเอกสารพิมพ์ของระบบเงินเดือน (payroll.js)
+   =================================================================== */
+
+
+/* ===== ui-assets.js ===== */
+/* ===================================================================
+   หน้าจอและแบบฟอร์มของทรัพย์สิน โครงการ และงบประมาณ (assets.js)
+   =================================================================== */
+
+
 /* ===== ui-actions.js ===== */
 /* ===================================================================
    การกระทำของผู้ใช้ — ปุ่มทุกปุ่มในระบบวิ่งมาจบที่นี่
@@ -13436,6 +13493,7 @@ function dispatch(act) {
   const arg = rest.join(':');
 
   if (peekDispatch(head, arg, rest)) return;
+  for (let i = 0; i < EXTRA_DISPATCH.length; i++) if (EXTRA_DISPATCH[i](head, rest, arg)) return;
   if (head === 'go')      { STATE.screen = arg; STATE.sel = null; STATE.filter = ''; render();
     if (arg === 'settings') refreshTrash().then(function () { if (STATE.screen === 'settings') render(); });
     return; }
@@ -13708,6 +13766,7 @@ function bindEvents() {
 
   document.addEventListener('input', function (ev) {
     if (ev.target.id === 'cmdkQ') { cmdkRefresh(); return; }
+    for (let i = 0; i < EXTRA_INPUT.length; i++) if (EXTRA_INPUT[i](ev.target, ev)) return;
     const n = ev.target.name || '';
     if (/^j\d+_(dr|cr)$/.test(n)) { refreshJvTotals(); return; }
     if (/^e\d+_(qty|price)$/.test(n)) { refreshExpenseSum(); return; }
@@ -13720,6 +13779,7 @@ function bindEvents() {
 
   document.addEventListener('change', function (ev) {
     const t = ev.target;
+    for (let i = 0; i < EXTRA_CHANGE.length; i++) if (EXTRA_CHANGE[i](t, ev)) return;
     if (t.id === 'periodSel') { STATE.period = t.value; STATE.sel = null; save(); render(); return; }
     if (t.id === 'prCopies')  { PRINT.copies = t.value; renderPrint(); return; }
     /* เปลี่ยนใบกำกับที่อ้างในใบลดหนี้/เพิ่มหนี้ — อัตราภาษีและสินค้าที่รับคืนได้เปลี่ยนตาม */

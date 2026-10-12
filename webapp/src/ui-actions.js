@@ -1225,6 +1225,7 @@ function dispatch(act) {
   const arg = rest.join(':');
 
   if (peekDispatch(head, arg, rest)) return;
+  for (let i = 0; i < EXTRA_DISPATCH.length; i++) if (EXTRA_DISPATCH[i](head, rest, arg)) return;
   if (head === 'go')      { STATE.screen = arg; STATE.sel = null; STATE.filter = ''; render();
     if (arg === 'settings') refreshTrash().then(function () { if (STATE.screen === 'settings') render(); });
     return; }
@@ -1497,6 +1498,7 @@ function bindEvents() {
 
   document.addEventListener('input', function (ev) {
     if (ev.target.id === 'cmdkQ') { cmdkRefresh(); return; }
+    for (let i = 0; i < EXTRA_INPUT.length; i++) if (EXTRA_INPUT[i](ev.target, ev)) return;
     const n = ev.target.name || '';
     if (/^j\d+_(dr|cr)$/.test(n)) { refreshJvTotals(); return; }
     if (/^e\d+_(qty|price)$/.test(n)) { refreshExpenseSum(); return; }
@@ -1509,6 +1511,7 @@ function bindEvents() {
 
   document.addEventListener('change', function (ev) {
     const t = ev.target;
+    for (let i = 0; i < EXTRA_CHANGE.length; i++) if (EXTRA_CHANGE[i](t, ev)) return;
     if (t.id === 'periodSel') { STATE.period = t.value; STATE.sel = null; save(); render(); return; }
     if (t.id === 'prCopies')  { PRINT.copies = t.value; renderPrint(); return; }
     /* เปลี่ยนใบกำกับที่อ้างในใบลดหนี้/เพิ่มหนี้ — อัตราภาษีและสินค้าที่รับคืนได้เปลี่ยนตาม */

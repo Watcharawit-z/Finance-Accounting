@@ -1,6 +1,6 @@
 /* ทดสอบเครื่องบัญชีในเบราว์เซอร์ — รันด้วย node webapp/test.js */
 const fs = require('fs');
-const src = ['engine','operations','stock','seed','import','verify'].map(f => fs.readFileSync(__dirname + '/src/' + f + '.js','utf8')).join('\n');
+const src = ['engine','operations','stock','settle','bank','payroll','assets','seed','import','verify'].map(f => fs.readFileSync(__dirname + '/src/' + f + '.js','utf8')).join('\n');
 const ctx = new Function(src + '\nreturn {DB,buildSeed,trialBalance,balanceSheet,incomeStatement,cashFlow,' +
   'reconciliationChecks,aging,issueInvoice,receivePayment,issueCreditNote,recordBill,payBill,' +
   'runPayroll,runDepreciation,fileVat,fileWht,post,reverse,fmt,M,validTaxId,DomainError,' +

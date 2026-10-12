@@ -16,6 +16,15 @@ const STATE = {
 };
 const TODAY = '2026-07-31';
 
+/* ส่วนเสริมของแต่ละระบบ (ui-settle ui-bank ui-payroll ui-assets ...) ลงทะเบียนตัวรับเหตุการณ์ของตัวเองที่นี่
+   ไม่ต้องแก้ ui-actions.js · ตัวรับคืน true เมื่อจัดการเหตุการณ์นั้นแล้ว
+   EXTRA_DISPATCH: function (head, rest, arg) — ปุ่ม data-act="head:rest..."
+   EXTRA_CHANGE:   function (target, ev)       — ช่องเลือก/ช่องกรอกที่เปลี่ยนค่า
+   EXTRA_INPUT:    function (target, ev)       — พิมพ์ในช่องกรอก (คำนวณยอดสด) */
+const EXTRA_DISPATCH = [];
+const EXTRA_CHANGE = [];
+const EXTRA_INPUT = [];
+
 const esc = (s) => String(s === null || s === undefined ? '' : s)
   .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 
