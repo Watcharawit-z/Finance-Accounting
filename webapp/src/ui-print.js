@@ -101,7 +101,9 @@ const DOC_PRINT = {
     find: (no) => DB.docs.invoice.find((d) => d.no === no),
     build: function (d, copy) {
       const term = Math.round((new Date(d.due) - new Date(d.date)) / 86400000);
-      return pSheet(pHead('ใบกำกับภาษี/ใบส่งของ', 'TAX INVOICE / DELIVERY ORDER', copy)
+      /* กิจการที่ไม่ได้จดทะเบียนภาษีมูลค่าเพิ่ม ออกใบกำกับภาษีไม่ได้ — พิมพ์เป็นใบแจ้งหนี้ */
+      return pSheet((d.nonVat ? pHead('ใบแจ้งหนี้/ใบส่งของ', 'INVOICE / DELIVERY ORDER', copy)
+        : pHead('ใบกำกับภาษี/ใบส่งของ', 'TAX INVOICE / DELIVERY ORDER', copy))
         + '<div class="p-meta">' + pParty('ลูกค้า', d.snap)
         + pInfo([['เลขที่', d.no], ['วันที่', thDate(d.date)], ['เครดิต', term > 0 ? term + ' วัน' : 'เงินสด'], ['ครบกำหนด', thDate(d.due)]]) + '</div>'
         + pTable(LINE_COLS, lineRows(d.lines), 8, PAGED)

@@ -1200,6 +1200,81 @@ function modalVoidRun(kind, period) {
   });
 }
 
+/* ยื่น ภ.พ.30: แสดงตัวเลขทุกบรรทัดก่อนยื่น และให้เลือกว่าภาษีที่ชำระเกินจะขอคืนเป็นเงินสดหรือยกไปหักเดือนถัดไป */
+function modalFileVat() {
+  const p = STATE.period;
+  const r = vatReturnOf(p);
+  const row = (n, label, v, strong) => '<div' + (strong ? ' class="gt"' : '') + '><span>' + n + '. ' + esc(label) + '</span><b>' + fmt(v) + '</b></div>';
+  modal({
+    title:'ยื่นแบบ ภ.พ.30 งวด ' + thPeriod(p),
+    sub:'ระบบปิดบัญชีภาษีขายและภาษีซื้อของงวดเป็นศูนย์ แล้วตั้งเป็นภาษีค้างชำระหรือภาษีขอคืน',
+    body:'<div class="reco">'
+      + row(5, 'ภาษีขายเดือนนี้', r.outTax)
+      + row(7, 'ภาษีซื้อเดือนนี้', r.inTax)
+      + (r.diff >= 0 ? row(8, 'ภาษีที่ต้องชำระเดือนนี้', r.diff) : row(9, 'ภาษีที่ชำระเกินเดือนนี้', -r.diff))
+      + row(10, 'ภาษีที่ชำระเกินยกมา', r.carryIn)
+      + (r.net >= 0 ? row(11, 'ภาษีสุทธิที่ต้องชำระ', r.net, true) : row(12, 'ภาษีสุทธิที่ชำระเกิน', -r.net, true))
+      + '</div>'
+      + (r.overpaid > 0 ? '<div class="flds">' + field({ name:'vatover', label:'ภาษีที่ชำระเกิน ' + fmt(r.overpaid) + ' บาท', type:'select', wide:true,
+          value:'carry', options:[['carry','ยกไปเป็นเครดิตภาษีเดือนถัดไป'], ['refund','ขอคืนเป็นเงินสด']],
+          hint:'ขอคืนเป็นเงินสด: ยอดค้างในบัญชีภาษีขอคืนจนได้รับเงิน — บันทึกรับเงินคืนด้วยสมุดรายวันรับ (Dr ธนาคาร / Cr ภาษีขอคืน)' }) + '</div>' : ''),
+    submitLabel:'ยื่นแบบและปิดภาษีงวดนี้',
+    onSubmit: function () {
+      submitAction(function () {
+        const f = fileVat(p, { refund: r.overpaid > 0 && val('vatover') === 'refund' });
+        STATE.screen = 'pp30';
+        toast('ยื่น ภ.พ.30 งวด ' + thPeriod(p) + ' แล้ว', 'ok',
+          f.payable >= 0 ? 'ต้องชำระ ' + fmt(f.payable) + ' บาท'
+            : f.refund ? 'ขอคืนเป็นเงินสด ' + fmt(f.refund) + ' บาท' : 'ชำระเกิน ' + fmt(f.carryOut) + ' บาท ยกไปเดือนถัดไป');
+        return f;
+      });
+    },
+  });
+}
+
+/* ยื่น ภ.ง.ด.: เลือกวันที่จ่ายจริงและบัญชีที่จ่าย — แบบที่ภาษีเป็นศูนย์ยื่นได้โดยไม่มีใบสำคัญ */
+function modalFileWht(form) {
+  const p = STATE.period;
+  const rows = whtRowsOf(p, form);
+  const total = rows.reduce((s, t) => s + t.tax, 0);
+  const banks = payFromAccounts().map((a) => [a.code, a.code + ' ' + a.name]);
+  modal({
+    title:'ยื่น ' + TAX_FORM_TH[form] + ' งวด ' + thPeriod(p),
+    sub: rows.length + ' รายการ · ภาษีที่ต้องนำส่ง ' + fmt(total) + ' บาท',
+    body:'<div class="flds">'
+      + (total ? field({ name:'wdate', label:'วันที่นำส่ง', type:'date', value: addDays(endOfMonth(p + '-01'), 7),
+            hint:'กำหนดยื่นกระดาษวันที่ 7 ยื่นออนไลน์ถึงวันที่ 15 ของเดือนถัดไป' })
+          + field({ name:'wacc', label:'จ่ายจากบัญชี', type:'select', options: banks, value: accBySub('bank') })
+        : '<div class="note wide">ภาษีที่หักรวมเป็นศูนย์ ยื่นแบบได้โดยไม่มีเงินต้องจ่าย ระบบจึงไม่สร้างใบสำคัญ</div>')
+      + '</div>',
+    submitLabel:'ยื่น ' + TAX_FORM_TH[form],
+    note: total ? 'Dr ภาษีหัก ณ ที่จ่ายค้างนำส่ง / Cr บัญชีที่จ่าย' : null,
+    onSubmit: function () {
+      submitAction(function () {
+        const f = fileWht(p, form, total ? { date: val('wdate'), account: val('wacc') } : {});
+        toast('ยื่น ' + TAX_FORM_TH[form] + ' แล้ว', 'ok', f.count + ' รายการ รวม ' + fmt(f.total) + ' บาท'
+          + (f.excluded ? ' · กันรายการ e-Withholding ออก ' + f.excluded + ' รายการ' : ''));
+        return f;
+      });
+    },
+  });
+}
+
+function modalYearEndReopen() {
+  modal({
+    title:'ยกเลิกการปิดบัญชีสิ้นปี',
+    sub:'ระบบกลับรายการใบปิดบัญชี รายได้และค่าใช้จ่ายของปีกลับมามียอดเหมือนก่อนปิด',
+    body:'<div class="flds">' + field({ name:'reason', label:'เหตุผล', wide:true, placeholder:'เช่น ผู้สอบบัญชีให้ปรับปรุงรายการก่อนปิดบัญชี' }) + '</div>',
+    submitLabel:'ยกเลิกการปิดบัญชีสิ้นปี', submitKind:'danger',
+    onSubmit: function () {
+      submitAction(function () {
+        const r = reopenFiscalYear(pEnd(), val('reason'));
+        toast('ยกเลิกการปิดบัญชีสิ้นปีแล้ว', 'ok', 'ใบกลับรายการ ' + r.no);
+        return r;
+      });
+    },
+  });
+}
 function modalReopen() {
   modal({
     title:'ขอเปิดงวด ' + thPeriod(STATE.period) + ' ใหม่',
@@ -1413,6 +1488,14 @@ function dispatch(act) {
   }
   if (head === 'cn')      { modalCreditNote(arg); return; }
   if (head === 'refund')  { modalRefund(arg); return; }
+  if (head === 'yearend') {
+    if (arg === 'reopen') { modalYearEndReopen(); return; }
+    runAction(function () {
+      const r = closeFiscalYear(pEnd());
+      toast('ปิดบัญชีสิ้นปีแล้ว ' + r.entry.no, 'ok', (r.profit >= 0 ? 'กำไร' : 'ขาดทุน') + 'สุทธิ ' + fmt(Math.abs(r.profit)) + ' บาท โอนเข้ากำไรสะสม');
+    });
+    return;
+  }
   if (head === 'newyear') {
     runAction(function () {
       const made = openNextFiscalYear('เปิดจากหน้าปิดงวด');
@@ -1458,17 +1541,8 @@ function dispatch(act) {
       const r = runPayroll(STATE.period);
       toast('ทำเงินเดือน ' + r.count + ' คนแล้ว', 'ok', 'จ่ายสุทธิ ' + fmt(r.net) + ' บาท');
     });
-    if (arg === 'pp30') return void runAction(function () {
-      const f = fileVat(STATE.period);
-      STATE.screen = 'pp30';
-      toast('ยื่น ภ.พ.30 งวด ' + thPeriod(STATE.period) + ' แล้ว', 'ok',
-        f.payable >= 0 ? 'ต้องชำระ ' + fmt(f.payable) + ' บาท' : 'ชำระเกิน ' + fmt(-f.payable) + ' บาท ยกไปเดือนถัดไป');
-    });
-    if (rest[0] === 'pnd') return void runAction(function () {
-      const f = fileWht(STATE.period, rest[1]);
-      toast('ยื่น ' + rest[1] + ' แล้ว', 'ok', f.count + ' รายการ รวม ' + fmt(f.total) + ' บาท'
-        + (f.excluded ? ' · กันรายการ e-Withholding ออก ' + f.excluded + ' รายการ' : ''));
-    });
+    if (arg === 'pp30') return void modalFileVat();
+    if (rest[0] === 'pnd') return void modalFileWht(rest[1]);
     return;
   }
 
@@ -1696,8 +1770,12 @@ function modalBlank() {
       + field({ name:'coname', label:'ชื่อผู้ประกอบการ', wide:true, placeholder:'บริษัท ... จำกัด' })
       + field({ name:'cotax', label:'เลขประจำตัวผู้เสียภาษี 13 หลัก', placeholder:'เว้นว่างไว้ก่อนได้',
           hint:'ถ้าใส่ ระบบจะตรวจหลักที่ 13 ให้ทันที' })
-      + field({ name:'coyear', label:'ปีของรอบบัญชี (ค.ศ.)', value: String(yr),
+      + field({ name:'coyear', label:'ปีที่รอบบัญชีเริ่ม (ค.ศ.)', value: String(yr),
           hint:'ระบบจะสร้างงวดรายเดือน 12 งวดให้' })
+      + field({ name:'costart', label:'รอบบัญชีเริ่มเดือน', type:'select', value:'1',
+          options:[['1','มกราคม (ปีปฏิทิน)'],['2','กุมภาพันธ์'],['3','มีนาคม'],['4','เมษายน'],['5','พฤษภาคม'],['6','มิถุนายน'],
+            ['7','กรกฎาคม'],['8','สิงหาคม'],['9','กันยายน'],['10','ตุลาคม'],['11','พฤศจิกายน'],['12','ธันวาคม']],
+          hint:'ตามที่จดทะเบียนไว้ ส่วนใหญ่ 1 ม.ค. – 31 ธ.ค.' })
       + field({ name:'coaddr', label:'ที่อยู่สถานประกอบการ', wide:true,
           placeholder:'ที่อยู่ที่จะพิมพ์ลงใบกำกับภาษีทุกใบ' })
       + '</div>',
@@ -1707,7 +1785,7 @@ function modalBlank() {
       if (!window.confirm('ลบข้อมูลทั้งหมดของ "' + DB.company.name + '" และเริ่มจากบริษัทเปล่า?')) return;
       submitAction(function () {
         const c = buildBlank({ name: val('coname'), taxId: val('cotax'),
-          address: val('coaddr'), year: val('coyear') });
+          address: val('coaddr'), year: val('coyear'), startMonth: val('costart') });
         STATE.period = DB.periods[0].code;
         STATE.imp = null; STATE.impResult = null; STATE.sel = null;
         toast('สร้างบริษัท ' + c.name + ' แล้ว', 'ok', 'ผังบัญชี ' + DB.accounts.length + ' บัญชี · ยังไม่มีรายการใด ๆ');
@@ -1725,7 +1803,11 @@ function modalNewCompany() {
     body:'<div class="flds">'
       + field({ name:'coname', label:'ชื่อผู้ประกอบการ', wide:true, placeholder:'บริษัท ... จำกัด' })
       + field({ name:'cotax', label:'เลขประจำตัวผู้เสียภาษี 13 หลัก', placeholder:'เว้นว่างไว้ก่อนได้' })
-      + field({ name:'coyear', label:'ปีของรอบบัญชี (ค.ศ.)', value: String(yr) })
+      + field({ name:'coyear', label:'ปีที่รอบบัญชีเริ่ม (ค.ศ.)', value: String(yr) })
+      + field({ name:'costart', label:'รอบบัญชีเริ่มเดือน', type:'select', value:'1',
+          options:[['1','มกราคม (ปีปฏิทิน)'],['2','กุมภาพันธ์'],['3','มีนาคม'],['4','เมษายน'],['5','พฤษภาคม'],['6','มิถุนายน'],
+            ['7','กรกฎาคม'],['8','สิงหาคม'],['9','กันยายน'],['10','ตุลาคม'],['11','พฤศจิกายน'],['12','ธันวาคม']],
+          hint:'ตามที่จดทะเบียนไว้ ส่วนใหญ่ 1 ม.ค. – 31 ธ.ค.' })
       + field({ name:'coaddr', label:'ที่อยู่สถานประกอบการ', wide:true,
           placeholder:'ที่อยู่ที่จะพิมพ์ลงใบกำกับภาษีทุกใบ' })
       + '</div>'
@@ -1734,7 +1816,7 @@ function modalNewCompany() {
     onSubmit: function () {
       const name = val('coname').trim();
       if (!name) { toast('ต้องใส่ชื่อผู้ประกอบการ', 'err'); return; }
-      const opts = { name: name, taxId: val('cotax'), address: val('coaddr'), year: val('coyear') };
+      const opts = { name: name, taxId: val('cotax'), address: val('coaddr'), year: val('coyear'), startMonth: val('costart') };
       /* ตรวจให้ผ่านก่อน แล้วค่อยแตะข้อมูลบริษัทที่เปิดอยู่ */
       try { blankState(); buildBlankCheck(opts); }
       catch (e) {
@@ -1761,6 +1843,8 @@ function buildBlankCheck(o) {
       'ปีของรอบบัญชีต้องเป็น ค.ศ. ระหว่าง 2000 ถึง 2100 (ได้รับ "' + o.year + '")',
       'ปี พ.ศ. 2569 คือ ค.ศ. 2026');
   }
+  const sm = o.startMonth === undefined || o.startMonth === '' ? 1 : Number(o.startMonth);
+  if (!Number.isInteger(sm) || sm < 1 || sm > 12) throw new DomainError('FISCAL_START_INVALID', 'เดือนเริ่มรอบบัญชีต้องเป็น 1 ถึง 12');
 }
 
 async function createCompany(opts) {

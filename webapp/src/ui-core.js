@@ -14,7 +14,16 @@ const STATE = {
   imp: null,          // สถานะการนำเข้าไฟล์
   impResult: null,
 };
-const TODAY = '2026-07-31';
+/* "วันนี้" — ข้อมูลตัวอย่างเดินถึง 31 ก.ค. 2569 เสมอ บริษัทจริงใช้วันที่จริงของเครื่อง
+   ใช้ตัดสินเอกสารเลยกำหนด ใบเสนอราคาหมดอายุ วันที่พิมพ์ และวันที่เริ่มต้นในแบบฟอร์ม
+   เดิมตรึงไว้ที่ 31 ก.ค. 2569 สำหรับทุกบริษัท ใบที่เลยกำหนดจริงจึงไม่เคยขึ้นว่าเลยกำหนด */
+const DEMO_TODAY = '2026-07-31';
+let TODAY = DEMO_TODAY;
+function syncToday() {
+  const d = new Date();
+  const real = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  TODAY = DB.company && DB.isDemo === false ? real : DEMO_TODAY;
+}
 
 /* ส่วนเสริมของแต่ละระบบ (ui-settle ui-bank ui-payroll ui-assets ...) ลงทะเบียนตัวรับเหตุการณ์ของตัวเองที่นี่
    ไม่ต้องแก้ ui-actions.js · ตัวรับคืน true เมื่อจัดการเหตุการณ์นั้นแล้ว
@@ -582,6 +591,7 @@ function renderTopTools() {
 
 function render() {
   PEEK.reg.length = 0;      // ตัวเลขที่เจาะดูได้ ลงทะเบียนใหม่ทุกครั้งที่วาดหน้า
+  syncToday();
   /* ★ ตอนที่ยังใส่รหัสผ่านไม่ผ่าน ยังไม่มีข้อมูลบริษัทให้วาดแถบบนและเมนู
      ต้องออกก่อนแตะ DB.company ไม่งั้นหน้าจอขาวทั้งหน้า */
   if (SYNC.status === 'locked') {

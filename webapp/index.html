@@ -1096,6 +1096,15 @@ function accBySub(subType) {
 /* ===================================================================
    งวดบัญชี
    =================================================================== */
+/** ปีบัญชีของวันที่นี้ — งวดเรียงต่อกันปีละ 12 งวดนับจากงวดแรกของบริษัท (รอบบัญชีเริ่มเดือนไหนก็ได้) */
+function fiscalYearOf(date) {
+  const ps = DB.periods.slice().sort((a, b) => (a.start < b.start ? -1 : 1));
+  const i = ps.findIndex((p) => date >= p.start && date <= p.end);
+  if (i < 0) return null;
+  const list = ps.slice(i - (i % 12), i - (i % 12) + 12);
+  return { start: list[0].start, end: list[list.length - 1].end, periods: list, complete: list.length === 12,
+    label: thDate(list[0].start) + ' – ' + thDate(list[list.length - 1].end) };
+}
 function periodFor(date) {
   const p = DB.periods.find((x) => date >= x.start && date <= x.end);
   if (!p) {
@@ -1283,8 +1292,33 @@ function txRestore(snap) {
 function atomically(fn) {
   if (TX_BULK > 0) return fn();
   const snap = txSnapshot();
-  try { return fn(); }
+  const taxBefore = DB.taxTx.length;
+  try {
+    const r = fn();
+    assertTaxRowsOpen(taxBefore);
+    return r;
+  }
   catch (e) { txRestore(snap); throw e; }
+}
+/* ★ เอกสารที่มีภาษีลงวันที่ในเดือนที่ยื่นแบบไปแล้ว ภาษีจะค้างอยู่ในบัญชีโดยไม่เข้าแบบไหนเลย
+   (แบบยื่นแล้วยื่นซ้ำไม่ได้) ตรวจทุกคำสั่งที่เขียนข้อมูลจากแถวทะเบียนภาษีที่เพิ่งเกิด
+   จึงครอบคลุมเอกสารทุกชนิด รวมถึงชนิดที่เพิ่มทีหลัง โดยไม่ต้องไล่ใส่ทีละคำสั่ง */
+const TAX_FORM_TH = { PP30:'ภ.พ.30', PND1:'ภ.ง.ด.1', PND3:'ภ.ง.ด.3', PND53:'ภ.ง.ด.53' };
+function assertTaxRowsOpen(from) {
+  DB.taxTx.slice(from).forEach(function (t) {
+    /* แถวที่เข้าแบบไปแล้ว (มีเลขอ้างอิงการยื่น) ไม่ใช่ปัญหา — ปัญหาคือแถวที่เกิดหลังยื่นแล้วไม่มีแบบไหนรับ */
+    if (t.void || t.filingId) return;
+    const vat = t.kind === 'vat_output' || t.kind === 'vat_input';
+    if (vat && !t.tax && !t.base && !t.zero && !t.exempt && !t.nonClaimable) return;
+    if (!vat && (t.kind !== 'wht' || !t.tax || t.channel === 'e_wht')) return;
+    const form = vat ? 'PP30' : t.form;
+    if (!DB.docs.filing.some((f) => f.form === form && f.period === t.period)) return;
+    throw new DomainError('TAX_PERIOD_FILED',
+      'ยื่นแบบ ' + TAX_FORM_TH[form] + ' งวด ' + thPeriod(t.period) + ' ไปแล้ว — เอกสารที่มีภาษีลงวันที่ในเดือนนั้นไม่ได้',
+      t.kind === 'vat_input' ? 'ลงวันที่ที่ได้รับใบกำกับภาษีในเดือนที่ยังไม่ได้ยื่น (ภาษีซื้อขอหักได้ภายใน 6 เดือนนับจากเดือนในใบกำกับ)'
+        : t.kind === 'vat_output' ? 'ออกเอกสารด้วยวันที่ของเดือนปัจจุบัน หรือยื่นแบบเพิ่มเติมกับกรมสรรพากรก่อน'
+        : 'ใช้วันที่จ่ายเงินจริงในเดือนที่ยังไม่ได้ยื่น หรือยื่นแบบเพิ่มเติมกับกรมสรรพากรก่อน');
+  });
 }
 function transactional(fn) {
   return function () { const a = arguments, t = this; return atomically(() => fn.apply(t, a)); };
@@ -1316,6 +1350,7 @@ const ENTRY_FROM = {
   depreciation:['ค่าเสื่อมราคาประจำงวด', 'ไปที่หน้าค่าเสื่อมราคาแล้วกดยกเลิกงวด ระบบจะคืนค่าเสื่อมสะสมของทรัพย์สินให้ด้วย'],
   filing:['การยื่นแบบภาษี', 'แบบที่ยื่นแล้วต้องยื่นเพิ่มเติมกับกรมสรรพากร แล้วบันทึกปรับปรุงแทน'],
   import:['การนำเข้าข้อมูล', 'ยกเลิกที่หน้านำเข้าข้อมูลจากระบบเดิม'],
+  yearEnd:['การปิดบัญชีสิ้นปี', 'ไปที่หน้าปิดงวดของเดือนสุดท้ายของปีแล้วกดยกเลิกการปิดบัญชีสิ้นปี'],
   stockAdj:['ใบปรับปรุงสินค้า', 'เปิดใบปรับปรุงสินค้าที่หน้าสินค้า → ยอดยกมา ตรวจนับ ตัดจำหน่าย แล้วกดยกเลิก'],
   reversal:['การกลับรายการ', 'กลับรายการซ้อนไม่ได้ ให้บันทึกใบสำคัญใหม่แทน'],
 };
@@ -1336,7 +1371,8 @@ function reverse(entryNo, reason, date, opts) {
       'การกลับรายการต้องระบุเหตุผล เพื่อให้ผู้สอบบัญชีตรวจสอบได้ภายหลัง');
   }
   const rev = post({
-    type: 'adjustment',
+    /* กลับรายการปิดบัญชีสิ้นปียังเป็นรายการปิดบัญชี — งบกำไรขาดทุนต้องไม่นับทั้งคู่ */
+    type: e.type === 'closing' ? 'closing' : 'adjustment',
     date: date || e.date,
     desc: 'กลับรายการ ' + e.no + ': ' + reason.trim(),
     src: 'reversal', srcId: e.no,
@@ -1415,6 +1451,9 @@ function trialBalance(from, to) {
     let od = 0, dr = 0, cr = 0;
     DB.entries.forEach(function (e) {
       if (!LIVE(e)) return;
+      /* งบทดลองของช่วงที่มีวันปิดบัญชีสิ้นปี แสดงก่อนปิดบัญชี (บัญชีรายได้/ค่าใช้จ่ายยังมียอดทั้งปี)
+         ส่วนช่วงหลังจากนั้นยกยอดหลังปิดบัญชีมาแล้ว รายได้/ค่าใช้จ่ายเริ่มที่ศูนย์ กำไรอยู่ในกำไรสะสม */
+      if (e.type === 'closing' && e.date >= from && e.date <= to) return;
       e.lines.forEach(function (l) {
         if (l.acc !== a.code) return;
         if (e.date < from) od += l.dr - l.cr;
@@ -1512,7 +1551,8 @@ function incomeStatement(from, to) {
   const out = [];
   PL_LINES.forEach(function (L) {
     if (L.k === 'd') {
-      const v = balBySub(L.sub, to, from) * L.sign;
+      /* ใบปิดบัญชีสิ้นปีโอนรายได้/ค่าใช้จ่ายเข้ากำไรสะสม — ถ้านับด้วย กำไรทั้งปีจะเป็นศูนย์ */
+      const v = balBySub(L.sub, to, from, notClosingEntry) * L.sign;
       vals[L.label] = v;
       out.push({ ...L, value: v });
     } else out.push({ ...L });
@@ -1538,6 +1578,7 @@ function incomeStatement(from, to) {
 /* ---------- งบแสดงการเปลี่ยนแปลงส่วนของผู้ถือหุ้น ----------
    ยอดต้นงวดรวมใบสำคัญยอดยกมาที่ลงวันแรกของงวดด้วย · ยอดปลายงวดต้องเท่ากับงบแสดงฐานะการเงิน */
 const RETAINED_SUB = ['retained_earnings', 'current_year_earnings', 'dividend', 'opening_balance'];
+const notClosingEntry = (e) => e.type !== 'closing';
 function equityStatement(from, to) {
   const before = addDays(from, -1);
   const isOpen = isOpeningEntry;
@@ -1551,7 +1592,7 @@ function equityStatement(from, to) {
   /* กำไรขาดทุนในใบยอดยกมาที่ลงกลางปี คือกำไรสะสมตั้งแต่ต้นปีถึงวันตัดยอด เป็นกำไรของปีนี้
      ต้องนับเป็นกำไรสุทธิของงวดให้ตรงกับงบกำไรขาดทุน ไม่ใช่ย้ายไปเป็นยอดต้นงวด (สองงบจะขัดกัน) */
   const ret = { open: opening(RETAINED_SUB) - bal(pnl, before), close: closing(RETAINED_SUB) + closing(pnl) };
-  const net = -balanceOf(pnl, to, from);
+  const net = -balanceOf(pnl, to, from, notClosingEntry);
   const dividend = -balBySub(['dividend'], to, from, notOpen);
   const capMove = cap.close - cap.open;
   const resMove = res.close - res.open;
@@ -2796,29 +2837,63 @@ function runPayroll(period) {
 }
 
 /* ---------- ปิดภาษีมูลค่าเพิ่มรายเดือน (ภ.พ.30) ---------- */
-function fileVat(period) {
+/* ภาษีที่ชำระเกินยกมา = ยอดยกไปของ ภ.พ.30 ฉบับล่าสุดก่อนงวดนี้ (ฉบับที่ขอคืนเป็นเงินสด ไม่มียอดยกไป) */
+function vatCarryInOf(period) {
+  const prev = DB.docs.filing.filter((f) => f.form === 'PP30' && f.period < period)
+    .sort((a, b) => (a.period < b.period ? 1 : -1))[0];
+  return prev ? (prev.carryOut || 0) : 0;
+}
+
+/* ตัวเลขทุกบรรทัดของแบบ ภ.พ.30 — ใช้ทั้งตอนยื่นจริงและหน้าตัวอย่างก่อนยื่น ตัวเลขจึงตรงกันเสมอ */
+function vatReturnOf(period) {
+  /* แถวของเอกสารที่ยกเลิกแล้วยอดเป็นศูนย์ ไม่นับเข้าแบบ แต่ยังโชว์ในรายงานภาษีว่า "ยกเลิก" */
+  const out = DB.taxTx.filter((t) => t.kind === 'vat_output' && t.period === period && !t.void);
+  const inn = DB.taxTx.filter((t) => t.kind === 'vat_input' && t.period === period && !t.void);
+  const sum = (rows, k) => rows.reduce((s, t) => s + (t[k] || 0), 0);
+  const outBase = sum(out, 'base'), outZero = sum(out, 'zero'), outExempt = sum(out, 'exempt');
+  const outTax = sum(out, 'tax'), inTax = sum(inn, 'tax');
+  const diff = outTax - inTax;                 // บรรทัด 8 (บวก) หรือ 9 (ลบ)
+  const carryIn = vatCarryInOf(period);        // บรรทัด 10
+  const net = diff - carryIn;                  // บวก = บรรทัด 11 ต้องชำระ · ลบ = บรรทัด 12 ชำระเกินสุทธิ
+  return { out, inn, outBase, outZero, outExempt, outTax, inBase: sum(inn, 'base'), inTax,
+    diff, carryIn, net, payable: net, overpaid: net < 0 ? -net : 0 };
+}
+
+function fileVat(period, opts) {
+  opts = opts || {};
   const existing = DB.docs.filing.find((f) => f.form === 'PP30' && f.period === period);
   if (existing) {
     throw new DomainError('ALREADY_FILED',
       'ยื่น ภ.พ.30 งวด ' + thPeriod(period) + ' ไปแล้วเมื่อ ' + thDate(existing.filedDate));
   }
-  /* แถวของเอกสารที่ยกเลิกแล้วยอดเป็นศูนย์ ไม่นับเข้าแบบ แต่ยังโชว์ในรายงานภาษีว่า "ยกเลิก" */
-  const out = DB.taxTx.filter((t) => t.kind === 'vat_output' && t.period === period && !t.void);
-  const inn = DB.taxTx.filter((t) => t.kind === 'vat_input' && t.period === period && !t.void);
-  const outTax = out.reduce((s, t) => s + t.tax, 0);
-  const inTax = inn.reduce((s, t) => s + t.tax, 0);
-  const payable = outTax - inTax;
+  /* ยื่นเรียงเดือน — ภาษีชำระเกินยกมาของเดือนนี้มาจากแบบเดือนก่อน ข้ามเดือนไปแล้วยอดยกมาผิดทั้งสาย */
+  const missing = DB.taxTx.filter((t) => (t.kind === 'vat_output' || t.kind === 'vat_input') && !t.void
+    && t.period < period && !t.filingId && (t.tax || t.base || t.zero || t.exempt)
+    && !DB.docs.filing.some((f) => f.form === 'PP30' && f.period === t.period))
+    .map((t) => t.period).sort()[0];
+  if (missing) {
+    throw new DomainError('VAT_FILE_ORDER', 'ต้องยื่น ภ.พ.30 งวด ' + thPeriod(missing) + ' ก่อน แล้วค่อยยื่นงวด ' + thPeriod(period),
+      'ภาษีที่ชำระเกินยกมาของเดือนถัดไปมาจากแบบของเดือนก่อน');
+  }
+  const r = vatReturnOf(period);
+  const refund = opts.refund && r.overpaid > 0 ? r.overpaid : 0;
+  const carryOut = r.overpaid - refund;
   const endDate = endOfMonth(period + '-01');
 
   /* ล้างบัญชีภาษีขายและภาษีซื้อของงวดให้เป็นศูนย์ทุกครั้งที่มียอด แม้ผลสุทธิเป็นศูนย์
      (ภาษีขาย 70 ภาษีซื้อ 70 ต้องล้างทั้งคู่ ไม่ใช่ค้างอยู่ในงบ) และรองรับยอดติดลบ
-     (เดือนที่มีแต่ใบลดหนี้ ภาษีขายติดลบ ต้องกลับไปอยู่ฝั่งเครดิต) */
-  const signed = (acc, amt) => amt > 0 ? { acc, dr: amt } : { acc, cr: -amt };
+     (เดือนที่มีแต่ใบลดหนี้ ภาษีขายติดลบ ต้องกลับไปอยู่ฝั่งเครดิต)
+     ภาษีชำระเกินยกมาที่ใช้หักในเดือนนี้ ล้างออกจากบัญชีภาษีขอคืน (เครดิต) ส่วนที่ชำระเกินเพิ่มตั้งเป็นภาษีขอคืน (เดบิต)
+     ขอคืนเป็นเงินสด: ยอดยังค้างในบัญชีภาษีขอคืนจนกว่าจะได้รับเงินคืน แต่ไม่ยกไปหักเดือนถัดไป */
+  const signed = (acc, amt, memo) => amt > 0 ? { acc, dr: amt, memo } : { acc, cr: -amt, memo };
+  const recvDelta = r.overpaid - r.carryIn;
   const vatLines = [
-    signed(accBySub('output_vat'), outTax),
-    signed(accBySub('input_vat'), -inTax),
-    payable > 0 ? { acc: accBySub('vat_payable'), cr: payable } : { acc: accBySub('vat_receivable'), dr: -payable },
-  ].filter((l) => (l.dr || 0) !== 0 || (l.cr || 0) !== 0);
+    signed(accBySub('output_vat'), r.outTax),
+    signed(accBySub('input_vat'), -r.inTax),
+    r.net > 0 ? { acc: accBySub('vat_payable'), cr: r.net } : null,
+    signed(accBySub('vat_receivable'), recvDelta,
+      refund ? 'ขอคืนเป็นเงินสด ' + fmt(refund) + ' บาท' : r.carryIn ? 'ภาษีชำระเกินยกมา ' + fmt(r.carryIn) + ' บาท' : null),
+  ].filter((l) => l && ((l.dr || 0) !== 0 || (l.cr || 0) !== 0));
   const je = vatLines.length ? post({
     type: 'adjustment', date: endDate,
     desc: 'ปิดภาษีมูลค่าเพิ่มงวด ' + thPeriod(period),
@@ -2829,49 +2904,69 @@ function fileVat(period) {
   const filing = {
     form: 'PP30', period, filedDate: endDate,
     dueDate: addDays(endOfMonth(period + '-01'), 15),
-    outBase: out.reduce((s, t) => s + t.base, 0),
-    outZero: out.reduce((s, t) => s + (t.zero || 0), 0),
-    outTax, inBase: inn.reduce((s, t) => s + t.base, 0), inTax,
-    payable, entryNo: je ? je.no : null, count: out.length + inn.length,
+    outBase: r.outBase, outZero: r.outZero, outExempt: r.outExempt,
+    outTax: r.outTax, inBase: r.inBase, inTax: r.inTax,
+    diff: r.diff, carryIn: r.carryIn, carryOut, refund,
+    payable: r.net, entryNo: je ? je.no : null, count: r.out.length + r.inn.length,
   };
   DB.docs.filing.unshift(filing);
-  out.concat(inn).forEach((t) => { t.filingId = 'PP30|' + period; });
-  audit('filing', 'PP30|' + period, 'file', null, { payable: fmt(payable) });
+  r.out.concat(r.inn).forEach((t) => { t.filingId = 'PP30|' + period; });
+  audit('filing', 'PP30|' + period, 'file', null, { payable: fmt(r.net), carryIn: fmt(r.carryIn),
+    carryOut: fmt(carryOut), refund: fmt(refund) });
   return filing;
 }
 
 /* ---------- ยื่นภาษีหัก ณ ที่จ่าย ---------- */
-function fileWht(period, form) {
+const WHT_FORM_SUB = { PND1: 'wht_payable_pnd1', PND3: 'wht_payable_pnd3', PND53: 'wht_payable_pnd53' };
+function whtRowsOf(period, form) {
+  // ★ กันรายการที่ธนาคารนำส่งแทน (e-WHT) ออก ไม่งั้นนำส่งซ้ำ
+  return DB.taxTx.filter((t) => t.kind === 'wht' && t.period === period
+    && t.form === form && t.channel === 'manual' && !t.void);
+}
+
+/* opts.date วันที่จ่ายจริง (ค่าเริ่มต้นวันที่ 7 ของเดือนถัดไป) · opts.account บัญชีเงินสด/ธนาคารที่จ่าย
+   opts.nil ยื่นแบบไม่มีรายการ (ภ.ง.ด.1 ต้องยื่นทุกเดือนที่มีลูกจ้าง แม้ไม่มีภาษีหัก) — ไม่มีใบสำคัญ */
+function fileWht(period, form, opts) {
+  opts = opts || {};
+  if (!WHT_FORM_SUB[form]) throw new DomainError('WHT_FORM_UNKNOWN', 'ไม่รู้จักแบบ ' + form);
   const key = form + '|' + period;
   if (DB.docs.filing.find((f) => f.form === form && f.period === period)) {
-    throw new DomainError('ALREADY_FILED', 'ยื่น ' + form + ' งวด ' + thPeriod(period) + ' ไปแล้ว');
+    throw new DomainError('ALREADY_FILED', 'ยื่น ' + TAX_FORM_TH[form] + ' งวด ' + thPeriod(period) + ' ไปแล้ว');
   }
-  // ★ กันรายการที่ธนาคารนำส่งแทน (e-WHT) ออก ไม่งั้นนำส่งซ้ำ
-  const rows = DB.taxTx.filter((t) => t.kind === 'wht' && t.period === period
-    && t.form === form && t.channel === 'manual' && !t.void);
-  if (!rows.length) {
+  const rows = whtRowsOf(period, form);
+  if (!rows.length && !opts.nil) {
     throw new DomainError('NOTHING_TO_FILE',
-      'ไม่มีรายการที่ต้องยื่นใน ' + form + ' งวด ' + thPeriod(period),
+      'ไม่มีรายการที่ต้องยื่นใน ' + TAX_FORM_TH[form] + ' งวด ' + thPeriod(period),
       'รายการที่นำส่งผ่าน e-Withholding Tax ธนาคารนำส่งให้แล้ว ไม่ต้องยื่นซ้ำ');
   }
   const total = rows.reduce((s, t) => s + t.tax, 0);
   const endDate = endOfMonth(period + '-01');
-  /* นำส่งภาษีเดือนธันวาคมเกิดในเดือนมกราคมปีถัดไป — ถ้ายังไม่มีงวดปีหน้า เปิดให้ก่อน */
-  const remitDate = addDays(endDate, 7);
-  if (!DB.periods.some((x) => remitDate >= x.start && remitDate <= x.end)) {
-    openNextFiscalYear('ต้องบันทึกการนำส่ง ' + form + ' งวด ' + thPeriod(period) + ' ในเดือนถัดไป');
+  const remitDate = opts.date || addDays(endDate, 7);
+  if (remitDate <= endDate) {
+    throw new DomainError('WHT_REMIT_DATE', 'วันที่นำส่งต้องอยู่หลังสิ้นงวด ' + thPeriod(period),
+      'ภาษีหัก ณ ที่จ่ายนำส่งในเดือนถัดไป');
   }
-  const acctSub = form === 'PND1' ? 'wht_payable_pnd1' : form === 'PND3' ? 'wht_payable_pnd3' : 'wht_payable_pnd53';
-
-  const je = post({
-    type: 'payment', date: addDays(endDate, 7),
-    desc: 'นำส่งภาษีหัก ณ ที่จ่าย ' + form + ' งวด ' + thPeriod(period),
+  const payAcc = opts.account || accBySub('bank');
+  if (total) {
+    const pa = DB.accounts.find((a) => a.code === payAcc);
+    if (!pa || !pa.postable || (pa.subType !== 'cash' && pa.subType !== 'bank')) {
+      throw new DomainError('PAY_ACCOUNT_INVALID', 'บัญชีที่จ่ายต้องเป็นบัญชีเงินสดหรือเงินฝากธนาคาร');
+    }
+    /* นำส่งภาษีเดือนสุดท้ายของปีเกิดในปีบัญชีถัดไป — ถ้ายังไม่มีงวดปีหน้า เปิดให้ก่อน */
+    if (!DB.periods.some((x) => remitDate >= x.start && remitDate <= x.end)) {
+      openNextFiscalYear('ต้องบันทึกการนำส่ง ' + TAX_FORM_TH[form] + ' งวด ' + thPeriod(period) + ' ในเดือนถัดไป');
+    }
+  }
+  /* แบบที่ภาษีเป็นศูนย์ (ทุกแถวต่ำกว่าเกณฑ์ หรือยื่นไม่มีรายการ) ยื่นได้แต่ไม่มีเงินต้องจ่าย จึงไม่มีใบสำคัญ */
+  const je = total ? post({
+    type: 'payment', date: remitDate,
+    desc: 'นำส่งภาษีหัก ณ ที่จ่าย ' + TAX_FORM_TH[form] + ' งวด ' + thPeriod(period),
     src: 'filing', srcId: key,
-    lines: [{ acc: accBySub(acctSub), dr: total }, { acc: accBySub('bank'), cr: total }],
-  });
-  const filing = { form, period, filedDate: addDays(endDate, 7), dueDate: addDays(endDate, 7),
-    count: rows.length, total, entryNo: je.no,
-    excluded: DB.taxTx.filter((t) => t.kind === 'wht' && t.period === period && t.channel === 'e_wht' && !t.void).length };
+    lines: [{ acc: accBySub(WHT_FORM_SUB[form]), dr: total }, { acc: payAcc, cr: total }],
+  }) : null;
+  const filing = { form, period, filedDate: remitDate, dueDate: addDays(endDate, 7),
+    count: rows.length, total, entryNo: je ? je.no : null, payAccount: total ? payAcc : null, nil: !rows.length,
+    excluded: DB.taxTx.filter((t) => t.kind === 'wht' && t.period === period && t.form === form && t.channel === 'e_wht' && !t.void).length };
   DB.docs.filing.unshift(filing);
   rows.forEach((t) => { t.filingId = key; });
   audit('filing', key, 'file', null, { count: rows.length, total: fmt(total) });
@@ -2907,8 +3002,25 @@ function closeChecklist(period) {
   items.push({ label: 'ทำเงินเดือนประจำงวด', ok: !!pay,
     detail: pay ? pay.count + ' คน ' + fmt(pay.net) + ' บาท' : 'ยังไม่ได้ทำ', blocking: false, action: 'payroll' });
   const vat = DB.docs.filing.find((f) => f.form === 'PP30' && f.period === period);
-  items.push({ label: 'ยื่นแบบ ภ.พ.30', ok: !!vat,
-    detail: vat ? 'ชำระ ' + fmt(vat.payable) + ' บาท' : 'ยังไม่ได้ยื่น', blocking: true, action: 'vat' });
+  /* กิจการที่ไม่ได้จดทะเบียนภาษีมูลค่าเพิ่มไม่ต้องยื่น ภ.พ.30 */
+  if (DB.company.vatRegistered !== false || vat) {
+    items.push({ label: 'ยื่นแบบ ภ.พ.30', ok: !!vat,
+      detail: !vat ? 'ยังไม่ได้ยื่น'
+        : vat.payable >= 0 ? 'ชำระ ' + fmt(vat.payable) + ' บาท'
+        : vat.refund ? 'ขอคืนเป็นเงินสด ' + fmt(vat.refund) + ' บาท'
+        : 'ชำระเกิน ยกไปเดือนถัดไป ' + fmt(-vat.payable) + ' บาท',
+      blocking: true, action: 'vat' });
+  }
+  /* เดือนสุดท้ายของปีบัญชี: ต้องปิดบัญชีสิ้นปีก่อนปิดงวด ไม่งั้นปีถัดไปจะยกยอดรายได้/ค่าใช้จ่ายมาทั้งก้อน */
+  const fy = fiscalYearOf(endDate);
+  if (fy && fy.complete && fy.periods[11].code === period) {
+    const left = yearEndOpen(fy);
+    const ye = yearEndOf(fy);
+    items.push({ label: 'ปิดบัญชีสิ้นปี — โอนกำไรขาดทุนทั้งปีเข้ากำไรสะสม', ok: left.length === 0,
+      detail: left.length === 0 ? (ye ? 'ปิดแล้ว ' + ye.no : 'ไม่มีรายได้/ค่าใช้จ่ายต้องปิด')
+        : (ye ? 'มีรายการลงเพิ่มหลังปิดบัญชี ' + left.length + ' บัญชี — กดปิดบัญชีสิ้นปีอีกครั้ง' : 'ยังไม่ได้ปิด ' + left.length + ' บัญชี'),
+      blocking: true, action: 'yearend' });
+  }
   const unmatched = DB.bankTxns.filter((t) => !t.matched && periodOf(t.date) <= period).length;
   items.push({ label: 'รายการธนาคารกระทบยอดครบ', ok: unmatched === 0,
     detail: unmatched === 0 ? 'ครบ' : 'ค้าง ' + unmatched + ' รายการ', blocking: false, action: 'bank' });
@@ -2917,6 +3029,13 @@ function closeChecklist(period) {
 }
 
 function closePeriod(period) {
+  /* ปิดงวดตามลำดับ — ปิดเดือนหลังทั้งที่เดือนก่อนยังเปิด ยอดยกมาของเดือนหลังเปลี่ยนได้ทั้งที่ปิดไปแล้ว */
+  const earlier = DB.periods.filter((x) => x.start < period + '-01' && x.status !== 'closed')
+    .sort((a, b) => (a.start < b.start ? -1 : 1));
+  if (earlier.length) {
+    throw new DomainError('CLOSE_OUT_OF_ORDER', 'ต้องปิดงวด ' + thPeriod(earlier[0].code) + ' ก่อน แล้วค่อยปิดงวด ' + thPeriod(period),
+      'ปิดงวดเรียงตามลำดับเดือน');
+  }
   const chk = closeChecklist(period);
   if (!chk.canClose) {
     throw new DomainError('CLOSE_BLOCKED',
@@ -4073,8 +4192,64 @@ function openNextFiscalYear(reason) {
     }
     d = addDays(endOfMonth(code + '-01'), 1);
   }
+  const fy = made.length ? fiscalYearOf(made[0] + '-01') : null;
+  if (fy && DB.company) DB.company.fiscalYear = String(Number(fy.start.slice(0, 4)) + 543);
   audit('period', made[0] + '…' + made[made.length - 1], 'open_year', null, { periods: made.length }, reason || 'เปิดปีบัญชีถัดไป');
   return made;
+}
+
+/* ===================================================================
+   ปิดบัญชีสิ้นปี — ใบสำคัญปิดบัญชี (CL) โอนรายได้และค่าใช้จ่ายทั้งปีเข้ากำไรสะสม ณ วันสิ้นปีบัญชี
+   งบกำไรขาดทุนไม่นับใบปิดบัญชี (ไม่งั้นกำไรทั้งปีเป็นศูนย์) งบทดลองของเดือนสุดท้ายแสดงก่อนปิดบัญชี
+   ปีถัดไปบัญชีรายได้/ค่าใช้จ่ายเริ่มที่ศูนย์ และกำไรสะสมรวมกำไรของปีที่ปิดแล้ว
+   ปิดแล้วยังมีรายการลงเพิ่มในปีนั้น กดปิดบัญชีสิ้นปีอีกครั้ง ระบบกลับใบเดิมแล้วปิดใหม่ทั้งปี
+   =================================================================== */
+const yearEndOf = (fy) => DB.entries.find((e) => e.src === 'yearEnd' && e.srcId === fy.start && e.status === 'posted');
+/** ยอดรายได้/ค่าใช้จ่ายของปีที่ยังไม่ได้โอนเข้ากำไรสะสม (รวมใบปิดบัญชีแล้ว) — ศูนย์ทุกบัญชี = ปิดบัญชีครบ */
+function yearEndOpen(fy) {
+  return DB.accounts.filter((a) => a.postable && (a.type === 'revenue' || a.type === 'expense'))
+    .map((a) => ({ acc: a.code, bal: balanceOf(a.code, fy.end, fy.start) })).filter((x) => x.bal !== 0);
+}
+function closeFiscalYear(date, reason) {
+  const fy = fiscalYearOf(date);
+  if (!fy) throw new DomainError('PERIOD_NOT_FOUND', 'ไม่พบงวดบัญชีของวันที่ ' + thDate(date));
+  if (!fy.complete) {
+    throw new DomainError('FISCAL_YEAR_INCOMPLETE', 'ปีบัญชีนี้มีงวดไม่ครบ 12 งวด ยังปิดบัญชีสิ้นปีไม่ได้');
+  }
+  const old = yearEndOf(fy);
+  if (old) reverse(old.no, reason || 'ปิดบัญชีสิ้นปีใหม่ — มีรายการลงเพิ่มหลังปิดบัญชีครั้งก่อน', fy.end, { fromSource: true });
+  const lines = [];
+  let profit = 0;
+  DB.accounts.filter((a) => a.postable && (a.type === 'revenue' || a.type === 'expense')).forEach(function (a) {
+    const b = balanceOf(a.code, fy.end, fy.start, notClosingEntry);
+    if (!b) return;
+    lines.push(b > 0 ? { acc: a.code, cr: b } : { acc: a.code, dr: -b });
+    profit -= b;
+  });
+  if (!lines.length) {
+    throw new DomainError('NOTHING_TO_CLOSE', 'ปี ' + fy.label + ' ไม่มีรายได้หรือค่าใช้จ่ายต้องปิดบัญชี');
+  }
+  const re = accBySub('retained_earnings');
+  if (profit) lines.push(profit > 0 ? { acc: re, cr: profit } : { acc: re, dr: -profit });
+  const je = post({
+    type: 'closing', date: fy.end,
+    desc: 'ปิดบัญชีสิ้นปี ' + fy.label + ' — โอน' + (profit >= 0 ? 'กำไร' : 'ขาดทุน') + 'สุทธิ ' + fmt(Math.abs(profit)) + ' บาท เข้ากำไรสะสม',
+    src: 'yearEnd', srcId: fy.start, lines,
+  });
+  audit('fiscal_year', fy.start, 'close', null, { profit: fmt(profit), entry: je.no });
+  return { entry: je, profit, fy };
+}
+/** ยกเลิกการปิดบัญชีสิ้นปี — กลับรายการใบปิดบัญชี (งวดสุดท้ายต้องยังเปิดอยู่) */
+function reopenFiscalYear(date, reason) {
+  if (!reason || String(reason).trim().length < 5) {
+    throw new DomainError('REASON_REQUIRED', 'ต้องระบุเหตุผลที่ยกเลิกการปิดบัญชีสิ้นปี');
+  }
+  const fy = fiscalYearOf(date);
+  const old = fy && yearEndOf(fy);
+  if (!old) throw new DomainError('YEAR_NOT_CLOSED', 'ปีบัญชีนี้ยังไม่ได้ปิดบัญชีสิ้นปี');
+  const rev = reverse(old.no, String(reason).trim(), fy.end, { fromSource: true });
+  audit('fiscal_year', fy.start, 'reopen', null, { reversal: rev.no }, String(reason).trim());
+  return rev;
 }
 
 
@@ -4168,6 +4343,8 @@ cancelPaymentBatch = transactional(cancelPaymentBatch);
 payPaymentBatch = transactional(payPaymentBatch);
 postJournalVoucher = transactional(postJournalVoucher);
 openNextFiscalYear = transactional(openNextFiscalYear);
+closeFiscalYear = transactional(closeFiscalYear);
+reopenFiscalYear = transactional(reopenFiscalYear);
 buildSeed = bulkTransaction(buildSeed);
 
 
@@ -4513,6 +4690,71 @@ voidStockAdj = transactional(voidStockAdj);
    =================================================================== */
 
 
+/* ===== tax.js ===== */
+/* ===================================================================
+   กิจการที่ไม่ได้จดทะเบียนภาษีมูลค่าเพิ่ม
+   - เรียกเก็บภาษีขายไม่ได้: ทุกบรรทัดของเอกสารขายคิดเป็นไม่มีภาษี และไม่มีแถวในรายงานภาษีขาย
+   - ขอคืนภาษีซื้อไม่ได้: ภาษีที่จ่ายผู้ขายรวมเป็นต้นทุนหรือค่าใช้จ่าย (เหมือนภาษีซื้อต้องห้าม)
+   - ไม่ต้องยื่น ภ.พ.30 (รายการตรวจปิดงวดข้ามให้)
+   ห่อฟังก์ชันเดิมแทนการแก้ข้างใน — ส่วนอื่นของระบบเรียกชื่อเดิมได้ตามปกติ
+   =================================================================== */
+const isVatRegistered = () => DB.company.vatRegistered !== false;
+
+function nonVatSalesInput(input) {
+  if (isVatRegistered() || !input) return input;
+  if ((input.lines || []).some((l) => l.taxCode === 'VAT7' || l.taxCode === 'VAT0')) {
+    throw new DomainError('NOT_VAT_REGISTERED', 'กิจการไม่ได้จดทะเบียนภาษีมูลค่าเพิ่ม เรียกเก็บภาษีมูลค่าเพิ่มไม่ได้',
+      'เปลี่ยนรหัสภาษีเป็น "ไม่มีภาษี" หรือแก้ข้อมูลบริษัทถ้าจดทะเบียนแล้ว');
+  }
+  return Object.assign({}, input, { lines: (input.lines || []).map((l) => Object.assign({}, l, { taxCode: 'EXEMPT' })) });
+}
+/* แถวรายงานภาษีขายของเอกสารที่ออกตอนไม่ได้จดทะเบียน ลบทิ้ง — ไม่ใช่ใบกำกับภาษีและไม่ต้องเข้าแบบ ภ.พ.30 */
+function dropVatOutputRows(no) {
+  for (let i = DB.taxTx.length - 1; i >= 0; i--) {
+    if (DB.taxTx[i].kind === 'vat_output' && DB.taxTx[i].docNo === no) DB.taxTx.splice(i, 1);
+  }
+}
+function wrapNonVatSale(fn) {
+  return function (input) {
+    if (isVatRegistered()) return fn.apply(this, arguments);
+    const args = Array.prototype.slice.call(arguments);
+    args[0] = nonVatSalesInput(input);
+    const doc = fn.apply(this, args);
+    if (doc && doc.no) { dropVatOutputRows(doc.no); doc.nonVat = true; doc.etax = null; }
+    return doc;
+  };
+}
+/* ใบลดหนี้/ใบเพิ่มหนี้ตามใบที่ออกตอนไม่ได้จดทะเบียน ก็ไม่มีภาษี — ส่วนใบกำกับภาษีที่ออกก่อนเลิกจดทะเบียนยังลดภาษีได้ตามจริง */
+function wrapNonVatNote(fn) {
+  return function (input) {
+    const inv = input && DB.docs.invoice.find((d) => d.no === input.invoiceNo);
+    if (!inv || !inv.nonVat) return fn.apply(this, arguments);
+    const args = Array.prototype.slice.call(arguments);
+    args[0] = Object.assign({}, input, { taxCode: 'EXEMPT' });
+    const doc = fn.apply(this, args);
+    if (doc && doc.no) { dropVatOutputRows(doc.no); doc.nonVat = true; }
+    return doc;
+  };
+}
+function wrapNonVatPurchase(fn, inputAt) {
+  return function () {
+    if (isVatRegistered()) return fn.apply(this, arguments);
+    const args = Array.prototype.slice.call(arguments);
+    args[inputAt] = Object.assign({}, args[inputAt], { nonClaimableVat: true });
+    return fn.apply(this, args);
+  };
+}
+issueInvoice = wrapNonVatSale(issueInvoice);
+issueCreditNote = wrapNonVatNote(issueCreditNote);
+issueDebitNote = wrapNonVatNote(issueDebitNote);
+recordBill = wrapNonVatPurchase(recordBill, 0);
+recordExpense = wrapNonVatPurchase(recordExpense, 0);
+/* ใบแจ้งหนี้ของกิจการที่ไม่ได้จดทะเบียนไม่ใช่ใบกำกับภาษี ไม่ต้องมีรายการครบตามมาตรา 86/4 (ลูกค้าไม่มีเลขผู้เสียภาษีก็ออกได้) */
+assertTaxInvoiceComplete = (function (orig) {
+  return function () { return isVatRegistered() ? orig.apply(this, arguments) : undefined; };
+})(assertTaxInvoiceComplete);
+
+
 /* ===== seed.js ===== */
 /* ===================================================================
    ข้อมูลตัวอย่าง — บริษัทซื้อมาขายไปขนาดกลาง 6 เดือน
@@ -4693,14 +4935,15 @@ function loadChart() {
   });
 }
 
-function loadPeriods(year) {
+/** 12 งวดรายเดือน เริ่มเดือนแรกของรอบบัญชี (บริษัทที่รอบบัญชีไม่ตรงปีปฏิทิน เช่น เม.ย.–มี.ค. ก็ได้) */
+function loadPeriods(year, startMonth) {
   DB.periods = [];
-  for (let m = 1; m <= 12; m++) {
-    const mm = String(m).padStart(2, '0');
-    DB.periods.push({
-      code: year + '-' + mm, start: year + '-' + mm + '-01',
-      end: endOfMonth(year + '-' + mm + '-01'), status: 'open',
-    });
+  let y = year, m = startMonth || 1;
+  for (let i = 0; i < 12; i++) {
+    const code = y + '-' + String(m).padStart(2, '0');
+    DB.periods.push({ code, start: code + '-01', end: endOfMonth(code + '-01'), status: 'open' });
+    m++;
+    if (m > 12) { m = 1; y++; }
   }
 }
 
@@ -4724,6 +4967,10 @@ function buildBlank(o) {
       'ปีของรอบบัญชีต้องเป็น ค.ศ. ระหว่าง 2000 ถึง 2100 (ได้รับ "' + o.year + '")',
       'ปี พ.ศ. 2569 คือ ค.ศ. 2026');
   }
+  const startMonth = o.startMonth === undefined || o.startMonth === '' ? 1 : Number(o.startMonth);
+  if (!Number.isInteger(startMonth) || startMonth < 1 || startMonth > 12) {
+    throw new DomainError('FISCAL_START_INVALID', 'เดือนเริ่มรอบบัญชีต้องเป็น 1 ถึง 12');
+  }
 
   /* ล้างทุกอย่างจากแม่แบบเดียวใน engine.js ห้ามไล่เขียนทีละฟิลด์ตรงนี้
      ไม่งั้นพอเพิ่มประเภทเอกสารใหม่ ที่นี่จะลืมแล้วสร้างบริษัทใหม่จะพัง */
@@ -4741,10 +4988,10 @@ function buildBlank(o) {
     fiscalYear: String(year + 543),
     standard: 'TFRS for NPAEs',
     bookkeeper: '', auditor: '',
-    paidUpCapital: 0, vatRegistered: true,
+    paidUpCapital: 0, vatRegistered: true, fyStartMonth: startMonth,
   };
   loadChart();
-  loadPeriods(year);
+  loadPeriods(year, startMonth);
   DB.isDemo = false;
   audit('company', 'blank', 'create', null, { name: DB.company.name, year: DB.company.fiscalYear });
   return DB.company;
@@ -5338,7 +5585,16 @@ const STATE = {
   imp: null,          // สถานะการนำเข้าไฟล์
   impResult: null,
 };
-const TODAY = '2026-07-31';
+/* "วันนี้" — ข้อมูลตัวอย่างเดินถึง 31 ก.ค. 2569 เสมอ บริษัทจริงใช้วันที่จริงของเครื่อง
+   ใช้ตัดสินเอกสารเลยกำหนด ใบเสนอราคาหมดอายุ วันที่พิมพ์ และวันที่เริ่มต้นในแบบฟอร์ม
+   เดิมตรึงไว้ที่ 31 ก.ค. 2569 สำหรับทุกบริษัท ใบที่เลยกำหนดจริงจึงไม่เคยขึ้นว่าเลยกำหนด */
+const DEMO_TODAY = '2026-07-31';
+let TODAY = DEMO_TODAY;
+function syncToday() {
+  const d = new Date();
+  const real = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  TODAY = DB.company && DB.isDemo === false ? real : DEMO_TODAY;
+}
 
 /* ส่วนเสริมของแต่ละระบบ (ui-settle ui-bank ui-payroll ui-assets ...) ลงทะเบียนตัวรับเหตุการณ์ของตัวเองที่นี่
    ไม่ต้องแก้ ui-actions.js · ตัวรับคืน true เมื่อจัดการเหตุการณ์นั้นแล้ว
@@ -5906,6 +6162,7 @@ function renderTopTools() {
 
 function render() {
   PEEK.reg.length = 0;      // ตัวเลขที่เจาะดูได้ ลงทะเบียนใหม่ทุกครั้งที่วาดหน้า
+  syncToday();
   /* ★ ตอนที่ยังใส่รหัสผ่านไม่ผ่าน ยังไม่มีข้อมูลบริษัทให้วาดแถบบนและเมนู
      ต้องออกก่อนแตะ DB.company ไม่งั้นหน้าจอขาวทั้งหน้า */
   if (SYNC.status === 'locked') {
@@ -7533,9 +7790,8 @@ function importedEntry(srcId) {
 
 /** ปีบัญชีของวันที่นี้เริ่มวันไหน — งวดเรียงต่อกันปีละ 12 งวดนับจากงวดแรกของบริษัท */
 function fyStartOf(date) {
-  const ps = DB.periods.slice().sort((a, b) => (a.start < b.start ? -1 : 1));
-  const i = ps.findIndex((p) => date >= p.start && date <= p.end);
-  return i < 0 ? null : ps[i - (i % 12)].start;
+  const fy = fiscalYearOf(date);
+  return fy ? fy.start : null;
 }
 
 /**
@@ -8773,6 +9029,7 @@ function scClose() {
     payroll: ['run:payroll', 'ทำเงินเดือนเดี๋ยวนี้'],
     vat: ['run:pp30', 'ยื่น ภ.พ.30 เดี๋ยวนี้'],
     bank: ['go:bank', 'ไปหน้ากระทบยอด'],
+    yearend: ['yearend:close', 'ปิดบัญชีสิ้นปีเดี๋ยวนี้'],
   };
   const rows = chk.items.map(function (i) {
     const a = i.action && actMap[i.action];
@@ -8796,16 +9053,40 @@ function scClose() {
       : (chk.canClose ? 'พร้อมปิดงวด — ตรวจครบทุกข้อแล้ว'
                       : 'ยังปิดไม่ได้: ' + chk.items.filter((i) => i.blocking && !i.ok).map((i) => i.label).join(' · ')),
   })
+  + yearEndCard()
   + card({ title:'สถานะงวดทั้งปี', sub:'รอบบัญชี ' + DB.company.fiscalYear + ' · ' + DB.periods.length + ' งวด',
-      /* เปิดปีถัดไปได้เมื่อเหลือไม่ถึงสามเดือนก่อนถึงงวดสุดท้าย กันกดเปิดปีล่วงหน้าไปไกลโดยไม่ตั้งใจ */
-      actions: btn('newyear', '+ เปิดงวดปีบัญชีถัดไป',
-        DB.periods.slice().sort((a, b) => a.start < b.start ? -1 : 1).pop().start <= addDays(TODAY, 92) ? '' : 'disabled'),
+      /* เปิดปีถัดไปได้เมื่อเหลือไม่ถึงสามเดือนก่อนถึงงวดสุดท้าย หรืองวดสุดท้ายปิดไปแล้ว กันกดเปิดปีล่วงหน้าไปไกลโดยไม่ตั้งใจ */
+      actions: btn('newyear', '+ เปิดงวดปีบัญชีถัดไป', (function () {
+        const last = DB.periods.slice().sort((a, b) => a.start < b.start ? -1 : 1).pop();
+        return last.start <= addDays(TODAY, 92) || last.status === 'closed' ? '' : 'disabled';
+      })()),
       body: '<div class="periods">' + DB.periods.map((x) =>
         '<button class="pchip ' + x.status + (x.code === STATE.period ? ' on' : '') + '" data-act="period:' + x.code + '">'
         + esc(thPeriod(x.code)) + '<span>' + (x.status === 'closed' ? 'ปิดแล้ว' : 'เปิดอยู่') + '</span></button>').join('')
         + '</div>',
-      foot: 'ปิดแล้ว ' + closedList.length + ' งวด จาก ' + DB.periods.length + ' งวด · ข้ามปีได้โดยไม่ต้องลงรายการปิดบัญชี '
-        + 'เพราะงบแสดงฐานะการเงินรวมกำไรของทุกปีก่อนหน้าเข้ากำไรสะสมให้เอง · ภาษีหัก ณ ที่จ่ายเดือนธันวาคม ระบบเปิดงวดปีถัดไปให้อัตโนมัติตอนยื่นแบบ' });
+      foot: 'ปิดแล้ว ' + closedList.length + ' งวด จาก ' + DB.periods.length + ' งวด · ปิดงวดเรียงตามลำดับเดือน · '
+        + 'เดือนสุดท้ายของปีต้องปิดบัญชีสิ้นปีก่อน (โอนกำไรขาดทุนเข้ากำไรสะสม) ปีถัดไปรายได้และค่าใช้จ่ายจะเริ่มที่ศูนย์' });
+}
+
+/** การ์ดปิดบัญชีสิ้นปี — ขึ้นเฉพาะเดือนสุดท้ายของปีบัญชี */
+function yearEndCard() {
+  const fy = fiscalYearOf(pEnd());
+  if (!fy || !fy.complete || fy.periods[11].code !== STATE.period) return '';
+  const ye = yearEndOf(fy);
+  const left = yearEndOpen(fy);
+  const is = incomeStatement(fy.start, fy.end);
+  const open = periodIsOpen();
+  return card({
+    title:'ปิดบัญชีสิ้นปี ' + fy.label,
+    sub: ye ? 'ปิดแล้วด้วยใบสำคัญ ' + ye.no + (left.length ? ' · มีรายการลงเพิ่มหลังปิด ' + left.length + ' บัญชี ต้องปิดใหม่' : '')
+      : 'โอนรายได้และค่าใช้จ่ายทั้งปีเข้ากำไรสะสม ณ ' + thDate(fy.end),
+    actions: (ye ? btn('entry:' + ye.no, 'ดูใบปิดบัญชี') + btn('yearend:reopen', 'ยกเลิกการปิดบัญชี', open ? '' : 'disabled') : '')
+      + btn('yearend:close', ye ? 'ปิดบัญชีสิ้นปีอีกครั้ง' : 'ปิดบัญชีสิ้นปี', open && left.length ? 'primary' : 'disabled'),
+    body:'<div class="reco"><div><span>รายได้ทั้งปี</span><b>' + fmt(is.revenue) + '</b></div>'
+      + '<div><span>กำไร (ขาดทุน) สุทธิทั้งปี</span><b>' + fmt(is.net) + '</b></div>'
+      + '<div class="gt"><span>' + (ye && !left.length ? 'โอนเข้ากำไรสะสมแล้ว' : 'จะโอนเข้ากำไรสะสม') + '</span><b>' + fmt(is.net) + '</b></div></div>',
+    foot:'ใบปิดบัญชีไม่นับในงบกำไรขาดทุน (กำไรทั้งปียังแสดงครบ) · งบทดลองของเดือนนี้แสดงก่อนปิดบัญชี · ปิดแล้วค่อยปิดงวดเดือนนี้และเปิดปีถัดไป',
+  });
 }
 
 /* ===================================================================
@@ -9424,46 +9705,54 @@ function vatRegister(kind) {
 
 function scPp30() {
   const f = DB.docs.filing.find((x) => x.form === 'PP30' && x.period === STATE.period);
-  const out = DB.taxTx.filter((t) => t.kind === 'vat_output' && t.period === STATE.period && !t.void);
-  const inn = DB.taxTx.filter((t) => t.kind === 'vat_input' && t.period === STATE.period && !t.void);
-  const outTax = f ? f.outTax : out.reduce((s, t) => s + t.tax, 0);
-  const inTax  = f ? f.inTax  : inn.reduce((s, t) => s + t.tax, 0);
-  const outBase = f ? f.outBase : out.reduce((s, t) => s + t.base, 0);
-  const inBase  = f ? f.inBase  : inn.reduce((s, t) => s + t.base, 0);
-  const payable = outTax - inTax;
+  const r = vatReturnOf(STATE.period);
+  /* ยื่นแล้วใช้ตัวเลขที่ยื่นจริง (แบบเก่าก่อนมียอดยกมาไม่มี carryIn/diff ให้คำนวณจากยอดที่ยื่น) */
+  const v = f ? { outBase: f.outBase, outZero: f.outZero || 0, outExempt: f.outExempt || 0, outTax: f.outTax, inBase: f.inBase,
+    inTax: f.inTax, diff: f.diff != null ? f.diff : f.outTax - f.inTax, carryIn: f.carryIn || 0, net: f.payable,
+    refund: f.refund || 0, carryOut: f.carryOut != null ? f.carryOut : (f.payable < 0 ? -f.payable : 0) }
+    : Object.assign({ refund: 0, carryOut: r.overpaid }, r);
   const due = nextMonthDay(STATE.period, 15);
   const dueE = nextMonthDay(STATE.period, 23);
+  const nonVat = DB.company.vatRegistered === false;
 
-  const line = (n, label, v, cls) =>
+  const line = (n, label, val, cls) =>
     '<tr class="' + (cls || '') + '"><td class="ctr dim">' + n + '</td><td>' + esc(label)
-    + '</td><td class="num' + (v < 0 ? ' neg' : '') + '">' + fmt(v) + '</td></tr>';
+    + '</td><td class="num' + (val < 0 ? ' neg' : '') + '">' + fmt(val) + '</td></tr>';
 
   return card({
     title:'แบบแสดงรายการภาษีมูลค่าเพิ่ม ภ.พ.30',
     sub:'ประจำเดือน ' + thPeriod(STATE.period) + ' · ' + DB.company.name + ' · สำนักงานใหญ่',
     actions: f ? btn('print', 'พิมพ์แบบ')
+               : nonVat ? '<span class="st draft">กิจการไม่ได้จดทะเบียนภาษีมูลค่าเพิ่ม</span>'
                : btn('run:pp30', 'ยื่นแบบและปิดภาษีงวดนี้', periodIsOpen() ? 'primary' : 'disabled'),
     body: '<div class="scroll"><table class="fs"><tbody>'
       + '<tr class="fs-h"><td colspan="3">ยอดขายและภาษีขาย</td></tr>'
-      + line(1, 'ยอดขายในเดือนนี้', outBase + (f ? f.outZero : 0))
-      + line(2, 'ยอดขายที่เสียภาษีอัตราร้อยละ 0', f ? f.outZero : 0)
-      + line(4, 'ยอดขายที่ต้องเสียภาษี', outBase)
-      + line(5, 'ภาษีขายเดือนนี้', outTax, 'fs-s')
+      + line(1, 'ยอดขายในเดือนนี้', v.outBase + v.outZero + v.outExempt)
+      + line(2, 'หัก ยอดขายที่เสียภาษีอัตราร้อยละ 0', v.outZero)
+      + line(3, 'หัก ยอดขายที่ได้รับยกเว้น', v.outExempt)
+      + line(4, 'ยอดขายที่ต้องเสียภาษี', v.outBase)
+      + line(5, 'ภาษีขายเดือนนี้', v.outTax, 'fs-s')
       + '<tr class="fs-h"><td colspan="3">ยอดซื้อและภาษีซื้อ</td></tr>'
-      + line(6, 'ยอดซื้อที่มีสิทธินำภาษีซื้อมาหัก', inBase)
-      + line(7, 'ภาษีซื้อเดือนนี้', inTax, 'fs-s')
+      + line(6, 'ยอดซื้อที่มีสิทธินำภาษีซื้อมาหัก', v.inBase)
+      + line(7, 'ภาษีซื้อเดือนนี้', v.inTax, 'fs-s')
       + '<tr class="fs-h"><td colspan="3">การคำนวณภาษี</td></tr>'
-      + (payable >= 0
-          ? line(8, 'ภาษีที่ต้องชำระ', payable, 'fs-t')
-          : line(9, 'ภาษีที่ชำระเกิน (ยกไปเครดิตเดือนถัดไป)', -payable, 'fs-t'))
+      + (v.diff >= 0 ? line(8, 'ภาษีที่ต้องชำระเดือนนี้', v.diff) : line(9, 'ภาษีที่ชำระเกินเดือนนี้', -v.diff))
+      + line(10, 'ภาษีที่ชำระเกินยกมา', v.carryIn)
+      + (v.net >= 0
+          ? line(11, 'ภาษีสุทธิที่ต้องชำระ', v.net, 'fs-t')
+          : line(12, 'ภาษีสุทธิที่ชำระเกิน' + (v.refund ? ' (ขอคืนเป็นเงินสด)' : ' (ยกไปเครดิตเดือนถัดไป)'), -v.net, 'fs-t'))
       + '</tbody></table></div>'
       + '<div class="reco">'
       + '<div><span>กำหนดยื่นแบบกระดาษ</span><b>' + thDate(due) + '</b></div>'
       + '<div><span>กำหนดยื่นผ่านอินเทอร์เน็ต (ขยาย 8 วัน)</span><b>' + thDate(dueE) + '</b></div>'
-      + (f ? '<div class="gt"><span>สถานะ</span><b>ยื่นแล้วเมื่อ ' + thDate(f.filedDate) + ' · ใบสำคัญ ' + f.entryNo + '</b></div>'
+      + (v.net < 0 ? '<div><span>' + (v.refund ? 'ขอคืนเป็นเงินสด' : 'ยกไปหักเดือนถัดไป') + '</span><b>'
+          + fmt(v.refund || v.carryOut) + '</b></div>' : '')
+      + (f ? '<div class="gt"><span>สถานะ</span><b>ยื่นแล้วเมื่อ ' + thDate(f.filedDate)
+             + (f.entryNo ? ' · ใบสำคัญ ' + f.entryNo : ' · ไม่มียอดต้องลงบัญชี') + '</b></div>'
            : '<div class="gt"><span>สถานะ</span><b>ยังไม่ได้ยื่น</b></div>')
       + '</div>',
-    foot:'เมื่อยื่นแบบ ระบบจะปิดบัญชีภาษีขายและภาษีซื้อของงวดเป็นศูนย์ แล้วตั้งเป็นภาษีค้างชำระหรือภาษีขอคืน ตามผลการคำนวณ',
+    foot: nonVat ? 'กิจการไม่ได้จดทะเบียนภาษีมูลค่าเพิ่ม จึงไม่ต้องยื่น ภ.พ.30 — เปลี่ยนได้ที่ข้อมูลบริษัท'
+      : 'เมื่อยื่นแบบ ระบบจะปิดบัญชีภาษีขายและภาษีซื้อของงวดเป็นศูนย์ หักภาษีที่ชำระเกินยกมา แล้วตั้งเป็นภาษีค้างชำระหรือภาษีขอคืน ตามผลการคำนวณ',
   });
 }
 
@@ -11309,7 +11598,9 @@ const DOC_PRINT = {
     find: (no) => DB.docs.invoice.find((d) => d.no === no),
     build: function (d, copy) {
       const term = Math.round((new Date(d.due) - new Date(d.date)) / 86400000);
-      return pSheet(pHead('ใบกำกับภาษี/ใบส่งของ', 'TAX INVOICE / DELIVERY ORDER', copy)
+      /* กิจการที่ไม่ได้จดทะเบียนภาษีมูลค่าเพิ่ม ออกใบกำกับภาษีไม่ได้ — พิมพ์เป็นใบแจ้งหนี้ */
+      return pSheet((d.nonVat ? pHead('ใบแจ้งหนี้/ใบส่งของ', 'INVOICE / DELIVERY ORDER', copy)
+        : pHead('ใบกำกับภาษี/ใบส่งของ', 'TAX INVOICE / DELIVERY ORDER', copy))
         + '<div class="p-meta">' + pParty('ลูกค้า', d.snap)
         + pInfo([['เลขที่', d.no], ['วันที่', thDate(d.date)], ['เครดิต', term > 0 ? term + ' วัน' : 'เงินสด'], ['ครบกำหนด', thDate(d.due)]]) + '</div>'
         + pTable(LINE_COLS, lineRows(d.lines), 8, PAGED)
@@ -13480,6 +13771,81 @@ function modalVoidRun(kind, period) {
   });
 }
 
+/* ยื่น ภ.พ.30: แสดงตัวเลขทุกบรรทัดก่อนยื่น และให้เลือกว่าภาษีที่ชำระเกินจะขอคืนเป็นเงินสดหรือยกไปหักเดือนถัดไป */
+function modalFileVat() {
+  const p = STATE.period;
+  const r = vatReturnOf(p);
+  const row = (n, label, v, strong) => '<div' + (strong ? ' class="gt"' : '') + '><span>' + n + '. ' + esc(label) + '</span><b>' + fmt(v) + '</b></div>';
+  modal({
+    title:'ยื่นแบบ ภ.พ.30 งวด ' + thPeriod(p),
+    sub:'ระบบปิดบัญชีภาษีขายและภาษีซื้อของงวดเป็นศูนย์ แล้วตั้งเป็นภาษีค้างชำระหรือภาษีขอคืน',
+    body:'<div class="reco">'
+      + row(5, 'ภาษีขายเดือนนี้', r.outTax)
+      + row(7, 'ภาษีซื้อเดือนนี้', r.inTax)
+      + (r.diff >= 0 ? row(8, 'ภาษีที่ต้องชำระเดือนนี้', r.diff) : row(9, 'ภาษีที่ชำระเกินเดือนนี้', -r.diff))
+      + row(10, 'ภาษีที่ชำระเกินยกมา', r.carryIn)
+      + (r.net >= 0 ? row(11, 'ภาษีสุทธิที่ต้องชำระ', r.net, true) : row(12, 'ภาษีสุทธิที่ชำระเกิน', -r.net, true))
+      + '</div>'
+      + (r.overpaid > 0 ? '<div class="flds">' + field({ name:'vatover', label:'ภาษีที่ชำระเกิน ' + fmt(r.overpaid) + ' บาท', type:'select', wide:true,
+          value:'carry', options:[['carry','ยกไปเป็นเครดิตภาษีเดือนถัดไป'], ['refund','ขอคืนเป็นเงินสด']],
+          hint:'ขอคืนเป็นเงินสด: ยอดค้างในบัญชีภาษีขอคืนจนได้รับเงิน — บันทึกรับเงินคืนด้วยสมุดรายวันรับ (Dr ธนาคาร / Cr ภาษีขอคืน)' }) + '</div>' : ''),
+    submitLabel:'ยื่นแบบและปิดภาษีงวดนี้',
+    onSubmit: function () {
+      submitAction(function () {
+        const f = fileVat(p, { refund: r.overpaid > 0 && val('vatover') === 'refund' });
+        STATE.screen = 'pp30';
+        toast('ยื่น ภ.พ.30 งวด ' + thPeriod(p) + ' แล้ว', 'ok',
+          f.payable >= 0 ? 'ต้องชำระ ' + fmt(f.payable) + ' บาท'
+            : f.refund ? 'ขอคืนเป็นเงินสด ' + fmt(f.refund) + ' บาท' : 'ชำระเกิน ' + fmt(f.carryOut) + ' บาท ยกไปเดือนถัดไป');
+        return f;
+      });
+    },
+  });
+}
+
+/* ยื่น ภ.ง.ด.: เลือกวันที่จ่ายจริงและบัญชีที่จ่าย — แบบที่ภาษีเป็นศูนย์ยื่นได้โดยไม่มีใบสำคัญ */
+function modalFileWht(form) {
+  const p = STATE.period;
+  const rows = whtRowsOf(p, form);
+  const total = rows.reduce((s, t) => s + t.tax, 0);
+  const banks = payFromAccounts().map((a) => [a.code, a.code + ' ' + a.name]);
+  modal({
+    title:'ยื่น ' + TAX_FORM_TH[form] + ' งวด ' + thPeriod(p),
+    sub: rows.length + ' รายการ · ภาษีที่ต้องนำส่ง ' + fmt(total) + ' บาท',
+    body:'<div class="flds">'
+      + (total ? field({ name:'wdate', label:'วันที่นำส่ง', type:'date', value: addDays(endOfMonth(p + '-01'), 7),
+            hint:'กำหนดยื่นกระดาษวันที่ 7 ยื่นออนไลน์ถึงวันที่ 15 ของเดือนถัดไป' })
+          + field({ name:'wacc', label:'จ่ายจากบัญชี', type:'select', options: banks, value: accBySub('bank') })
+        : '<div class="note wide">ภาษีที่หักรวมเป็นศูนย์ ยื่นแบบได้โดยไม่มีเงินต้องจ่าย ระบบจึงไม่สร้างใบสำคัญ</div>')
+      + '</div>',
+    submitLabel:'ยื่น ' + TAX_FORM_TH[form],
+    note: total ? 'Dr ภาษีหัก ณ ที่จ่ายค้างนำส่ง / Cr บัญชีที่จ่าย' : null,
+    onSubmit: function () {
+      submitAction(function () {
+        const f = fileWht(p, form, total ? { date: val('wdate'), account: val('wacc') } : {});
+        toast('ยื่น ' + TAX_FORM_TH[form] + ' แล้ว', 'ok', f.count + ' รายการ รวม ' + fmt(f.total) + ' บาท'
+          + (f.excluded ? ' · กันรายการ e-Withholding ออก ' + f.excluded + ' รายการ' : ''));
+        return f;
+      });
+    },
+  });
+}
+
+function modalYearEndReopen() {
+  modal({
+    title:'ยกเลิกการปิดบัญชีสิ้นปี',
+    sub:'ระบบกลับรายการใบปิดบัญชี รายได้และค่าใช้จ่ายของปีกลับมามียอดเหมือนก่อนปิด',
+    body:'<div class="flds">' + field({ name:'reason', label:'เหตุผล', wide:true, placeholder:'เช่น ผู้สอบบัญชีให้ปรับปรุงรายการก่อนปิดบัญชี' }) + '</div>',
+    submitLabel:'ยกเลิกการปิดบัญชีสิ้นปี', submitKind:'danger',
+    onSubmit: function () {
+      submitAction(function () {
+        const r = reopenFiscalYear(pEnd(), val('reason'));
+        toast('ยกเลิกการปิดบัญชีสิ้นปีแล้ว', 'ok', 'ใบกลับรายการ ' + r.no);
+        return r;
+      });
+    },
+  });
+}
 function modalReopen() {
   modal({
     title:'ขอเปิดงวด ' + thPeriod(STATE.period) + ' ใหม่',
@@ -13693,6 +14059,14 @@ function dispatch(act) {
   }
   if (head === 'cn')      { modalCreditNote(arg); return; }
   if (head === 'refund')  { modalRefund(arg); return; }
+  if (head === 'yearend') {
+    if (arg === 'reopen') { modalYearEndReopen(); return; }
+    runAction(function () {
+      const r = closeFiscalYear(pEnd());
+      toast('ปิดบัญชีสิ้นปีแล้ว ' + r.entry.no, 'ok', (r.profit >= 0 ? 'กำไร' : 'ขาดทุน') + 'สุทธิ ' + fmt(Math.abs(r.profit)) + ' บาท โอนเข้ากำไรสะสม');
+    });
+    return;
+  }
   if (head === 'newyear') {
     runAction(function () {
       const made = openNextFiscalYear('เปิดจากหน้าปิดงวด');
@@ -13738,17 +14112,8 @@ function dispatch(act) {
       const r = runPayroll(STATE.period);
       toast('ทำเงินเดือน ' + r.count + ' คนแล้ว', 'ok', 'จ่ายสุทธิ ' + fmt(r.net) + ' บาท');
     });
-    if (arg === 'pp30') return void runAction(function () {
-      const f = fileVat(STATE.period);
-      STATE.screen = 'pp30';
-      toast('ยื่น ภ.พ.30 งวด ' + thPeriod(STATE.period) + ' แล้ว', 'ok',
-        f.payable >= 0 ? 'ต้องชำระ ' + fmt(f.payable) + ' บาท' : 'ชำระเกิน ' + fmt(-f.payable) + ' บาท ยกไปเดือนถัดไป');
-    });
-    if (rest[0] === 'pnd') return void runAction(function () {
-      const f = fileWht(STATE.period, rest[1]);
-      toast('ยื่น ' + rest[1] + ' แล้ว', 'ok', f.count + ' รายการ รวม ' + fmt(f.total) + ' บาท'
-        + (f.excluded ? ' · กันรายการ e-Withholding ออก ' + f.excluded + ' รายการ' : ''));
-    });
+    if (arg === 'pp30') return void modalFileVat();
+    if (rest[0] === 'pnd') return void modalFileWht(rest[1]);
     return;
   }
 
@@ -13976,8 +14341,12 @@ function modalBlank() {
       + field({ name:'coname', label:'ชื่อผู้ประกอบการ', wide:true, placeholder:'บริษัท ... จำกัด' })
       + field({ name:'cotax', label:'เลขประจำตัวผู้เสียภาษี 13 หลัก', placeholder:'เว้นว่างไว้ก่อนได้',
           hint:'ถ้าใส่ ระบบจะตรวจหลักที่ 13 ให้ทันที' })
-      + field({ name:'coyear', label:'ปีของรอบบัญชี (ค.ศ.)', value: String(yr),
+      + field({ name:'coyear', label:'ปีที่รอบบัญชีเริ่ม (ค.ศ.)', value: String(yr),
           hint:'ระบบจะสร้างงวดรายเดือน 12 งวดให้' })
+      + field({ name:'costart', label:'รอบบัญชีเริ่มเดือน', type:'select', value:'1',
+          options:[['1','มกราคม (ปีปฏิทิน)'],['2','กุมภาพันธ์'],['3','มีนาคม'],['4','เมษายน'],['5','พฤษภาคม'],['6','มิถุนายน'],
+            ['7','กรกฎาคม'],['8','สิงหาคม'],['9','กันยายน'],['10','ตุลาคม'],['11','พฤศจิกายน'],['12','ธันวาคม']],
+          hint:'ตามที่จดทะเบียนไว้ ส่วนใหญ่ 1 ม.ค. – 31 ธ.ค.' })
       + field({ name:'coaddr', label:'ที่อยู่สถานประกอบการ', wide:true,
           placeholder:'ที่อยู่ที่จะพิมพ์ลงใบกำกับภาษีทุกใบ' })
       + '</div>',
@@ -13987,7 +14356,7 @@ function modalBlank() {
       if (!window.confirm('ลบข้อมูลทั้งหมดของ "' + DB.company.name + '" และเริ่มจากบริษัทเปล่า?')) return;
       submitAction(function () {
         const c = buildBlank({ name: val('coname'), taxId: val('cotax'),
-          address: val('coaddr'), year: val('coyear') });
+          address: val('coaddr'), year: val('coyear'), startMonth: val('costart') });
         STATE.period = DB.periods[0].code;
         STATE.imp = null; STATE.impResult = null; STATE.sel = null;
         toast('สร้างบริษัท ' + c.name + ' แล้ว', 'ok', 'ผังบัญชี ' + DB.accounts.length + ' บัญชี · ยังไม่มีรายการใด ๆ');
@@ -14005,7 +14374,11 @@ function modalNewCompany() {
     body:'<div class="flds">'
       + field({ name:'coname', label:'ชื่อผู้ประกอบการ', wide:true, placeholder:'บริษัท ... จำกัด' })
       + field({ name:'cotax', label:'เลขประจำตัวผู้เสียภาษี 13 หลัก', placeholder:'เว้นว่างไว้ก่อนได้' })
-      + field({ name:'coyear', label:'ปีของรอบบัญชี (ค.ศ.)', value: String(yr) })
+      + field({ name:'coyear', label:'ปีที่รอบบัญชีเริ่ม (ค.ศ.)', value: String(yr) })
+      + field({ name:'costart', label:'รอบบัญชีเริ่มเดือน', type:'select', value:'1',
+          options:[['1','มกราคม (ปีปฏิทิน)'],['2','กุมภาพันธ์'],['3','มีนาคม'],['4','เมษายน'],['5','พฤษภาคม'],['6','มิถุนายน'],
+            ['7','กรกฎาคม'],['8','สิงหาคม'],['9','กันยายน'],['10','ตุลาคม'],['11','พฤศจิกายน'],['12','ธันวาคม']],
+          hint:'ตามที่จดทะเบียนไว้ ส่วนใหญ่ 1 ม.ค. – 31 ธ.ค.' })
       + field({ name:'coaddr', label:'ที่อยู่สถานประกอบการ', wide:true,
           placeholder:'ที่อยู่ที่จะพิมพ์ลงใบกำกับภาษีทุกใบ' })
       + '</div>'
@@ -14014,7 +14387,7 @@ function modalNewCompany() {
     onSubmit: function () {
       const name = val('coname').trim();
       if (!name) { toast('ต้องใส่ชื่อผู้ประกอบการ', 'err'); return; }
-      const opts = { name: name, taxId: val('cotax'), address: val('coaddr'), year: val('coyear') };
+      const opts = { name: name, taxId: val('cotax'), address: val('coaddr'), year: val('coyear'), startMonth: val('costart') };
       /* ตรวจให้ผ่านก่อน แล้วค่อยแตะข้อมูลบริษัทที่เปิดอยู่ */
       try { blankState(); buildBlankCheck(opts); }
       catch (e) {
@@ -14041,6 +14414,8 @@ function buildBlankCheck(o) {
       'ปีของรอบบัญชีต้องเป็น ค.ศ. ระหว่าง 2000 ถึง 2100 (ได้รับ "' + o.year + '")',
       'ปี พ.ศ. 2569 คือ ค.ศ. 2026');
   }
+  const sm = o.startMonth === undefined || o.startMonth === '' ? 1 : Number(o.startMonth);
+  if (!Number.isInteger(sm) || sm < 1 || sm > 12) throw new DomainError('FISCAL_START_INVALID', 'เดือนเริ่มรอบบัญชีต้องเป็น 1 ถึง 12');
 }
 
 async function createCompany(opts) {

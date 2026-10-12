@@ -1111,9 +1111,8 @@ function importedEntry(srcId) {
 
 /** ปีบัญชีของวันที่นี้เริ่มวันไหน — งวดเรียงต่อกันปีละ 12 งวดนับจากงวดแรกของบริษัท */
 function fyStartOf(date) {
-  const ps = DB.periods.slice().sort((a, b) => (a.start < b.start ? -1 : 1));
-  const i = ps.findIndex((p) => date >= p.start && date <= p.end);
-  return i < 0 ? null : ps[i - (i % 12)].start;
+  const fy = fiscalYearOf(date);
+  return fy ? fy.start : null;
 }
 
 /**

@@ -384,6 +384,7 @@ function scClose() {
     payroll: ['run:payroll', 'ทำเงินเดือนเดี๋ยวนี้'],
     vat: ['run:pp30', 'ยื่น ภ.พ.30 เดี๋ยวนี้'],
     bank: ['go:bank', 'ไปหน้ากระทบยอด'],
+    yearend: ['yearend:close', 'ปิดบัญชีสิ้นปีเดี๋ยวนี้'],
   };
   const rows = chk.items.map(function (i) {
     const a = i.action && actMap[i.action];
@@ -407,16 +408,40 @@ function scClose() {
       : (chk.canClose ? 'พร้อมปิดงวด — ตรวจครบทุกข้อแล้ว'
                       : 'ยังปิดไม่ได้: ' + chk.items.filter((i) => i.blocking && !i.ok).map((i) => i.label).join(' · ')),
   })
+  + yearEndCard()
   + card({ title:'สถานะงวดทั้งปี', sub:'รอบบัญชี ' + DB.company.fiscalYear + ' · ' + DB.periods.length + ' งวด',
-      /* เปิดปีถัดไปได้เมื่อเหลือไม่ถึงสามเดือนก่อนถึงงวดสุดท้าย กันกดเปิดปีล่วงหน้าไปไกลโดยไม่ตั้งใจ */
-      actions: btn('newyear', '+ เปิดงวดปีบัญชีถัดไป',
-        DB.periods.slice().sort((a, b) => a.start < b.start ? -1 : 1).pop().start <= addDays(TODAY, 92) ? '' : 'disabled'),
+      /* เปิดปีถัดไปได้เมื่อเหลือไม่ถึงสามเดือนก่อนถึงงวดสุดท้าย หรืองวดสุดท้ายปิดไปแล้ว กันกดเปิดปีล่วงหน้าไปไกลโดยไม่ตั้งใจ */
+      actions: btn('newyear', '+ เปิดงวดปีบัญชีถัดไป', (function () {
+        const last = DB.periods.slice().sort((a, b) => a.start < b.start ? -1 : 1).pop();
+        return last.start <= addDays(TODAY, 92) || last.status === 'closed' ? '' : 'disabled';
+      })()),
       body: '<div class="periods">' + DB.periods.map((x) =>
         '<button class="pchip ' + x.status + (x.code === STATE.period ? ' on' : '') + '" data-act="period:' + x.code + '">'
         + esc(thPeriod(x.code)) + '<span>' + (x.status === 'closed' ? 'ปิดแล้ว' : 'เปิดอยู่') + '</span></button>').join('')
         + '</div>',
-      foot: 'ปิดแล้ว ' + closedList.length + ' งวด จาก ' + DB.periods.length + ' งวด · ข้ามปีได้โดยไม่ต้องลงรายการปิดบัญชี '
-        + 'เพราะงบแสดงฐานะการเงินรวมกำไรของทุกปีก่อนหน้าเข้ากำไรสะสมให้เอง · ภาษีหัก ณ ที่จ่ายเดือนธันวาคม ระบบเปิดงวดปีถัดไปให้อัตโนมัติตอนยื่นแบบ' });
+      foot: 'ปิดแล้ว ' + closedList.length + ' งวด จาก ' + DB.periods.length + ' งวด · ปิดงวดเรียงตามลำดับเดือน · '
+        + 'เดือนสุดท้ายของปีต้องปิดบัญชีสิ้นปีก่อน (โอนกำไรขาดทุนเข้ากำไรสะสม) ปีถัดไปรายได้และค่าใช้จ่ายจะเริ่มที่ศูนย์' });
+}
+
+/** การ์ดปิดบัญชีสิ้นปี — ขึ้นเฉพาะเดือนสุดท้ายของปีบัญชี */
+function yearEndCard() {
+  const fy = fiscalYearOf(pEnd());
+  if (!fy || !fy.complete || fy.periods[11].code !== STATE.period) return '';
+  const ye = yearEndOf(fy);
+  const left = yearEndOpen(fy);
+  const is = incomeStatement(fy.start, fy.end);
+  const open = periodIsOpen();
+  return card({
+    title:'ปิดบัญชีสิ้นปี ' + fy.label,
+    sub: ye ? 'ปิดแล้วด้วยใบสำคัญ ' + ye.no + (left.length ? ' · มีรายการลงเพิ่มหลังปิด ' + left.length + ' บัญชี ต้องปิดใหม่' : '')
+      : 'โอนรายได้และค่าใช้จ่ายทั้งปีเข้ากำไรสะสม ณ ' + thDate(fy.end),
+    actions: (ye ? btn('entry:' + ye.no, 'ดูใบปิดบัญชี') + btn('yearend:reopen', 'ยกเลิกการปิดบัญชี', open ? '' : 'disabled') : '')
+      + btn('yearend:close', ye ? 'ปิดบัญชีสิ้นปีอีกครั้ง' : 'ปิดบัญชีสิ้นปี', open && left.length ? 'primary' : 'disabled'),
+    body:'<div class="reco"><div><span>รายได้ทั้งปี</span><b>' + fmt(is.revenue) + '</b></div>'
+      + '<div><span>กำไร (ขาดทุน) สุทธิทั้งปี</span><b>' + fmt(is.net) + '</b></div>'
+      + '<div class="gt"><span>' + (ye && !left.length ? 'โอนเข้ากำไรสะสมแล้ว' : 'จะโอนเข้ากำไรสะสม') + '</span><b>' + fmt(is.net) + '</b></div></div>',
+    foot:'ใบปิดบัญชีไม่นับในงบกำไรขาดทุน (กำไรทั้งปียังแสดงครบ) · งบทดลองของเดือนนี้แสดงก่อนปิดบัญชี · ปิดแล้วค่อยปิดงวดเดือนนี้และเปิดปีถัดไป',
+  });
 }
 
 /* ===================================================================
@@ -1035,46 +1060,54 @@ function vatRegister(kind) {
 
 function scPp30() {
   const f = DB.docs.filing.find((x) => x.form === 'PP30' && x.period === STATE.period);
-  const out = DB.taxTx.filter((t) => t.kind === 'vat_output' && t.period === STATE.period && !t.void);
-  const inn = DB.taxTx.filter((t) => t.kind === 'vat_input' && t.period === STATE.period && !t.void);
-  const outTax = f ? f.outTax : out.reduce((s, t) => s + t.tax, 0);
-  const inTax  = f ? f.inTax  : inn.reduce((s, t) => s + t.tax, 0);
-  const outBase = f ? f.outBase : out.reduce((s, t) => s + t.base, 0);
-  const inBase  = f ? f.inBase  : inn.reduce((s, t) => s + t.base, 0);
-  const payable = outTax - inTax;
+  const r = vatReturnOf(STATE.period);
+  /* ยื่นแล้วใช้ตัวเลขที่ยื่นจริง (แบบเก่าก่อนมียอดยกมาไม่มี carryIn/diff ให้คำนวณจากยอดที่ยื่น) */
+  const v = f ? { outBase: f.outBase, outZero: f.outZero || 0, outExempt: f.outExempt || 0, outTax: f.outTax, inBase: f.inBase,
+    inTax: f.inTax, diff: f.diff != null ? f.diff : f.outTax - f.inTax, carryIn: f.carryIn || 0, net: f.payable,
+    refund: f.refund || 0, carryOut: f.carryOut != null ? f.carryOut : (f.payable < 0 ? -f.payable : 0) }
+    : Object.assign({ refund: 0, carryOut: r.overpaid }, r);
   const due = nextMonthDay(STATE.period, 15);
   const dueE = nextMonthDay(STATE.period, 23);
+  const nonVat = DB.company.vatRegistered === false;
 
-  const line = (n, label, v, cls) =>
+  const line = (n, label, val, cls) =>
     '<tr class="' + (cls || '') + '"><td class="ctr dim">' + n + '</td><td>' + esc(label)
-    + '</td><td class="num' + (v < 0 ? ' neg' : '') + '">' + fmt(v) + '</td></tr>';
+    + '</td><td class="num' + (val < 0 ? ' neg' : '') + '">' + fmt(val) + '</td></tr>';
 
   return card({
     title:'แบบแสดงรายการภาษีมูลค่าเพิ่ม ภ.พ.30',
     sub:'ประจำเดือน ' + thPeriod(STATE.period) + ' · ' + DB.company.name + ' · สำนักงานใหญ่',
     actions: f ? btn('print', 'พิมพ์แบบ')
+               : nonVat ? '<span class="st draft">กิจการไม่ได้จดทะเบียนภาษีมูลค่าเพิ่ม</span>'
                : btn('run:pp30', 'ยื่นแบบและปิดภาษีงวดนี้', periodIsOpen() ? 'primary' : 'disabled'),
     body: '<div class="scroll"><table class="fs"><tbody>'
       + '<tr class="fs-h"><td colspan="3">ยอดขายและภาษีขาย</td></tr>'
-      + line(1, 'ยอดขายในเดือนนี้', outBase + (f ? f.outZero : 0))
-      + line(2, 'ยอดขายที่เสียภาษีอัตราร้อยละ 0', f ? f.outZero : 0)
-      + line(4, 'ยอดขายที่ต้องเสียภาษี', outBase)
-      + line(5, 'ภาษีขายเดือนนี้', outTax, 'fs-s')
+      + line(1, 'ยอดขายในเดือนนี้', v.outBase + v.outZero + v.outExempt)
+      + line(2, 'หัก ยอดขายที่เสียภาษีอัตราร้อยละ 0', v.outZero)
+      + line(3, 'หัก ยอดขายที่ได้รับยกเว้น', v.outExempt)
+      + line(4, 'ยอดขายที่ต้องเสียภาษี', v.outBase)
+      + line(5, 'ภาษีขายเดือนนี้', v.outTax, 'fs-s')
       + '<tr class="fs-h"><td colspan="3">ยอดซื้อและภาษีซื้อ</td></tr>'
-      + line(6, 'ยอดซื้อที่มีสิทธินำภาษีซื้อมาหัก', inBase)
-      + line(7, 'ภาษีซื้อเดือนนี้', inTax, 'fs-s')
+      + line(6, 'ยอดซื้อที่มีสิทธินำภาษีซื้อมาหัก', v.inBase)
+      + line(7, 'ภาษีซื้อเดือนนี้', v.inTax, 'fs-s')
       + '<tr class="fs-h"><td colspan="3">การคำนวณภาษี</td></tr>'
-      + (payable >= 0
-          ? line(8, 'ภาษีที่ต้องชำระ', payable, 'fs-t')
-          : line(9, 'ภาษีที่ชำระเกิน (ยกไปเครดิตเดือนถัดไป)', -payable, 'fs-t'))
+      + (v.diff >= 0 ? line(8, 'ภาษีที่ต้องชำระเดือนนี้', v.diff) : line(9, 'ภาษีที่ชำระเกินเดือนนี้', -v.diff))
+      + line(10, 'ภาษีที่ชำระเกินยกมา', v.carryIn)
+      + (v.net >= 0
+          ? line(11, 'ภาษีสุทธิที่ต้องชำระ', v.net, 'fs-t')
+          : line(12, 'ภาษีสุทธิที่ชำระเกิน' + (v.refund ? ' (ขอคืนเป็นเงินสด)' : ' (ยกไปเครดิตเดือนถัดไป)'), -v.net, 'fs-t'))
       + '</tbody></table></div>'
       + '<div class="reco">'
       + '<div><span>กำหนดยื่นแบบกระดาษ</span><b>' + thDate(due) + '</b></div>'
       + '<div><span>กำหนดยื่นผ่านอินเทอร์เน็ต (ขยาย 8 วัน)</span><b>' + thDate(dueE) + '</b></div>'
-      + (f ? '<div class="gt"><span>สถานะ</span><b>ยื่นแล้วเมื่อ ' + thDate(f.filedDate) + ' · ใบสำคัญ ' + f.entryNo + '</b></div>'
+      + (v.net < 0 ? '<div><span>' + (v.refund ? 'ขอคืนเป็นเงินสด' : 'ยกไปหักเดือนถัดไป') + '</span><b>'
+          + fmt(v.refund || v.carryOut) + '</b></div>' : '')
+      + (f ? '<div class="gt"><span>สถานะ</span><b>ยื่นแล้วเมื่อ ' + thDate(f.filedDate)
+             + (f.entryNo ? ' · ใบสำคัญ ' + f.entryNo : ' · ไม่มียอดต้องลงบัญชี') + '</b></div>'
            : '<div class="gt"><span>สถานะ</span><b>ยังไม่ได้ยื่น</b></div>')
       + '</div>',
-    foot:'เมื่อยื่นแบบ ระบบจะปิดบัญชีภาษีขายและภาษีซื้อของงวดเป็นศูนย์ แล้วตั้งเป็นภาษีค้างชำระหรือภาษีขอคืน ตามผลการคำนวณ',
+    foot: nonVat ? 'กิจการไม่ได้จดทะเบียนภาษีมูลค่าเพิ่ม จึงไม่ต้องยื่น ภ.พ.30 — เปลี่ยนได้ที่ข้อมูลบริษัท'
+      : 'เมื่อยื่นแบบ ระบบจะปิดบัญชีภาษีขายและภาษีซื้อของงวดเป็นศูนย์ หักภาษีที่ชำระเกินยกมา แล้วตั้งเป็นภาษีค้างชำระหรือภาษีขอคืน ตามผลการคำนวณ',
   });
 }
 

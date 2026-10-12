@@ -177,16 +177,26 @@ const overflowInfo = (page) => page.evaluate(() => {
 
   await page.evaluate(() => { STATE.screen = 'pp30'; render(); });
   await page.click('[data-act="run:pp30"]');
-  await page.waitForTimeout(300);
+  await page.waitForSelector('#modal.show');
+  const pv30 = await page.evaluate(() => document.querySelector('#modal').textContent);
+  ok('หน้าตัวอย่าง ภ.พ.30 แสดงบรรทัด 10 ภาษีชำระเกินยกมา และบรรทัดสุทธิก่อนยื่น', /10\. ภาษีที่ชำระเกินยกมา/.test(pv30) && /(11|12)\. ภาษีสุทธิ/.test(pv30));
+  await page.click('[data-act="modal:submit"]');
+  await closed(page);
   const f = await page.evaluate(() => DB.docs.filing.find((x) => x.form === 'PP30' && x.period === '2026-07'));
   ok('ยื่น ภ.พ.30 แล้ว', !!f, f && 'ต้องชำระ ' + f.payable / 10000);
+  ok('แบบที่ยื่นแล้วแสดงบรรทัด 3 ยอดขายที่ได้รับยกเว้น และบรรทัด 10', await page.evaluate(() => {
+    const t = document.querySelector('#main, main, body').textContent; return /ยอดขายที่ได้รับยกเว้น/.test(t) && /ภาษีที่ชำระเกินยกมา/.test(t); }));
 
   await page.evaluate(() => { STATE.screen = 'pnd'; render(); });
   for (let i = 0; i < 3; i++) {
     const b = await page.$('[data-act^="run:pnd:"]');
     if (!b) break;
     await b.click();
-    await page.waitForTimeout(200);
+    await page.waitForSelector('#modal.show');
+    if (i === 0) ok('ยื่น ภ.ง.ด. เลือกวันที่นำส่งและบัญชีที่จ่ายได้', await page.evaluate(() =>
+      !!document.querySelector('#modal [name="wdate"]') && !!document.querySelector('#modal [name="wacc"]')));
+    await page.click('[data-act="modal:submit"]');
+    await closed(page);
   }
   const filings = await page.evaluate(() => DB.docs.filing.filter((x) => x.period === '2026-07').map((x) => x.form));
   ok('ยื่นแบบภาษีหัก ณ ที่จ่ายแล้ว', filings.length > 1, filings.join(', '));
@@ -204,6 +214,8 @@ const overflowInfo = (page) => page.evaluate(() => {
   }
   ok('กระทบยอดครบทุกรายการ', await page.evaluate(() => DB.bankTxns.every((t) => t.matched)));
 
+  /* ปิดงวดต้องเรียงตามลำดับ — ข้อมูลตัวอย่างยังเปิดทุกเดือน ปิด ม.ค.–มิ.ย. ก่อน */
+  await page.evaluate(() => { ['2026-01', '2026-02', '2026-03', '2026-04', '2026-05', '2026-06'].forEach((p) => closePeriod(p)); });
   await page.evaluate(() => { STATE.screen = 'close'; render(); });
   const chk = await page.evaluate(() => closeChecklist('2026-07'));
   ok('รายการตรวจก่อนปิดงวดผ่านครบ', chk.canClose,

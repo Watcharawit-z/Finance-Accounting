@@ -330,6 +330,15 @@ function accBySub(subType) {
 /* ===================================================================
    งวดบัญชี
    =================================================================== */
+/** ปีบัญชีของวันที่นี้ — งวดเรียงต่อกันปีละ 12 งวดนับจากงวดแรกของบริษัท (รอบบัญชีเริ่มเดือนไหนก็ได้) */
+function fiscalYearOf(date) {
+  const ps = DB.periods.slice().sort((a, b) => (a.start < b.start ? -1 : 1));
+  const i = ps.findIndex((p) => date >= p.start && date <= p.end);
+  if (i < 0) return null;
+  const list = ps.slice(i - (i % 12), i - (i % 12) + 12);
+  return { start: list[0].start, end: list[list.length - 1].end, periods: list, complete: list.length === 12,
+    label: thDate(list[0].start) + ' – ' + thDate(list[list.length - 1].end) };
+}
 function periodFor(date) {
   const p = DB.periods.find((x) => date >= x.start && date <= x.end);
   if (!p) {
@@ -517,8 +526,33 @@ function txRestore(snap) {
 function atomically(fn) {
   if (TX_BULK > 0) return fn();
   const snap = txSnapshot();
-  try { return fn(); }
+  const taxBefore = DB.taxTx.length;
+  try {
+    const r = fn();
+    assertTaxRowsOpen(taxBefore);
+    return r;
+  }
   catch (e) { txRestore(snap); throw e; }
+}
+/* ★ เอกสารที่มีภาษีลงวันที่ในเดือนที่ยื่นแบบไปแล้ว ภาษีจะค้างอยู่ในบัญชีโดยไม่เข้าแบบไหนเลย
+   (แบบยื่นแล้วยื่นซ้ำไม่ได้) ตรวจทุกคำสั่งที่เขียนข้อมูลจากแถวทะเบียนภาษีที่เพิ่งเกิด
+   จึงครอบคลุมเอกสารทุกชนิด รวมถึงชนิดที่เพิ่มทีหลัง โดยไม่ต้องไล่ใส่ทีละคำสั่ง */
+const TAX_FORM_TH = { PP30:'ภ.พ.30', PND1:'ภ.ง.ด.1', PND3:'ภ.ง.ด.3', PND53:'ภ.ง.ด.53' };
+function assertTaxRowsOpen(from) {
+  DB.taxTx.slice(from).forEach(function (t) {
+    /* แถวที่เข้าแบบไปแล้ว (มีเลขอ้างอิงการยื่น) ไม่ใช่ปัญหา — ปัญหาคือแถวที่เกิดหลังยื่นแล้วไม่มีแบบไหนรับ */
+    if (t.void || t.filingId) return;
+    const vat = t.kind === 'vat_output' || t.kind === 'vat_input';
+    if (vat && !t.tax && !t.base && !t.zero && !t.exempt && !t.nonClaimable) return;
+    if (!vat && (t.kind !== 'wht' || !t.tax || t.channel === 'e_wht')) return;
+    const form = vat ? 'PP30' : t.form;
+    if (!DB.docs.filing.some((f) => f.form === form && f.period === t.period)) return;
+    throw new DomainError('TAX_PERIOD_FILED',
+      'ยื่นแบบ ' + TAX_FORM_TH[form] + ' งวด ' + thPeriod(t.period) + ' ไปแล้ว — เอกสารที่มีภาษีลงวันที่ในเดือนนั้นไม่ได้',
+      t.kind === 'vat_input' ? 'ลงวันที่ที่ได้รับใบกำกับภาษีในเดือนที่ยังไม่ได้ยื่น (ภาษีซื้อขอหักได้ภายใน 6 เดือนนับจากเดือนในใบกำกับ)'
+        : t.kind === 'vat_output' ? 'ออกเอกสารด้วยวันที่ของเดือนปัจจุบัน หรือยื่นแบบเพิ่มเติมกับกรมสรรพากรก่อน'
+        : 'ใช้วันที่จ่ายเงินจริงในเดือนที่ยังไม่ได้ยื่น หรือยื่นแบบเพิ่มเติมกับกรมสรรพากรก่อน');
+  });
 }
 function transactional(fn) {
   return function () { const a = arguments, t = this; return atomically(() => fn.apply(t, a)); };
@@ -550,6 +584,7 @@ const ENTRY_FROM = {
   depreciation:['ค่าเสื่อมราคาประจำงวด', 'ไปที่หน้าค่าเสื่อมราคาแล้วกดยกเลิกงวด ระบบจะคืนค่าเสื่อมสะสมของทรัพย์สินให้ด้วย'],
   filing:['การยื่นแบบภาษี', 'แบบที่ยื่นแล้วต้องยื่นเพิ่มเติมกับกรมสรรพากร แล้วบันทึกปรับปรุงแทน'],
   import:['การนำเข้าข้อมูล', 'ยกเลิกที่หน้านำเข้าข้อมูลจากระบบเดิม'],
+  yearEnd:['การปิดบัญชีสิ้นปี', 'ไปที่หน้าปิดงวดของเดือนสุดท้ายของปีแล้วกดยกเลิกการปิดบัญชีสิ้นปี'],
   stockAdj:['ใบปรับปรุงสินค้า', 'เปิดใบปรับปรุงสินค้าที่หน้าสินค้า → ยอดยกมา ตรวจนับ ตัดจำหน่าย แล้วกดยกเลิก'],
   reversal:['การกลับรายการ', 'กลับรายการซ้อนไม่ได้ ให้บันทึกใบสำคัญใหม่แทน'],
 };
@@ -570,7 +605,8 @@ function reverse(entryNo, reason, date, opts) {
       'การกลับรายการต้องระบุเหตุผล เพื่อให้ผู้สอบบัญชีตรวจสอบได้ภายหลัง');
   }
   const rev = post({
-    type: 'adjustment',
+    /* กลับรายการปิดบัญชีสิ้นปียังเป็นรายการปิดบัญชี — งบกำไรขาดทุนต้องไม่นับทั้งคู่ */
+    type: e.type === 'closing' ? 'closing' : 'adjustment',
     date: date || e.date,
     desc: 'กลับรายการ ' + e.no + ': ' + reason.trim(),
     src: 'reversal', srcId: e.no,
@@ -649,6 +685,9 @@ function trialBalance(from, to) {
     let od = 0, dr = 0, cr = 0;
     DB.entries.forEach(function (e) {
       if (!LIVE(e)) return;
+      /* งบทดลองของช่วงที่มีวันปิดบัญชีสิ้นปี แสดงก่อนปิดบัญชี (บัญชีรายได้/ค่าใช้จ่ายยังมียอดทั้งปี)
+         ส่วนช่วงหลังจากนั้นยกยอดหลังปิดบัญชีมาแล้ว รายได้/ค่าใช้จ่ายเริ่มที่ศูนย์ กำไรอยู่ในกำไรสะสม */
+      if (e.type === 'closing' && e.date >= from && e.date <= to) return;
       e.lines.forEach(function (l) {
         if (l.acc !== a.code) return;
         if (e.date < from) od += l.dr - l.cr;
@@ -746,7 +785,8 @@ function incomeStatement(from, to) {
   const out = [];
   PL_LINES.forEach(function (L) {
     if (L.k === 'd') {
-      const v = balBySub(L.sub, to, from) * L.sign;
+      /* ใบปิดบัญชีสิ้นปีโอนรายได้/ค่าใช้จ่ายเข้ากำไรสะสม — ถ้านับด้วย กำไรทั้งปีจะเป็นศูนย์ */
+      const v = balBySub(L.sub, to, from, notClosingEntry) * L.sign;
       vals[L.label] = v;
       out.push({ ...L, value: v });
     } else out.push({ ...L });
@@ -772,6 +812,7 @@ function incomeStatement(from, to) {
 /* ---------- งบแสดงการเปลี่ยนแปลงส่วนของผู้ถือหุ้น ----------
    ยอดต้นงวดรวมใบสำคัญยอดยกมาที่ลงวันแรกของงวดด้วย · ยอดปลายงวดต้องเท่ากับงบแสดงฐานะการเงิน */
 const RETAINED_SUB = ['retained_earnings', 'current_year_earnings', 'dividend', 'opening_balance'];
+const notClosingEntry = (e) => e.type !== 'closing';
 function equityStatement(from, to) {
   const before = addDays(from, -1);
   const isOpen = isOpeningEntry;
@@ -785,7 +826,7 @@ function equityStatement(from, to) {
   /* กำไรขาดทุนในใบยอดยกมาที่ลงกลางปี คือกำไรสะสมตั้งแต่ต้นปีถึงวันตัดยอด เป็นกำไรของปีนี้
      ต้องนับเป็นกำไรสุทธิของงวดให้ตรงกับงบกำไรขาดทุน ไม่ใช่ย้ายไปเป็นยอดต้นงวด (สองงบจะขัดกัน) */
   const ret = { open: opening(RETAINED_SUB) - bal(pnl, before), close: closing(RETAINED_SUB) + closing(pnl) };
-  const net = -balanceOf(pnl, to, from);
+  const net = -balanceOf(pnl, to, from, notClosingEntry);
   const dividend = -balBySub(['dividend'], to, from, notOpen);
   const capMove = cap.close - cap.open;
   const resMove = res.close - res.open;

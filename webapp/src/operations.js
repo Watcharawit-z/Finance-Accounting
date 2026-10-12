@@ -1024,29 +1024,63 @@ function runPayroll(period) {
 }
 
 /* ---------- ปิดภาษีมูลค่าเพิ่มรายเดือน (ภ.พ.30) ---------- */
-function fileVat(period) {
+/* ภาษีที่ชำระเกินยกมา = ยอดยกไปของ ภ.พ.30 ฉบับล่าสุดก่อนงวดนี้ (ฉบับที่ขอคืนเป็นเงินสด ไม่มียอดยกไป) */
+function vatCarryInOf(period) {
+  const prev = DB.docs.filing.filter((f) => f.form === 'PP30' && f.period < period)
+    .sort((a, b) => (a.period < b.period ? 1 : -1))[0];
+  return prev ? (prev.carryOut || 0) : 0;
+}
+
+/* ตัวเลขทุกบรรทัดของแบบ ภ.พ.30 — ใช้ทั้งตอนยื่นจริงและหน้าตัวอย่างก่อนยื่น ตัวเลขจึงตรงกันเสมอ */
+function vatReturnOf(period) {
+  /* แถวของเอกสารที่ยกเลิกแล้วยอดเป็นศูนย์ ไม่นับเข้าแบบ แต่ยังโชว์ในรายงานภาษีว่า "ยกเลิก" */
+  const out = DB.taxTx.filter((t) => t.kind === 'vat_output' && t.period === period && !t.void);
+  const inn = DB.taxTx.filter((t) => t.kind === 'vat_input' && t.period === period && !t.void);
+  const sum = (rows, k) => rows.reduce((s, t) => s + (t[k] || 0), 0);
+  const outBase = sum(out, 'base'), outZero = sum(out, 'zero'), outExempt = sum(out, 'exempt');
+  const outTax = sum(out, 'tax'), inTax = sum(inn, 'tax');
+  const diff = outTax - inTax;                 // บรรทัด 8 (บวก) หรือ 9 (ลบ)
+  const carryIn = vatCarryInOf(period);        // บรรทัด 10
+  const net = diff - carryIn;                  // บวก = บรรทัด 11 ต้องชำระ · ลบ = บรรทัด 12 ชำระเกินสุทธิ
+  return { out, inn, outBase, outZero, outExempt, outTax, inBase: sum(inn, 'base'), inTax,
+    diff, carryIn, net, payable: net, overpaid: net < 0 ? -net : 0 };
+}
+
+function fileVat(period, opts) {
+  opts = opts || {};
   const existing = DB.docs.filing.find((f) => f.form === 'PP30' && f.period === period);
   if (existing) {
     throw new DomainError('ALREADY_FILED',
       'ยื่น ภ.พ.30 งวด ' + thPeriod(period) + ' ไปแล้วเมื่อ ' + thDate(existing.filedDate));
   }
-  /* แถวของเอกสารที่ยกเลิกแล้วยอดเป็นศูนย์ ไม่นับเข้าแบบ แต่ยังโชว์ในรายงานภาษีว่า "ยกเลิก" */
-  const out = DB.taxTx.filter((t) => t.kind === 'vat_output' && t.period === period && !t.void);
-  const inn = DB.taxTx.filter((t) => t.kind === 'vat_input' && t.period === period && !t.void);
-  const outTax = out.reduce((s, t) => s + t.tax, 0);
-  const inTax = inn.reduce((s, t) => s + t.tax, 0);
-  const payable = outTax - inTax;
+  /* ยื่นเรียงเดือน — ภาษีชำระเกินยกมาของเดือนนี้มาจากแบบเดือนก่อน ข้ามเดือนไปแล้วยอดยกมาผิดทั้งสาย */
+  const missing = DB.taxTx.filter((t) => (t.kind === 'vat_output' || t.kind === 'vat_input') && !t.void
+    && t.period < period && !t.filingId && (t.tax || t.base || t.zero || t.exempt)
+    && !DB.docs.filing.some((f) => f.form === 'PP30' && f.period === t.period))
+    .map((t) => t.period).sort()[0];
+  if (missing) {
+    throw new DomainError('VAT_FILE_ORDER', 'ต้องยื่น ภ.พ.30 งวด ' + thPeriod(missing) + ' ก่อน แล้วค่อยยื่นงวด ' + thPeriod(period),
+      'ภาษีที่ชำระเกินยกมาของเดือนถัดไปมาจากแบบของเดือนก่อน');
+  }
+  const r = vatReturnOf(period);
+  const refund = opts.refund && r.overpaid > 0 ? r.overpaid : 0;
+  const carryOut = r.overpaid - refund;
   const endDate = endOfMonth(period + '-01');
 
   /* ล้างบัญชีภาษีขายและภาษีซื้อของงวดให้เป็นศูนย์ทุกครั้งที่มียอด แม้ผลสุทธิเป็นศูนย์
      (ภาษีขาย 70 ภาษีซื้อ 70 ต้องล้างทั้งคู่ ไม่ใช่ค้างอยู่ในงบ) และรองรับยอดติดลบ
-     (เดือนที่มีแต่ใบลดหนี้ ภาษีขายติดลบ ต้องกลับไปอยู่ฝั่งเครดิต) */
-  const signed = (acc, amt) => amt > 0 ? { acc, dr: amt } : { acc, cr: -amt };
+     (เดือนที่มีแต่ใบลดหนี้ ภาษีขายติดลบ ต้องกลับไปอยู่ฝั่งเครดิต)
+     ภาษีชำระเกินยกมาที่ใช้หักในเดือนนี้ ล้างออกจากบัญชีภาษีขอคืน (เครดิต) ส่วนที่ชำระเกินเพิ่มตั้งเป็นภาษีขอคืน (เดบิต)
+     ขอคืนเป็นเงินสด: ยอดยังค้างในบัญชีภาษีขอคืนจนกว่าจะได้รับเงินคืน แต่ไม่ยกไปหักเดือนถัดไป */
+  const signed = (acc, amt, memo) => amt > 0 ? { acc, dr: amt, memo } : { acc, cr: -amt, memo };
+  const recvDelta = r.overpaid - r.carryIn;
   const vatLines = [
-    signed(accBySub('output_vat'), outTax),
-    signed(accBySub('input_vat'), -inTax),
-    payable > 0 ? { acc: accBySub('vat_payable'), cr: payable } : { acc: accBySub('vat_receivable'), dr: -payable },
-  ].filter((l) => (l.dr || 0) !== 0 || (l.cr || 0) !== 0);
+    signed(accBySub('output_vat'), r.outTax),
+    signed(accBySub('input_vat'), -r.inTax),
+    r.net > 0 ? { acc: accBySub('vat_payable'), cr: r.net } : null,
+    signed(accBySub('vat_receivable'), recvDelta,
+      refund ? 'ขอคืนเป็นเงินสด ' + fmt(refund) + ' บาท' : r.carryIn ? 'ภาษีชำระเกินยกมา ' + fmt(r.carryIn) + ' บาท' : null),
+  ].filter((l) => l && ((l.dr || 0) !== 0 || (l.cr || 0) !== 0));
   const je = vatLines.length ? post({
     type: 'adjustment', date: endDate,
     desc: 'ปิดภาษีมูลค่าเพิ่มงวด ' + thPeriod(period),
@@ -1057,49 +1091,69 @@ function fileVat(period) {
   const filing = {
     form: 'PP30', period, filedDate: endDate,
     dueDate: addDays(endOfMonth(period + '-01'), 15),
-    outBase: out.reduce((s, t) => s + t.base, 0),
-    outZero: out.reduce((s, t) => s + (t.zero || 0), 0),
-    outTax, inBase: inn.reduce((s, t) => s + t.base, 0), inTax,
-    payable, entryNo: je ? je.no : null, count: out.length + inn.length,
+    outBase: r.outBase, outZero: r.outZero, outExempt: r.outExempt,
+    outTax: r.outTax, inBase: r.inBase, inTax: r.inTax,
+    diff: r.diff, carryIn: r.carryIn, carryOut, refund,
+    payable: r.net, entryNo: je ? je.no : null, count: r.out.length + r.inn.length,
   };
   DB.docs.filing.unshift(filing);
-  out.concat(inn).forEach((t) => { t.filingId = 'PP30|' + period; });
-  audit('filing', 'PP30|' + period, 'file', null, { payable: fmt(payable) });
+  r.out.concat(r.inn).forEach((t) => { t.filingId = 'PP30|' + period; });
+  audit('filing', 'PP30|' + period, 'file', null, { payable: fmt(r.net), carryIn: fmt(r.carryIn),
+    carryOut: fmt(carryOut), refund: fmt(refund) });
   return filing;
 }
 
 /* ---------- ยื่นภาษีหัก ณ ที่จ่าย ---------- */
-function fileWht(period, form) {
+const WHT_FORM_SUB = { PND1: 'wht_payable_pnd1', PND3: 'wht_payable_pnd3', PND53: 'wht_payable_pnd53' };
+function whtRowsOf(period, form) {
+  // ★ กันรายการที่ธนาคารนำส่งแทน (e-WHT) ออก ไม่งั้นนำส่งซ้ำ
+  return DB.taxTx.filter((t) => t.kind === 'wht' && t.period === period
+    && t.form === form && t.channel === 'manual' && !t.void);
+}
+
+/* opts.date วันที่จ่ายจริง (ค่าเริ่มต้นวันที่ 7 ของเดือนถัดไป) · opts.account บัญชีเงินสด/ธนาคารที่จ่าย
+   opts.nil ยื่นแบบไม่มีรายการ (ภ.ง.ด.1 ต้องยื่นทุกเดือนที่มีลูกจ้าง แม้ไม่มีภาษีหัก) — ไม่มีใบสำคัญ */
+function fileWht(period, form, opts) {
+  opts = opts || {};
+  if (!WHT_FORM_SUB[form]) throw new DomainError('WHT_FORM_UNKNOWN', 'ไม่รู้จักแบบ ' + form);
   const key = form + '|' + period;
   if (DB.docs.filing.find((f) => f.form === form && f.period === period)) {
-    throw new DomainError('ALREADY_FILED', 'ยื่น ' + form + ' งวด ' + thPeriod(period) + ' ไปแล้ว');
+    throw new DomainError('ALREADY_FILED', 'ยื่น ' + TAX_FORM_TH[form] + ' งวด ' + thPeriod(period) + ' ไปแล้ว');
   }
-  // ★ กันรายการที่ธนาคารนำส่งแทน (e-WHT) ออก ไม่งั้นนำส่งซ้ำ
-  const rows = DB.taxTx.filter((t) => t.kind === 'wht' && t.period === period
-    && t.form === form && t.channel === 'manual' && !t.void);
-  if (!rows.length) {
+  const rows = whtRowsOf(period, form);
+  if (!rows.length && !opts.nil) {
     throw new DomainError('NOTHING_TO_FILE',
-      'ไม่มีรายการที่ต้องยื่นใน ' + form + ' งวด ' + thPeriod(period),
+      'ไม่มีรายการที่ต้องยื่นใน ' + TAX_FORM_TH[form] + ' งวด ' + thPeriod(period),
       'รายการที่นำส่งผ่าน e-Withholding Tax ธนาคารนำส่งให้แล้ว ไม่ต้องยื่นซ้ำ');
   }
   const total = rows.reduce((s, t) => s + t.tax, 0);
   const endDate = endOfMonth(period + '-01');
-  /* นำส่งภาษีเดือนธันวาคมเกิดในเดือนมกราคมปีถัดไป — ถ้ายังไม่มีงวดปีหน้า เปิดให้ก่อน */
-  const remitDate = addDays(endDate, 7);
-  if (!DB.periods.some((x) => remitDate >= x.start && remitDate <= x.end)) {
-    openNextFiscalYear('ต้องบันทึกการนำส่ง ' + form + ' งวด ' + thPeriod(period) + ' ในเดือนถัดไป');
+  const remitDate = opts.date || addDays(endDate, 7);
+  if (remitDate <= endDate) {
+    throw new DomainError('WHT_REMIT_DATE', 'วันที่นำส่งต้องอยู่หลังสิ้นงวด ' + thPeriod(period),
+      'ภาษีหัก ณ ที่จ่ายนำส่งในเดือนถัดไป');
   }
-  const acctSub = form === 'PND1' ? 'wht_payable_pnd1' : form === 'PND3' ? 'wht_payable_pnd3' : 'wht_payable_pnd53';
-
-  const je = post({
-    type: 'payment', date: addDays(endDate, 7),
-    desc: 'นำส่งภาษีหัก ณ ที่จ่าย ' + form + ' งวด ' + thPeriod(period),
+  const payAcc = opts.account || accBySub('bank');
+  if (total) {
+    const pa = DB.accounts.find((a) => a.code === payAcc);
+    if (!pa || !pa.postable || (pa.subType !== 'cash' && pa.subType !== 'bank')) {
+      throw new DomainError('PAY_ACCOUNT_INVALID', 'บัญชีที่จ่ายต้องเป็นบัญชีเงินสดหรือเงินฝากธนาคาร');
+    }
+    /* นำส่งภาษีเดือนสุดท้ายของปีเกิดในปีบัญชีถัดไป — ถ้ายังไม่มีงวดปีหน้า เปิดให้ก่อน */
+    if (!DB.periods.some((x) => remitDate >= x.start && remitDate <= x.end)) {
+      openNextFiscalYear('ต้องบันทึกการนำส่ง ' + TAX_FORM_TH[form] + ' งวด ' + thPeriod(period) + ' ในเดือนถัดไป');
+    }
+  }
+  /* แบบที่ภาษีเป็นศูนย์ (ทุกแถวต่ำกว่าเกณฑ์ หรือยื่นไม่มีรายการ) ยื่นได้แต่ไม่มีเงินต้องจ่าย จึงไม่มีใบสำคัญ */
+  const je = total ? post({
+    type: 'payment', date: remitDate,
+    desc: 'นำส่งภาษีหัก ณ ที่จ่าย ' + TAX_FORM_TH[form] + ' งวด ' + thPeriod(period),
     src: 'filing', srcId: key,
-    lines: [{ acc: accBySub(acctSub), dr: total }, { acc: accBySub('bank'), cr: total }],
-  });
-  const filing = { form, period, filedDate: addDays(endDate, 7), dueDate: addDays(endDate, 7),
-    count: rows.length, total, entryNo: je.no,
-    excluded: DB.taxTx.filter((t) => t.kind === 'wht' && t.period === period && t.channel === 'e_wht' && !t.void).length };
+    lines: [{ acc: accBySub(WHT_FORM_SUB[form]), dr: total }, { acc: payAcc, cr: total }],
+  }) : null;
+  const filing = { form, period, filedDate: remitDate, dueDate: addDays(endDate, 7),
+    count: rows.length, total, entryNo: je ? je.no : null, payAccount: total ? payAcc : null, nil: !rows.length,
+    excluded: DB.taxTx.filter((t) => t.kind === 'wht' && t.period === period && t.form === form && t.channel === 'e_wht' && !t.void).length };
   DB.docs.filing.unshift(filing);
   rows.forEach((t) => { t.filingId = key; });
   audit('filing', key, 'file', null, { count: rows.length, total: fmt(total) });
@@ -1135,8 +1189,25 @@ function closeChecklist(period) {
   items.push({ label: 'ทำเงินเดือนประจำงวด', ok: !!pay,
     detail: pay ? pay.count + ' คน ' + fmt(pay.net) + ' บาท' : 'ยังไม่ได้ทำ', blocking: false, action: 'payroll' });
   const vat = DB.docs.filing.find((f) => f.form === 'PP30' && f.period === period);
-  items.push({ label: 'ยื่นแบบ ภ.พ.30', ok: !!vat,
-    detail: vat ? 'ชำระ ' + fmt(vat.payable) + ' บาท' : 'ยังไม่ได้ยื่น', blocking: true, action: 'vat' });
+  /* กิจการที่ไม่ได้จดทะเบียนภาษีมูลค่าเพิ่มไม่ต้องยื่น ภ.พ.30 */
+  if (DB.company.vatRegistered !== false || vat) {
+    items.push({ label: 'ยื่นแบบ ภ.พ.30', ok: !!vat,
+      detail: !vat ? 'ยังไม่ได้ยื่น'
+        : vat.payable >= 0 ? 'ชำระ ' + fmt(vat.payable) + ' บาท'
+        : vat.refund ? 'ขอคืนเป็นเงินสด ' + fmt(vat.refund) + ' บาท'
+        : 'ชำระเกิน ยกไปเดือนถัดไป ' + fmt(-vat.payable) + ' บาท',
+      blocking: true, action: 'vat' });
+  }
+  /* เดือนสุดท้ายของปีบัญชี: ต้องปิดบัญชีสิ้นปีก่อนปิดงวด ไม่งั้นปีถัดไปจะยกยอดรายได้/ค่าใช้จ่ายมาทั้งก้อน */
+  const fy = fiscalYearOf(endDate);
+  if (fy && fy.complete && fy.periods[11].code === period) {
+    const left = yearEndOpen(fy);
+    const ye = yearEndOf(fy);
+    items.push({ label: 'ปิดบัญชีสิ้นปี — โอนกำไรขาดทุนทั้งปีเข้ากำไรสะสม', ok: left.length === 0,
+      detail: left.length === 0 ? (ye ? 'ปิดแล้ว ' + ye.no : 'ไม่มีรายได้/ค่าใช้จ่ายต้องปิด')
+        : (ye ? 'มีรายการลงเพิ่มหลังปิดบัญชี ' + left.length + ' บัญชี — กดปิดบัญชีสิ้นปีอีกครั้ง' : 'ยังไม่ได้ปิด ' + left.length + ' บัญชี'),
+      blocking: true, action: 'yearend' });
+  }
   const unmatched = DB.bankTxns.filter((t) => !t.matched && periodOf(t.date) <= period).length;
   items.push({ label: 'รายการธนาคารกระทบยอดครบ', ok: unmatched === 0,
     detail: unmatched === 0 ? 'ครบ' : 'ค้าง ' + unmatched + ' รายการ', blocking: false, action: 'bank' });
@@ -1145,6 +1216,13 @@ function closeChecklist(period) {
 }
 
 function closePeriod(period) {
+  /* ปิดงวดตามลำดับ — ปิดเดือนหลังทั้งที่เดือนก่อนยังเปิด ยอดยกมาของเดือนหลังเปลี่ยนได้ทั้งที่ปิดไปแล้ว */
+  const earlier = DB.periods.filter((x) => x.start < period + '-01' && x.status !== 'closed')
+    .sort((a, b) => (a.start < b.start ? -1 : 1));
+  if (earlier.length) {
+    throw new DomainError('CLOSE_OUT_OF_ORDER', 'ต้องปิดงวด ' + thPeriod(earlier[0].code) + ' ก่อน แล้วค่อยปิดงวด ' + thPeriod(period),
+      'ปิดงวดเรียงตามลำดับเดือน');
+  }
   const chk = closeChecklist(period);
   if (!chk.canClose) {
     throw new DomainError('CLOSE_BLOCKED',
@@ -2301,8 +2379,64 @@ function openNextFiscalYear(reason) {
     }
     d = addDays(endOfMonth(code + '-01'), 1);
   }
+  const fy = made.length ? fiscalYearOf(made[0] + '-01') : null;
+  if (fy && DB.company) DB.company.fiscalYear = String(Number(fy.start.slice(0, 4)) + 543);
   audit('period', made[0] + '…' + made[made.length - 1], 'open_year', null, { periods: made.length }, reason || 'เปิดปีบัญชีถัดไป');
   return made;
+}
+
+/* ===================================================================
+   ปิดบัญชีสิ้นปี — ใบสำคัญปิดบัญชี (CL) โอนรายได้และค่าใช้จ่ายทั้งปีเข้ากำไรสะสม ณ วันสิ้นปีบัญชี
+   งบกำไรขาดทุนไม่นับใบปิดบัญชี (ไม่งั้นกำไรทั้งปีเป็นศูนย์) งบทดลองของเดือนสุดท้ายแสดงก่อนปิดบัญชี
+   ปีถัดไปบัญชีรายได้/ค่าใช้จ่ายเริ่มที่ศูนย์ และกำไรสะสมรวมกำไรของปีที่ปิดแล้ว
+   ปิดแล้วยังมีรายการลงเพิ่มในปีนั้น กดปิดบัญชีสิ้นปีอีกครั้ง ระบบกลับใบเดิมแล้วปิดใหม่ทั้งปี
+   =================================================================== */
+const yearEndOf = (fy) => DB.entries.find((e) => e.src === 'yearEnd' && e.srcId === fy.start && e.status === 'posted');
+/** ยอดรายได้/ค่าใช้จ่ายของปีที่ยังไม่ได้โอนเข้ากำไรสะสม (รวมใบปิดบัญชีแล้ว) — ศูนย์ทุกบัญชี = ปิดบัญชีครบ */
+function yearEndOpen(fy) {
+  return DB.accounts.filter((a) => a.postable && (a.type === 'revenue' || a.type === 'expense'))
+    .map((a) => ({ acc: a.code, bal: balanceOf(a.code, fy.end, fy.start) })).filter((x) => x.bal !== 0);
+}
+function closeFiscalYear(date, reason) {
+  const fy = fiscalYearOf(date);
+  if (!fy) throw new DomainError('PERIOD_NOT_FOUND', 'ไม่พบงวดบัญชีของวันที่ ' + thDate(date));
+  if (!fy.complete) {
+    throw new DomainError('FISCAL_YEAR_INCOMPLETE', 'ปีบัญชีนี้มีงวดไม่ครบ 12 งวด ยังปิดบัญชีสิ้นปีไม่ได้');
+  }
+  const old = yearEndOf(fy);
+  if (old) reverse(old.no, reason || 'ปิดบัญชีสิ้นปีใหม่ — มีรายการลงเพิ่มหลังปิดบัญชีครั้งก่อน', fy.end, { fromSource: true });
+  const lines = [];
+  let profit = 0;
+  DB.accounts.filter((a) => a.postable && (a.type === 'revenue' || a.type === 'expense')).forEach(function (a) {
+    const b = balanceOf(a.code, fy.end, fy.start, notClosingEntry);
+    if (!b) return;
+    lines.push(b > 0 ? { acc: a.code, cr: b } : { acc: a.code, dr: -b });
+    profit -= b;
+  });
+  if (!lines.length) {
+    throw new DomainError('NOTHING_TO_CLOSE', 'ปี ' + fy.label + ' ไม่มีรายได้หรือค่าใช้จ่ายต้องปิดบัญชี');
+  }
+  const re = accBySub('retained_earnings');
+  if (profit) lines.push(profit > 0 ? { acc: re, cr: profit } : { acc: re, dr: -profit });
+  const je = post({
+    type: 'closing', date: fy.end,
+    desc: 'ปิดบัญชีสิ้นปี ' + fy.label + ' — โอน' + (profit >= 0 ? 'กำไร' : 'ขาดทุน') + 'สุทธิ ' + fmt(Math.abs(profit)) + ' บาท เข้ากำไรสะสม',
+    src: 'yearEnd', srcId: fy.start, lines,
+  });
+  audit('fiscal_year', fy.start, 'close', null, { profit: fmt(profit), entry: je.no });
+  return { entry: je, profit, fy };
+}
+/** ยกเลิกการปิดบัญชีสิ้นปี — กลับรายการใบปิดบัญชี (งวดสุดท้ายต้องยังเปิดอยู่) */
+function reopenFiscalYear(date, reason) {
+  if (!reason || String(reason).trim().length < 5) {
+    throw new DomainError('REASON_REQUIRED', 'ต้องระบุเหตุผลที่ยกเลิกการปิดบัญชีสิ้นปี');
+  }
+  const fy = fiscalYearOf(date);
+  const old = fy && yearEndOf(fy);
+  if (!old) throw new DomainError('YEAR_NOT_CLOSED', 'ปีบัญชีนี้ยังไม่ได้ปิดบัญชีสิ้นปี');
+  const rev = reverse(old.no, String(reason).trim(), fy.end, { fromSource: true });
+  audit('fiscal_year', fy.start, 'reopen', null, { reversal: rev.no }, String(reason).trim());
+  return rev;
 }
 
 
@@ -2396,4 +2530,6 @@ cancelPaymentBatch = transactional(cancelPaymentBatch);
 payPaymentBatch = transactional(payPaymentBatch);
 postJournalVoucher = transactional(postJournalVoucher);
 openNextFiscalYear = transactional(openNextFiscalYear);
+closeFiscalYear = transactional(closeFiscalYear);
+reopenFiscalYear = transactional(reopenFiscalYear);
 buildSeed = bulkTransaction(buildSeed);

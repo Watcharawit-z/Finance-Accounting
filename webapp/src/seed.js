@@ -177,14 +177,15 @@ function loadChart() {
   });
 }
 
-function loadPeriods(year) {
+/** 12 งวดรายเดือน เริ่มเดือนแรกของรอบบัญชี (บริษัทที่รอบบัญชีไม่ตรงปีปฏิทิน เช่น เม.ย.–มี.ค. ก็ได้) */
+function loadPeriods(year, startMonth) {
   DB.periods = [];
-  for (let m = 1; m <= 12; m++) {
-    const mm = String(m).padStart(2, '0');
-    DB.periods.push({
-      code: year + '-' + mm, start: year + '-' + mm + '-01',
-      end: endOfMonth(year + '-' + mm + '-01'), status: 'open',
-    });
+  let y = year, m = startMonth || 1;
+  for (let i = 0; i < 12; i++) {
+    const code = y + '-' + String(m).padStart(2, '0');
+    DB.periods.push({ code, start: code + '-01', end: endOfMonth(code + '-01'), status: 'open' });
+    m++;
+    if (m > 12) { m = 1; y++; }
   }
 }
 
@@ -208,6 +209,10 @@ function buildBlank(o) {
       'ปีของรอบบัญชีต้องเป็น ค.ศ. ระหว่าง 2000 ถึง 2100 (ได้รับ "' + o.year + '")',
       'ปี พ.ศ. 2569 คือ ค.ศ. 2026');
   }
+  const startMonth = o.startMonth === undefined || o.startMonth === '' ? 1 : Number(o.startMonth);
+  if (!Number.isInteger(startMonth) || startMonth < 1 || startMonth > 12) {
+    throw new DomainError('FISCAL_START_INVALID', 'เดือนเริ่มรอบบัญชีต้องเป็น 1 ถึง 12');
+  }
 
   /* ล้างทุกอย่างจากแม่แบบเดียวใน engine.js ห้ามไล่เขียนทีละฟิลด์ตรงนี้
      ไม่งั้นพอเพิ่มประเภทเอกสารใหม่ ที่นี่จะลืมแล้วสร้างบริษัทใหม่จะพัง */
@@ -225,10 +230,10 @@ function buildBlank(o) {
     fiscalYear: String(year + 543),
     standard: 'TFRS for NPAEs',
     bookkeeper: '', auditor: '',
-    paidUpCapital: 0, vatRegistered: true,
+    paidUpCapital: 0, vatRegistered: true, fyStartMonth: startMonth,
   };
   loadChart();
-  loadPeriods(year);
+  loadPeriods(year, startMonth);
   DB.isDemo = false;
   audit('company', 'blank', 'create', null, { name: DB.company.name, year: DB.company.fiscalYear });
   return DB.company;
