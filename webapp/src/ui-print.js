@@ -76,6 +76,19 @@ function vatSplit(lines) {
   lines.forEach((l) => { o[l.taxCode === 'VAT0' ? 'zero' : l.taxCode === 'EXEMPT' ? 'exempt' : 'std'] += l.amount; });
   return o;
 }
+/* ภาษีหัก ณ ที่จ่ายที่ระบุบนเอกสาร — ต่อท้ายยอดรวม ให้อีกฝ่ายรู้ยอดที่ต้องโอนจริง */
+function whtSums(d, side) {
+  if (!d.whtCode) return [];
+  return [['หักภาษี ณ ที่จ่าย ' + d.whtRate + '%', pm(d.wht)],
+    [side === 'vendor' ? 'ยอดจ่ายสุทธิ' : 'ยอดชำระสุทธิ', pm(d.payNet), true]];
+}
+/** หมายเหตุใต้ยอดรวม — ฐานภาษีหัก ณ ที่จ่ายเมื่อไม่เท่ามูลค่าทั้งใบ (มีค่าสินค้าปน) หรือยอดต่ำกว่าเกณฑ์ */
+function whtNote(d) {
+  if (!d.whtCode) return '';
+  if (d.whtUnder) return '<div class="p-note">มูลค่าต่ำกว่า 1,000 บาท ไม่ต้องหักภาษี ณ ที่จ่าย</div>';
+  return d.whtBase !== d.base ? '<div class="p-note">หักภาษี ณ ที่จ่าย ' + esc(d.whtRate) + '% จากค่าบริการ ' + pm(d.whtBase)
+    + ' บาท (ไม่รวมค่าสินค้า)</div>' : '';
+}
 function vatSums(d) {
   const v = vatSplit(d.lines || []);
   /* หักเงินมัดจำ: แสดงรวมรายการ หักมัดจำ แล้วภาษีเฉพาะส่วนที่เหลือ — ภาษีของมัดจำออกใบกำกับไปแล้วตอนรับเงิน */
@@ -117,7 +130,7 @@ const DOC_PRINT = {
         + '<div class="p-meta">' + pParty('ลูกค้า', d.snap)
         + pInfo([['เลขที่', d.no], ['วันที่', thDate(d.date)], ['เครดิต', term > 0 ? term + ' วัน' : 'เงินสด'], ['ครบกำหนด', thDate(d.due)]]) + '</div>'
         + pTable(LINE_COLS, lineRows(d.lines), 8, PAGED)
-        + pTotals(d.total, vatSums(d))
+        + pTotals(d.total, vatSums(d).concat(whtSums(d, 'customer'))) + whtNote(d)
         + pSign(['ผู้รับสินค้า', 'ผู้ส่งสินค้า', 'ผู้มีอำนาจลงนาม']), d.no, d.status === 'void' ? 'ยกเลิก' : '');
     },
   },
@@ -319,7 +332,7 @@ function tradePrint(d, copy, kind) {
     + pInfo([['เลขที่', d.no], ['วันที่', thDate(d.date)], ['ยืนราคาถึง', d.validUntil ? thDate(d.validUntil) : ''],
       ['อ้างอิง', d.fromDoc || '']]) + '</div>'
     + pTable(LINE_COLS, lineRows(d.lines), 8, PAGED)
-    + pTotals(d.total, vatSums(d))
+    + pTotals(d.total, vatSums(d).concat(whtSums(d, kind === 'purchaseOrder' ? 'vendor' : 'customer'))) + whtNote(d)
     + (d.note ? '<div class="p-note">เงื่อนไข: ' + esc(d.note) + '</div>' : '')
     + pSign(T[3]), d.no, st === 'cancelled' || st === 'rejected' ? 'ยกเลิก' : '');
 }

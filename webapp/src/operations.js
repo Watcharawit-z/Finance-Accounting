@@ -162,7 +162,8 @@ function savePartner(input) {
     address: String(input.address || '').trim(),
     phone: String(input.phone || '').trim(),
     termDays: Math.max(0, Number(input.termDays || 0) || 0),
-    whtCode: kind === 'vendor' ? (input.whtCode || null) : null,
+    /* ผู้ขาย: ประเภทเงินได้ที่เราต้องหัก · ลูกค้า: ลูกค้าหักเราตอนจ่ายเงิน (นิติบุคคลที่ซื้อบริการ) — ใช้เป็นค่าเริ่มต้นในเอกสาร */
+    whtCode: input.whtCode && input.whtCode !== 'none' ? input.whtCode : null,
     creditLimit: M(input.creditLimit || '0'),
     active: active,
   };
@@ -428,6 +429,8 @@ function issueInvoice(input) {
     soNo: input.soNo || null, fromDoc: input.fromDoc || null,
     ...dep.fields,
   };
+  /* ลูกค้าจะหักภาษี ณ ที่จ่าย — พิมพ์ยอดชำระสุทธิให้ลูกค้าเห็น และเป็นค่าเริ่มต้นตอนรับชำระ (ยังไม่ลงบัญชี) */
+  if (input.whtCode && input.whtCode !== 'none') Object.assign(doc, docWht(input.whtCode, doc, input.date));
   DB.docs.invoice.unshift(doc);
   audit('invoice', no, 'issue', null, { total: fmt(v.total), partner: snap.name });
   return doc;
@@ -756,6 +759,27 @@ function tradeDocStatus(kind, d, asOf) {
   return 'issued';
 }
 
+/* ---------- ภาษีหัก ณ ที่จ่ายบนเอกสาร (ใบเสนอราคา ใบสั่งขาย ใบสั่งซื้อ ใบกำกับ) ----------
+   ยังไม่ลงบัญชี — บอกอีกฝ่ายว่าจะถูกหัก/ต้องหักเท่าไร และยอดชำระสุทธิเท่าไร ภาษีจริงคิดตอนรับ/จ่ายเงิน
+   ฐานคือค่าบริการก่อนภาษีมูลค่าเพิ่ม ไม่รวมค่าสินค้าที่มีสต๊อก (ซื้อขายสินค้าไม่ต้องหัก)
+   มูลค่าทั้งใบต่ำกว่า 1,000 บาทไม่ต้องหัก (ท.ป.4/2528) */
+const WHT_DOC_MIN = M('1000');
+function docWht(whtCode, doc, date) {
+  const code = whtCode && whtCode !== 'none' ? whtCode : null;
+  if (!code) return { whtCode: null, whtRate: null, whtBase: 0, wht: 0, payNet: doc.total };
+  const r = resolveRate(code, date, { channel: 'manual' });
+  const all = doc.lines.reduce((s, l) => s + l.amount, 0);
+  const goods = doc.lines.reduce(function (s, l) {
+    const it = l.itemCode ? DB.items.find((x) => x.code === l.itemCode) : null;
+    return s + (it && it.type === 'stock' ? l.amount : 0);
+  }, 0);
+  /* doc.base หลังหักเงินมัดจำแล้ว (ใบกำกับ) — ส่วนของค่าบริการคิดตามสัดส่วนบรรทัด */
+  const base = all ? round2(mulDiv(doc.base, all - goods, all)) : 0;
+  const under = doc.base < WHT_DOC_MIN;
+  const wht = under ? 0 : round2(pct(base, r.rate));
+  return { whtCode: code, whtRate: r.rate, whtBase: under ? 0 : base, wht, payNet: doc.total - wht, whtUnder: under || undefined };
+}
+
 /** คู่ค้าและบรรทัดของเอกสารก่อนลงบัญชี — ใช้ทั้งตอนออกใหม่และตอนแก้ไข
     บัญชีที่เลือกไว้ในบรรทัดตรวจตั้งแต่ตอนนี้ ไม่ต้องรอไปพังตอนแปลงเป็นใบกำกับหรือตั้งหนี้ */
 function tradeDocParts(kind, input) {
@@ -797,6 +821,7 @@ function issueTradeDoc(kind, input) {
     base: v.std + v.zero + v.exempt, vat: v.vat, total: v.total,
     note: input.note || '', status: 'issued', convertedTo: null, fromDoc: input.fromDoc || null,
   };
+  Object.assign(doc, docWht(input.whtCode, doc, input.date));
   DB.docs[kind].unshift(doc);
   audit(kind, no, 'issue', null, { partner: p.name, total: fmt(v.total) });
   return doc;
@@ -833,6 +858,7 @@ function updateTradeDoc(kind, no, input) {
   d.partnerCode = t.p.code; d.partnerName = t.p.name; d.snap = snapshotPartner(t.p);
   d.lines = t.rows;
   d.base = t.v.std + t.v.zero + t.v.exempt; d.vat = t.v.vat; d.total = t.v.total;
+  Object.assign(d, docWht(input.whtCode !== undefined ? input.whtCode : d.whtCode, d, date));
   if (input.note !== undefined) d.note = input.note || '';
   d.revision = (d.revision || 0) + 1;
   d.updatedAt = new Date().toISOString();
@@ -895,10 +921,10 @@ function convertTradeDoc(kind, no, input) {
 
   if (kind === 'quotation' && opts.to === 'invoice') {
     /* งานเล็กที่ไม่ต้องมีใบสั่งขาย — ลูกค้าตอบรับแล้วออกใบกำกับได้เลย */
-    made = issueInvoice({ partnerCode: d.partnerCode, date, lines: carry, fromDoc: d.no });
+    made = issueInvoice({ partnerCode: d.partnerCode, date, lines: carry, fromDoc: d.no, whtCode: d.whtCode || null });
   } else if (cfg.next === 'salesOrder') {
     made = issueTradeDoc('salesOrder', {
-      partnerCode: d.partnerCode, date, lines: carry, note: d.note, fromDoc: d.no,
+      partnerCode: d.partnerCode, date, lines: carry, note: d.note, fromDoc: d.no, whtCode: d.whtCode || null,
     });
   } else {
     if (!opts.vendorNo) {
@@ -917,7 +943,9 @@ function convertTradeDoc(kind, no, input) {
         return { ...l, acc: stock ? accBySub('inventory') : (pick[i] || l.acc || opts.acc || null),
           expenseSub: l.expenseSub || opts.expenseSub || 'admin_expense' };
       }),
-      nonClaimableVat: !!opts.nonClaimableVat, whtCode: opts.whtCode || null,
+      /* ภาษีหัก ณ ที่จ่ายตามที่เลือกตอนแปลง ไม่เลือก = ตามใบสั่งซื้อ ใบสั่งซื้อไม่ได้ระบุ = ตามประเภทของผู้ขาย */
+      nonClaimableVat: !!opts.nonClaimableVat,
+      whtCode: opts.whtCode !== undefined ? (opts.whtCode || 'none') : (d.whtCode !== undefined ? (d.whtCode || 'none') : undefined),
     });
   }
   d.status = 'closed';
@@ -986,7 +1014,8 @@ function invoiceSalesOrder(soNo, input) {
   });
   if (!rows.length) throw new DomainError('SO_QTY_INVALID', 'ต้องเลือกรายการที่จะออกใบกำกับอย่างน้อย 1 รายการ');
   if (so.status !== 'partially_invoiced') so.statusBeforeInvoice = so.status;
-  const inv = issueInvoice({ partnerCode: so.partnerCode, date: opts.date || TODAY, lines: rows, soNo: so.no, fromDoc: so.no });
+  const inv = issueInvoice({ partnerCode: so.partnerCode, date: opts.date || TODAY, lines: rows, soNo: so.no, fromDoc: so.no,
+    whtCode: so.whtCode || null });
   syncSoStatus(so);
   audit('salesOrder', soNo, so.status === 'closed' ? 'convert' : 'partial_invoice', null, { to: inv.no });
   return inv;

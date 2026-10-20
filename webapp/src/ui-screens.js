@@ -488,6 +488,7 @@ function invoiceDetail(no) {
       + '<div><span>มูลค่าก่อนภาษี</span><b>' + fmt(d.base) + '</b></div>'
       + '<div><span>ภาษีมูลค่าเพิ่ม 7%</span><b>' + fmt(d.vat) + '</b></div>'
       + '<div class="gt"><span>จำนวนเงินรวมทั้งสิ้น</span><b>' + fmt(d.total) + '</b></div>'
+      + whtTotalsHtml(d, 'customer')
       + (d.paid ? '<div><span>รับชำระแล้ว</span><b>' + fmt(d.paid) + '</b></div>' : '')
       + (d.credited ? '<div><span>ลดหนี้แล้ว</span><b>' + fmt(d.credited) + '</b></div>' : '')
       + (d.debited ? '<div><span>เพิ่มหนี้แล้ว</span><b>' + fmt(d.debited) + '</b></div>' : '')
@@ -1493,6 +1494,14 @@ function tradePill(st) {
   return TRADE_LABEL[st] ? { st: [p.st[0], TRADE_LABEL[st]] } : p;
 }
 
+/** ภาษีหัก ณ ที่จ่ายที่ระบุไว้บนเอกสาร และยอดชำระสุทธิ — ยังไม่ลงบัญชี ภาษีจริงคิดตอนรับ/จ่ายเงิน */
+function whtTotalsHtml(d, side) {
+  if (!d.whtCode) return '';
+  const who = side === 'customer' ? 'ลูกค้าหัก' : 'หัก';
+  return '<div><span>' + who + 'ภาษี ณ ที่จ่าย ' + esc(d.whtRate) + '% (ฐาน ' + fmt(d.whtBase) + ')</span><b>' + fmt(d.wht) + '</b></div>'
+    + (d.whtUnder ? '<div><span class="dim">มูลค่าต่ำกว่า 1,000 บาท ไม่ต้องหัก</span><b></b></div>' : '')
+    + '<div class="gt"><span>' + (side === 'customer' ? 'ยอดชำระสุทธิ' : 'ยอดจ่ายสุทธิ') + '</span><b>' + fmt(d.payNet) + '</b></div>';
+}
 function tradeDocDetail(kind, no) {
   const cfg = TRADE_DOCS[kind];
   const d = (DB.docs[kind] || []).find((x) => x.no === no);
@@ -1547,6 +1556,7 @@ function tradeDocDetail(kind, no) {
       + '<div><span>มูลค่าก่อนภาษี</span><b>' + fmt(d.base) + '</b></div>'
       + '<div><span>ภาษีมูลค่าเพิ่ม</span><b>' + fmt(d.vat) + '</b></div>'
       + '<div class="gt"><span>จำนวนเงินรวมทั้งสิ้น</span><b>' + fmt(d.total) + '</b></div>'
+      + whtTotalsHtml(d, cfg.side)
       + '</div>',
     foot:'เอกสารใบนี้ยังไม่มีผลทางบัญชี ตัวเลขจะเข้าบัญชีเมื่อกด' + nextLabel + 'เท่านั้น'
       + (isSo ? ' · ออกใบกำกับทีละงวดได้ ใบสั่งขายปิดเองเมื่อออกครบทุกรายการ' : '')

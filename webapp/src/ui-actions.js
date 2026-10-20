@@ -20,6 +20,15 @@ const optWht = (blank) => [['', blank || '— ไม่หักภาษี ณ
     return [c, r.label + ' ' + r.rate + '%'];
   }));
 const optVat = [['VAT7','ภาษีมูลค่าเพิ่ม 7%'], ['VAT0','อัตราร้อยละ 0 (ส่งออก)'], ['EXEMPT','ยกเว้นภาษี']];
+/* ช่องภาษีหัก ณ ที่จ่ายบนเอกสาร (ใบเสนอราคา ใบสั่งขาย ใบสั่งซื้อ ใบกำกับ) — ฝั่งลูกค้า: ลูกค้าหักเรา · ฝั่งผู้ขาย: เราหักผู้ขาย
+   ค่าเริ่มต้นตามที่ตั้งไว้ในทะเบียนผู้ติดต่อ เปลี่ยนคู่ค้าแล้วช่องนี้เปลี่ยนตาม */
+const partnerWht = (code) => { const p = code && DB.partners.find((x) => x.code === code); return p && p.whtCode ? p.whtCode : ''; };
+function docWhtField(side, value) {
+  return field({ name:'docWht', label: side === 'customer' ? 'ลูกค้าหักภาษี ณ ที่จ่าย' : 'หักภาษี ณ ที่จ่ายผู้ขาย', type:'select',
+    value: value || '', options: optWht(side === 'customer' ? '— ลูกค้าไม่หัก —' : '— ไม่หัก —'),
+    hint: side === 'customer' ? 'แสดงยอดชำระสุทธิให้ลูกค้าเห็น · ภาษีจริงบันทึกตอนรับชำระตาม 50 ทวิ ที่ลูกค้าส่งมา'
+      : 'แสดงยอดที่จะจ่ายจริงให้ผู้ขายเห็น · หักและออก 50 ทวิ ตอนจ่ายเงิน' });
+}
 
 function submitAction(fn) {
   try {
@@ -126,8 +135,16 @@ function refreshLineSum() {
   const incl = cash && val('vatIncl') !== 'no';
   try {
     const v = cash ? cashSaleAmounts(lines, date, incl) : computeVat(lines, date);
+    const code = !cash && val('docWht');
+    let w = null;
+    if (code) {
+      const rows = lines.map((l) => ({ itemCode: l.itemCode, amount: round2(mulQty(M(l.price), l.qty)) }));
+      w = docWht(code, { lines: rows, base: v.std + v.zero + v.exempt, total: v.total }, date);
+    }
     el.innerHTML = 'มูลค่าก่อนภาษี <b>' + fmt(v.std + v.zero + v.exempt) + '</b> &nbsp; ภาษี <b>' + fmt(v.vat)
-      + '</b> &nbsp; รวมทั้งสิ้น <b>' + fmt(v.total) + '</b>' + (incl ? ' <span class="dim">(ราคาที่กรอกรวมภาษีแล้ว)</span>' : '');
+      + '</b> &nbsp; รวมทั้งสิ้น <b>' + fmt(v.total) + '</b>' + (incl ? ' <span class="dim">(ราคาที่กรอกรวมภาษีแล้ว)</span>' : '')
+      + (w ? ' &nbsp; หัก ณ ที่จ่าย ' + w.whtRate + '% <b>' + fmt(w.wht) + '</b> &nbsp; ยอดชำระสุทธิ <b>' + fmt(w.payNet) + '</b>'
+        + (w.whtUnder ? ' <span class="dim">(ต่ำกว่า 1,000 บาท ไม่ต้องหัก)</span>' : '') : '');
   } catch (e) { el.innerHTML = ''; }
 }
 
@@ -159,6 +176,12 @@ EXTRA_INPUT.push(function (t) {
   return true;
 });
 EXTRA_CHANGE.push(function (t) {
+  if (t.name === 'docWht') { refreshLineSum(); return false; }
+  if (t.name === 'partner' && document.querySelector('#modal [name="docWht"]') && !document.querySelector('#modal [data-wht-edit]')) {
+    document.querySelector('#modal [name="docWht"]').value = partnerWht(t.value);
+    refreshLineSum();
+    return false;
+  }
   if (t.name === 'saleKind') {
     document.querySelectorAll('[data-sk]').forEach(function (el) {
       el.style.display = el.getAttribute('data-sk') === t.value ? '' : 'none';
@@ -195,6 +218,7 @@ function modalInvoice(kind) {
       + field({ name:'partner', label:'ลูกค้า', type:'select',
           options: custs.length ? custs : [['', '— ยังไม่มีลูกค้าในทะเบียน เพิ่มที่เมนูผู้ติดต่อ —']],
           hint:'ผู้ซื้อที่จด VAT ต้องมีเลขผู้เสียภาษีและสาขา · บุคคลธรรมดามีชื่อและที่อยู่ก็ออกได้' })
+      + docWhtField('customer', partnerWht((custs[0] || [])[0]))
       + '</div>'
       + '<div class="flds" data-sk="cash"' + show(cash) + '>'
       + field({ name:'buyer', label:'ลูกค้า (ไม่บังคับ)', type:'select',
@@ -227,7 +251,7 @@ function modalInvoice(kind) {
         }
         const doc = issueInvoice({
           partnerCode: val('partner'), date: val('date'), lines: collectLines(),
-          deposits: collectDepositPicks(),
+          deposits: collectDepositPicks(), whtCode: val('docWht') || null,
         });
         STATE.screen = 'invoices'; STATE.sel = doc.no;
         toast('ออกใบกำกับภาษี ' + doc.no + ' แล้ว', 'ok', 'รวมทั้งสิ้น ' + fmt(doc.total) + ' บาท');
@@ -287,7 +311,9 @@ function modalReceive(no) {
           options:[['transfer','โอนเงินเข้าบัญชี'],['cheque','เช็ค'],['cash','เงินสด']] })
       + cashAccField('in', 'transfer', 'รับเงินเข้าบัญชี')
       + field({ name:'wht', label:'ลูกค้าหักภาษี ณ ที่จ่ายหรือไม่', type:'select',
-          options: optWht('ไม่ได้ถูกหัก'), hint:'ถ้าถูกหัก ระบบจะบันทึกเป็นสินทรัพย์รอเครดิตภาษีปลายปี' })
+          options: optWht('ไม่ได้ถูกหัก'), value: inv ? (inv.whtCode || '') : '',
+          hint: inv && inv.whtCode ? 'ใบกำกับระบุว่าลูกค้าจะหัก ' + inv.whtRate + '% — เปลี่ยนได้ถ้า 50 ทวิ ที่ได้รับไม่ตรง'
+            : 'ถ้าถูกหัก ระบบจะบันทึกเป็นสินทรัพย์รอเครดิตภาษีปลายปี' })
       + field({ name:'whtBase', label:'ฐานที่ลูกค้าหัก (ตาม 50 ทวิ)', placeholder:'เว้นว่าง = ให้ระบบคิด',
           hint: inv ? 'ระบบคิดจากค่าบริการก่อนภาษี ไม่รวมค่าสินค้า · รับเต็มยอดนี้ = ' + fmt(receiptServiceShare(inv, out)) + ' บาท'
             : 'ระบบคิดจากค่าบริการก่อนภาษีในยอดที่รับ ไม่รวมค่าสินค้า (ซื้อสินค้าไม่ต้องหัก ณ ที่จ่าย)' })
@@ -446,7 +472,10 @@ function modalPartner(kind, code) {
       + field({ name:'termDays', label:'เครดิต (วัน)', value: p ? String(p.termDays || 0) : '30' })
       + (isVendor ? field({ name:'wht', label:'ประเภทเงินได้ที่ต้องหักภาษี ณ ที่จ่าย', type:'select',
           value: p && p.whtCode ? p.whtCode : '', options: optWht(),
-          hint:'ตั้งไว้ให้ระบบเลือกให้อัตโนมัติตอนจ่ายเงิน' }) : '')
+          hint:'ตั้งไว้ให้ระบบเลือกให้อัตโนมัติตอนจ่ายเงิน' })
+        : field({ name:'wht', label:'ลูกค้าหักภาษี ณ ที่จ่ายเมื่อจ่ายเงินให้เรา', type:'select',
+          value: p && p.whtCode ? p.whtCode : '', options: optWht('— ไม่หัก —'),
+          hint:'นิติบุคคลที่ซื้อบริการมักหัก 3% — ตั้งไว้แล้วใบเสนอราคาและใบกำกับแสดงยอดชำระสุทธิให้เอง' }))
       + field({ name:'active', label:'สถานะ', type:'select', value: p && p.active === false ? 'no' : 'yes',
           options:[['yes','ใช้งานอยู่'], ['no','เลิกใช้งาน — ไม่ขึ้นให้เลือกในเอกสารใหม่']],
           hint:'เลิกใช้งานแล้วเอกสารเดิม ยอดค้าง และรายงานยังอยู่ครบ รับ/จ่ายชำระหนี้เดิมได้ตามปกติ' })
@@ -468,7 +497,7 @@ function modalPartner(kind, code) {
           name: val('name'), entityType: val('entityType'), taxId: val('taxId'),
           vatRegistered: isVendor ? undefined : val('vatReg') === 'yes',
           branch: val('branch'), address: val('address'), phone: val('phone'),
-          termDays: val('termDays'), whtCode: isVendor ? (val('wht') || null) : null,
+          termDays: val('termDays'), whtCode: val('wht') || null,
           active: val('active') !== 'no',
         });
         toast((r.created ? 'เพิ่ม' : 'แก้ไข') + label + ' ' + r.partner.code + ' แล้ว', 'ok', r.partner.name
@@ -635,20 +664,22 @@ function modalTradeDoc(kind, no) {
               value: d ? (d.validUntil || '') : addDays(defaultDate(), cfg.validDays),
               hint:'พ้นวันนี้แล้วระบบจะขึ้นสถานะหมดอายุให้เอง' })
           : '')
+      + docWhtField(cfg.side, d ? (d.whtCode || '') : partnerWht((parties[0] || [])[0]))
       + field({ name:'note', label:'หมายเหตุ', wide:true, value: d ? d.note : '', placeholder:'เงื่อนไขการชำระเงิน กำหนดส่งมอบ ฯลฯ' })
-      + '</div>' + lineEditor(4, isCust ? 'sale' : 'purchase', d ? d.lines : null),
+      + '</div>' + (d ? '<span data-wht-edit hidden></span>' : '') + lineEditor(4, isCust ? 'sale' : 'purchase', d ? d.lines : null),
     submitLabel: d ? 'บันทึกการแก้ไข' : 'บันทึก' + cfg.label,
     onSubmit: function () {
       submitAction(function () {
         const input = {
           partnerCode: val('partner'), date: val('date'),
           validUntil: cfg.validDays ? (val('validUntil') || null) : null,
-          note: val('note'), lines: collectLines(),
+          note: val('note'), lines: collectLines(), whtCode: val('docWht') || null,
         };
         const doc = d ? updateTradeDoc(kind, d.no, input) : issueTradeDoc(kind, input);
         STATE.screen = TRADE_SCREEN[kind];
         STATE.sel = doc.no;
-        toast((d ? 'แก้ไข' : 'บันทึก') + cfg.label + ' ' + doc.no + ' แล้ว', 'ok', 'รวมทั้งสิ้น ' + fmt(doc.total) + ' บาท');
+        toast((d ? 'แก้ไข' : 'บันทึก') + cfg.label + ' ' + doc.no + ' แล้ว', 'ok', 'รวมทั้งสิ้น ' + fmt(doc.total) + ' บาท'
+          + (doc.wht ? ' · หัก ณ ที่จ่าย ' + fmt(doc.wht) + ' · สุทธิ ' + fmt(doc.payNet) + ' บาท' : ''));
         return doc;
       });
     },
@@ -682,7 +713,8 @@ function modalConvertTradeDoc(kind, no, to) {
       + field({ name:'date', label:'วันที่ของ' + nextLabel, type:'date', value: defaultDate(),
           hint: nextLabel === 'ใบสั่งขาย' ? '' : 'ต้องอยู่ในงวดที่ยังเปิดอยู่ ระบบจะเลือกอัตราภาษีตามวันที่นี้' })
       + (toBill ? field({ name:'vendorNo', label:'เลขที่ใบกำกับภาษีของผู้ขาย', placeholder:'ดูจากใบกำกับที่ผู้ขายส่งมา' }) : '')
-      + (toBill ? field({ name:'wht', label:'ภาษีหัก ณ ที่จ่ายตอนจ่ายเงิน', type:'select', options: optWht() }) : '')
+      + (toBill ? field({ name:'wht', label:'ภาษีหัก ณ ที่จ่ายตอนจ่ายเงิน', type:'select', options: optWht(),
+          value: d.whtCode !== undefined ? (d.whtCode || '') : partnerWht(d.partnerCode) }) : '')
       + '</div>' + accTable,
     submitLabel: toInv ? 'ออกใบกำกับภาษี' : 'แปลงเป็น' + nextLabel,
     note: nextLabel === 'ใบสั่งขาย' ? 'ยังไม่ลงบัญชีในขั้นนี้'
@@ -933,6 +965,11 @@ function modalBillingNote() {
   });
 }
 
+/* ใบกำกับทุกใบในใบวางบิลระบุภาษีหัก ณ ที่จ่ายเหมือนกัน ใช้เป็นค่าเริ่มต้น — ระบุต่างกันให้ผู้ใช้เลือกเอง */
+function bnWhtDefault(bn) {
+  const codes = bn.invoices.map((r) => { const inv = DB.docs.invoice.find((d) => d.no === (r.no || r)); return inv ? inv.whtCode || '' : ''; });
+  return codes.length && codes.every((c) => c === codes[0]) ? codes[0] : '';
+}
 function modalReceiveBillingNote(no) {
   const bn = DB.docs.billingNote.find((x) => x.no === no);
   if (!bn) return;
@@ -948,7 +985,7 @@ function modalReceiveBillingNote(no) {
       + field({ name:'method', label:'วิธีรับชำระ', type:'select', value:'cheque',
           options:[['cheque','เช็ค'],['transfer','โอนเงินเข้าบัญชี'],['cash','เงินสด']] })
       + cashAccField('in', 'cheque', 'รับเงินเข้าบัญชี')
-      + field({ name:'wht', label:'ลูกค้าหักภาษี ณ ที่จ่ายหรือไม่', type:'select', wide:true,
+      + field({ name:'wht', label:'ลูกค้าหักภาษี ณ ที่จ่ายหรือไม่', type:'select', wide:true, value: bnWhtDefault(bn),
           options: optWht('ไม่ได้ถูกหัก'), hint:'ใช้อัตราเดียวกันกับทุกใบกำกับในใบวางบิลนี้' })
       + '</div>'
       + '<div class="note">ระบบจะออกใบเสร็จรับเงินให้ทุกใบกำกับที่ยังค้าง (' + open.map((r) => esc(r.no)).join(', ')

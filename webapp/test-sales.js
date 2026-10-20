@@ -241,4 +241,53 @@ throws('ยื่นแบบแล้วยกเลิกใบอย่าง
 ok('ยอดคุมทุกตัวยังผ่านหลังยื่นแบบ', C.reconciliationChecks(JUNE).allPassed);
 ok('งบทดลองสมดุล', C.trialBalance('2026-01-01', '2026-12-31').balanced);
 
+console.log('\n=== 9. ภาษีหัก ณ ที่จ่ายบนใบเสนอราคา → ใบสั่งขาย → ใบกำกับ → รับชำระ ===');
+{
+  const svcCust = C.savePartner({ kind: 'customer', name: 'บริษัท ซื้อบริการ จำกัด', taxId: '0105548021442', branch: '00001',
+    address: 'กรุงเทพฯ', whtCode: 'WHT_SERVICE' }).partner;
+  ok('ลูกค้าเก็บประเภทภาษีที่หักเราไว้ในทะเบียนได้', svcCust.whtCode === 'WHT_SERVICE');
+  /* ค่าบริการ 10,000 + สินค้า 2 ชิ้น 300 — หัก 3% เฉพาะค่าบริการ */
+  const q = C.issueTradeDoc('quotation', { partnerCode: svcCust.code, date: '2026-07-01', whtCode: 'WHT_SERVICE',
+    lines: [{ desc: 'ค่าที่ปรึกษา', qty: 5, price: '2000', itemCode: consult.code }, { desc: 'สินค้า ก', qty: 2, price: '150', itemCode: widget.code }] });
+  ok('★ ใบเสนอราคาแสดงภาษีหัก ณ ที่จ่าย 3% จากค่าบริการเท่านั้น และยอดชำระสุทธิ', q.whtRate === '3' && q.whtBase === M('10000')
+    && q.wht === M('300') && q.payNet === q.total - M('300'), fmt(q.wht) + ' · สุทธิ ' + fmt(q.payNet));
+  const q2 = C.updateTradeDoc('quotation', q.no, { whtCode: null });
+  ok('แก้ใบเสนอราคาเอาภาษีหัก ณ ที่จ่ายออกได้', !q2.whtCode && q2.wht === 0 && q2.payNet === q2.total);
+  C.updateTradeDoc('quotation', q.no, { whtCode: 'WHT_SERVICE' });
+  const small = C.issueTradeDoc('quotation', { partnerCode: svcCust.code, date: '2026-07-01', whtCode: 'WHT_SERVICE',
+    lines: [{ desc: 'ค่าบริการเล็กน้อย', qty: 1, price: '800' }] });
+  ok('★ มูลค่าต่ำกว่า 1,000 บาท ไม่ต้องหัก (ท.ป.4/2528)', small.wht === 0 && small.whtUnder);
+  C.setTradeDocStatus('quotation', q.no, 'approved');
+  const so = C.convertTradeDoc('quotation', q.no, { date: '2026-07-02' });
+  ok('ใบสั่งขายรับภาษีหัก ณ ที่จ่ายต่อจากใบเสนอราคา', so.whtCode === 'WHT_SERVICE' && so.wht === M('300'));
+  C.setTradeDocStatus('salesOrder', so.no, 'approved');
+  const inv = C.invoiceSalesOrder(so.no, { date: '2026-07-03', lines: [{ line: 0, qty: 3 }] });
+  ok('★ ใบกำกับจากใบสั่งขาย (บางส่วน) คิดภาษีหัก ณ ที่จ่ายตามยอดของใบนี้', inv.whtCode === 'WHT_SERVICE' && inv.whtBase === M('6000')
+    && inv.wht === M('180') && inv.payNet === inv.total - M('180'));
+  ok('ภาษีหัก ณ ที่จ่ายบนเอกสารยังไม่ลงบัญชี (ลงตอนรับชำระ)', !D.entries.find((e) => e.no === inv.entryNo).lines.some((l) => l.acc === C.accBySub('wht_asset')));
+  const rcv = C.receivePayment({ invoiceNo: inv.no, date: '2026-07-10', whtCode: inv.whtCode });
+  ok('★ รับชำระตามที่ใบกำกับระบุ ลูกค้าหักตรงกับยอดบนใบกำกับ', rcv.wht === inv.wht && rcv.net === inv.payNet, fmt(rcv.wht));
+  const qi = C.issueTradeDoc('quotation', { partnerCode: svcCust.code, date: '2026-07-04', whtCode: 'WHT_SERVICE',
+    lines: [{ desc: 'งานติดตั้ง', qty: 1, price: '5000' }] });
+  C.setTradeDocStatus('quotation', qi.no, 'approved');
+  const inv2 = C.convertTradeDoc('quotation', qi.no, { date: '2026-07-04', to: 'invoice' });
+  ok('ใบเสนอราคา → ใบกำกับเลย ก็ได้ภาษีหัก ณ ที่จ่ายตามใบเสนอราคา', inv2.whtCode === 'WHT_SERVICE' && inv2.wht === M('150'));
+
+  /* ฝั่งซื้อ: ใบสั่งซื้อระบุหัก ณ ที่จ่ายผู้ขาย → ตั้งหนี้แล้วหักตอนจ่าย */
+  const po = C.issueTradeDoc('purchaseOrder', { partnerCode: vend.code, date: '2026-07-05', whtCode: 'WHT_SERVICE',
+    lines: [{ desc: 'ค่าซ่อมเครื่องจักร', qty: 1, price: '4000', acc: '5321' }] });
+  ok('ใบสั่งซื้อแสดงยอดจ่ายสุทธิหลังหัก ณ ที่จ่าย', po.wht === M('120') && po.payNet === po.total - M('120'));
+  C.setTradeDocStatus('purchaseOrder', po.no, 'approved');
+  const bill = C.convertTradeDoc('purchaseOrder', po.no, { date: '2026-07-06', vendorNo: 'RPR-77' });
+  ok('★ ตั้งหนี้จากใบสั่งซื้อ ได้ประเภทภาษีหัก ณ ที่จ่ายตามใบสั่งซื้อ', bill.whtCode === 'WHT_SERVICE');
+  const pay = C.payBill({ billNo: bill.no, date: '2026-07-07' });
+  ok('จ่ายชำระหักภาษีตรงกับใบสั่งซื้อ', pay.wht === po.wht, fmt(pay.wht));
+  const po2 = C.issueTradeDoc('purchaseOrder', { partnerCode: vend.code, date: '2026-07-05',
+    lines: [{ desc: 'ค่าบริการ', qty: 1, price: '4000', acc: '5321' }] });
+  C.setTradeDocStatus('purchaseOrder', po2.no, 'approved');
+  const bill2 = C.convertTradeDoc('purchaseOrder', po2.no, { date: '2026-07-06', vendorNo: 'RPR-78' });
+  ok('ใบสั่งซื้อที่เลือกไม่หัก ตั้งหนี้แล้วไม่หัก', !bill2.whtCode);
+  balanced('หลังเอกสารที่มีภาษีหัก ณ ที่จ่าย', '2026-07-31');
+}
+
 done();
