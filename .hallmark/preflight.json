@@ -1,0 +1,9 @@
+{
+  "scanned": "2026-10-20",
+  "framework": "vanilla HTML single file (webapp/build.js concatenates webapp/src/*.js into webapp/shell.html → webapp/index.html)",
+  "fonts": "Google Fonts link in webapp/shell.html L6 — Bai Jamjuree, IBM Plex Sans Thai, IBM Plex Mono; Sarabun for A4 print only",
+  "palette": "OKLCH custom properties in webapp/shell.html :root (--color-*), legacy aliases kept",
+  "motion": "none installed — CSS transitions only (motion-cut)",
+  "spacing": "--space-3xs … --space-3xl, 4-pt scale",
+  "design_md": "webapp/design.md"
+}

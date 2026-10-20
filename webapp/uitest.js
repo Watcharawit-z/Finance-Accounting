@@ -293,18 +293,23 @@ const overflowInfo = (page) => page.evaluate(() => {
   ok('กดปุ่มเมนูแล้วลิ้นชักเปิด', await page.evaluate(() =>
     document.getElementById('nav').getBoundingClientRect().right > 100));
 
-  console.log('\n[11.1] ฟอนต์: ไทยแบบมีหัวคู่กับ Inter ตัวเลขกว้างเท่ากัน');
+  console.log('\n[11.1] ฟอนต์: ระบบดีไซน์ (design.md) — Bai Jamjuree หัวเรื่อง · IBM Plex Sans Thai เนื้อความ · IBM Plex Mono รหัส');
   const fonts = await page.evaluate(() => {
     const css = getComputedStyle(document.documentElement);
     const num = document.querySelector('#main td.num');
     return { body: getComputedStyle(document.body).fontFamily,
+      display: css.getPropertyValue('--font-display'),
+      mono: css.getPropertyValue('--font-mono'),
       print: css.getPropertyValue('--print'),
       tnum: num ? getComputedStyle(num).fontVariantNumeric : 'no td.num',
       link: Array.prototype.some.call(document.querySelectorAll('link[rel="stylesheet"]'),
-        (l) => /family=Inter/.test(l.href) && /Noto\+Sans\+Thai\+Looped/.test(l.href) && /Sarabun/.test(l.href)) };
+        (l) => /Bai\+Jamjuree/.test(l.href) && /IBM\+Plex\+Sans\+Thai/.test(l.href)
+          && /IBM\+Plex\+Mono/.test(l.href) && /Sarabun/.test(l.href)) };
   });
-  ok('ตัวหนังสือบนจอใช้ Inter คู่กับ Noto Sans Thai Looped', /^"?Inter"?, "Noto Sans Thai Looped"/.test(fonts.body), fonts.body);
-  ok('โหลดฟอนต์ครบสามตระกูล (Inter, Noto Sans Thai Looped, Sarabun สำหรับพิมพ์)', fonts.link);
+  ok('ตัวหนังสือบนจอใช้ IBM Plex Sans Thai (มีอักษรไทย ตัวเลขกว้างเท่ากัน)', /^"?IBM Plex Sans Thai"?/.test(fonts.body), fonts.body);
+  ok('หัวเรื่องใช้ Bai Jamjuree · รหัสใช้ IBM Plex Mono', /Bai Jamjuree/.test(fonts.display) && /IBM Plex Mono/.test(fonts.mono),
+    fonts.display.trim() + ' | ' + fonts.mono.trim());
+  ok('โหลดฟอนต์ครบ (Bai Jamjuree, IBM Plex Sans Thai, IBM Plex Mono, Sarabun สำหรับพิมพ์)', fonts.link);
   ok('เอกสารพิมพ์ยังใช้ Sarabun แบบหนังสือราชการ', /^\s*"?Sarabun/.test(fonts.print), fonts.print);
   ok('ช่องจำนวนเงินใช้ตัวเลขกว้างเท่ากัน หลักตรงกันทุกแถว', /tabular-nums/.test(fonts.tnum), fonts.tnum);
 

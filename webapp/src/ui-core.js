@@ -60,15 +60,18 @@ function tbl(o) {
       + (o.emptyAction ? '<div style="margin-top:12px">' + o.emptyAction + '</div>' : '') + '</div>';
   }
   /* ตารางยาว: หัวตารางและบรรทัดรวมติดขอบกรอบเสมอ เลื่อนดูกลางตารางก็ยังเห็นชื่อคอลัมน์และยอดรวม */
-  let h = '<div class="scroll' + (o.rows.length > 12 ? ' tall' : '') + '"><table><thead><tr>';
+  /* จอมือถือ ตารางข้อมูลกลายเป็นการ์ดรายแถว — ทุกช่องมีชื่อคอลัมน์ติดไว้ (data-label) ให้อ่านได้โดยไม่ต้องเลื่อนข้าง */
+  const label = (j) => ' data-label="' + esc(o.cols[j] ? o.cols[j].t : '') + '"';
+  const labelled = (r) => r.map((c, j) => cell(c).replace(/^<td/, '<td' + label(j))).join('');
+  let h = '<div class="scroll' + (o.rows.length > 12 ? ' tall' : '') + '"><table class="dt"><thead><tr>';
   o.cols.forEach((c) => { h += '<th class="' + (c.a || 'l') + '">' + esc(c.t) + '</th>'; });
   h += '</tr></thead><tbody>';
   o.rows.forEach(function (r, i) {
     const attrs = o.rowAttr ? o.rowAttr(r, i) : '';
-    h += '<tr ' + attrs + '>' + (o.render ? o.render(r, i) : r.map(cell).join('')) + '</tr>';
+    h += '<tr ' + attrs + '>' + (o.render ? o.render(r, i) : labelled(r)) + '</tr>';
   });
   h += '</tbody>';
-  if (o.foot) h += '<tfoot><tr>' + o.foot.map(cell).join('') + '</tr></tfoot>';
+  if (o.foot) h += '<tfoot><tr>' + labelled(o.foot) + '</tr></tfoot>';
   return h + '</table></div>';
 }
 function card(o) {

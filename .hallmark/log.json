@@ -1,0 +1,18 @@
+[
+  {
+    "date": "2026-10-20",
+    "scope": "app",
+    "verb": "redesign",
+    "target": "webapp/shell.html + webapp/src/ui-*.js",
+    "design_system": "webapp/design.md",
+    "genre": "modern-minimal",
+    "macrostructure": "Index-First",
+    "theme": "Cobalt (Thai)",
+    "nav": "app sidebar (hairline, light) + bordered ⌘K top bar",
+    "footer": "none (app)",
+    "enrichment": "none",
+    "fonts": ["Bai Jamjuree", "IBM Plex Sans Thai", "IBM Plex Mono"],
+    "brief": "Thai accounting web app for bookkeepers and owners: easy to use, modern, numbers aligned, one cobalt signal, one graphite overview band on the dashboard",
+    "critique": "P4 H5 E4 S4 R5 V4"
+  }
+]

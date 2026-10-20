@@ -20,7 +20,8 @@ function kpi(list) {
   }).join('') + '</div>';
 }
 const searchBox = (ph) =>
-  '<input class="search" id="q" placeholder="' + esc(ph || 'ค้นหา…') + '" value="' + esc(STATE.filter) + '">';
+  '<label class="search-w">' + icon('search') + '<input class="search" id="q" placeholder="' + esc(ph || 'ค้นหา…')
+  + '" value="' + esc(STATE.filter) + '" aria-label="' + esc(ph || 'ค้นหา') + '"></label>';
 const hit = (s) => !STATE.filter || String(s).toLowerCase().indexOf(STATE.filter.toLowerCase()) >= 0;
 
 /* บรรทัดของงบการเงิน (ใช้ทั้งงบดุลและงบกำไรขาดทุน) */
@@ -324,9 +325,10 @@ function scDashboard() {
     + btn('new:expense', '+ บันทึกค่าใช้จ่าย') + btn('cmdk', 'ค้นหา…')
     + '</div></div>';
 
-  return demoBanner + hello + '<div class="kpis">' + tiles.map(function (k) {
+  /* แถบภาพรวมงวด — แถบกราไฟต์หนึ่งเดียวของแอป (design.md) ตัวเลขเป็นพระเอก ไม่มีไอคอนประดับ */
+  return demoBanner + hello + '<div class="kpis band">' + tiles.map(function (k) {
       return '<div class="kpi' + (k.tone ? ' ' + k.tone : '') + (k.act ? ' clickable" data-act="' + k.act : '') + '">'
-        + '<div class="kpi-l">' + (k.icon ? icon(k.icon) : '') + esc(k.label) + '</div>'
+        + '<div class="kpi-l">' + esc(k.label) + '</div>'
         + '<div class="kpi-v">' + esc(k.value) + '</div>'
         + '<div class="kpi-s">' + (k.sub || '') + '</div>'
         + (k.spark ? sparkline(k.spark) : '') + '</div>';
