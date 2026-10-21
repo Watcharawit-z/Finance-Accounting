@@ -3,7 +3,7 @@
   "build": {
     "builder": "RAILPACK",
     "buildCommand": "npm run build",
-    "watchPatterns": ["apps/api/**", "db/**", "package.json", "railway.json"]
+    "watchPatterns": ["apps/api/**", "db/**", "webapp/**", "package.json", "railway.json"]
   },
   "deploy": {
     "startCommand": "npm start",

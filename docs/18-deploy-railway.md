@@ -17,8 +17,13 @@
 2. ที่บริการที่สร้างขึ้น → **Settings → Source → Root Directory** ใส่ `webapp`
 3. **Settings → Networking → Generate Domain**
 
-จบ. Railway จะอ่าน `webapp/railway.json` เอง — build ด้วย `node build.js`
-แล้วรัน `node server.js` ตรวจสุขภาพที่ `/health`
+จบ. build ด้วย `node build.js` แล้วรัน `node server.js` ตรวจสุขภาพที่ `/health`
+
+> **ไฟล์ตั้งค่าไม่ตาม Root Directory** — ถ้าไม่ได้ตั้ง **Settings → Config-as-code → Railway Config File**
+> Railway จะใช้ `railway.json` ที่รากรีโป ไม่ใช่ `webapp/railway.json` ซึ่งก็ใช้ได้
+> (`npm run build` / `npm start` ใน `webapp/package.json` คือคำสั่งเดียวกัน)
+> และรายการ `watchPatterns` ที่รากมี `webapp/**` แล้ว แก้หน้าเว็บแล้ว push จะ deploy ใหม่ทุกครั้ง
+> ถ้าอยากให้บริการนี้ deploy เฉพาะตอน `webapp/` เปลี่ยน ให้ตั้งช่องนั้นเป็น `/webapp/railway.json`
 
 **ข้อมูลอยู่ที่ไหน:** ค่าเริ่มต้นคือในเบราว์เซอร์ของแต่ละคน เปิดคนละเครื่องคือคนละชุด
 ถ้าต้องการให้ทุกเครื่องเห็นชุดเดียวกัน ทำต่ออีก 3 ขั้นตามหัวข้อถัดไป
