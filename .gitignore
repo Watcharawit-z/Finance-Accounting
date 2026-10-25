@@ -31,3 +31,6 @@ config.json
 tools/flowaccount-import/config.json
 tools/flowaccount-import/out/
 out/
+
+# สำเนางานชั่วคราวของเอเจนต์ (git worktree) — ไม่ใช่ส่วนของโปรเจกต์
+.claude/worktrees/
