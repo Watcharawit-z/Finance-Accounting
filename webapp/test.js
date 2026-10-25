@@ -121,7 +121,7 @@ const inv = ctx.issueInvoice({ date:'2026-07-10', partnerCode:'CUS-0012',
          { desc:'ค่าบริการติดตั้ง', qty:1, price:'30000', revenueSub:'service_revenue' }] });
 ok('VAT 7% ของ 662,000', inv.vat === ctx.M('46340'), ctx.fmt(inv.vat));
 ok('ยอดรวม = ฐาน + VAT', inv.total === inv.base + inv.vat, ctx.fmt(inv.total));
-ok('ออกเลขที่ตามงวด', /^INV2607-\d{5}$/.test(inv.no), inv.no);
+ok('ออกเลขที่ตามงวด (คำนำหน้า + ปี ค.ศ. + เดือน + เลขรัน 4 หลัก)', /^INV202607\d{4}$/.test(inv.no), inv.no);
 
 const inv2 = ctx.issueInvoice({ date:'2026-07-11', partnerCode:'CUS-0012',
   lines:[{desc:'บริการ ก',qty:1,price:'33.33'},{desc:'บริการ ข',qty:1,price:'33.33'},
@@ -825,7 +825,7 @@ console.log('\n=== 7.13 ยกเลิกเอกสาร — กลับท
     const c2 = new Function(src + '\nreturn {DB,buildSeed,loadState};')();
     c2.buildSeed();
     const F = c2.DB.entries.find((e) => e.src === 'filing' && String(e.srcId).indexOf('PP30|2026-03') === 0);
-    const G = c2.DB.entries.find((e) => e.no.indexOf('JV2603') === 0 && e.src !== 'filing');
+    const G = c2.DB.entries.find((e) => e.no.indexOf('JV202603') === 0 && e.src !== 'filing');
     const fil = c2.DB.docs.filing.find((f) => f.form === 'PP30' && f.period === '2026-03');
     const gNo = G.no;
     F.no = gNo; fil.entryNo = gNo;

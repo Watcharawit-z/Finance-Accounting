@@ -631,7 +631,7 @@ function projectDetail(code) {
 }
 function modalProject(code) {
   const p = code ? DB.projects.find((x) => x.code === code) : null;
-  const custs = DB.partners.filter((x) => x.kind === 'customer');
+  const custs = DB.partners.filter((x) => isCustomer(x));
   modal({
     title: p ? 'แก้ไขโครงการ ' + p.code : 'สร้างโครงการ',
     sub: 'งบต้นทุนใช้เทียบกับต้นทุนจริงจากเอกสารที่ผูกเข้าโครงการ',

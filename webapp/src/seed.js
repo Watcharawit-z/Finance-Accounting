@@ -399,8 +399,8 @@ function generateTransactions() {
   const CLOSED_THROUGH = '2026-06';
   const stockItems = DB.items.filter((i) => i.type === 'stock');
   const svcItems = DB.items.filter((i) => i.type === 'service');
-  const customers = DB.partners.filter((p) => p.kind === 'customer');
-  const vendors = DB.partners.filter((p) => p.kind === 'vendor');
+  const customers = DB.partners.filter((p) => isCustomer(p));
+  const vendors = DB.partners.filter((p) => isVendor(p));
 
   months.forEach(function (mo, mi) {
     const last = Number(endOfMonth(mo + '-01').slice(-2));

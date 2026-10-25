@@ -762,7 +762,7 @@ function saveProject(input) {
   const customer = String(input.customer || '').trim() || null;
   if (customer) {
     const c = partnerByCode(customer);
-    if (c.kind !== 'customer') throw new DomainError('PARTNER_WRONG_SIDE', c.name + ' อยู่ในทะเบียนผู้ขาย ไม่ใช่ลูกค้า');
+    if (!isCustomer(c)) throw new DomainError('PARTNER_WRONG_SIDE', c.name + ' อยู่ในทะเบียนผู้ขาย ไม่ใช่ลูกค้า');
   }
   const contract = M(String(input.contract || '0'));
   const budget = M(String(input.budget || '0'));

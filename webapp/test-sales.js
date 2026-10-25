@@ -200,7 +200,7 @@ const cs3 = C.issueCashSale({ date: '2026-06-16', vatInclusive: false, payTo: '1
   buyerName: 'คุณลูกค้าหน้าร้าน', lines: [{ desc: 'ของ', qty: 3, price: '33.33' }] });
 ok('ราคาก่อนภาษี: บวกภาษีเพิ่ม และรับเข้าบัญชีธนาคารได้', cs3.base === M('99.99') && cs3.vat === M('7') && cs3.total === M('106.99')
   && drOf(entry(cs3.entryNo), '1113') === M('106.99'));
-ok('เลขที่ใบอย่างย่อแยกเล่มจากใบกำกับเต็มรูป', /^CS2606-\d{5}$/.test(cs.no) && cs2.no !== cs.no, cs.no + ' ' + cs2.no);
+ok('เลขที่ใบอย่างย่อแยกเล่มจากใบกำกับเต็มรูป', /^CA202606\d{4}$/.test(cs.no) && cs2.no !== cs.no, cs.no + ' ' + cs2.no);
 const seqBefore = JSON.stringify(D.seq);
 throws('สินค้าไม่พอ ขายเงินสดไม่ได้', () => C.issueCashSale({ date: '2026-06-16', lines: [{ desc: 'สินค้า ก', qty: 9999, price: '1', itemCode: widget.code }] }), 'INSUFFICIENT_STOCK');
 ok('ขายไม่สำเร็จไม่เสียเลขที่เอกสาร', JSON.stringify(D.seq) === seqBefore);

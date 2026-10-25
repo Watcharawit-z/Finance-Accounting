@@ -203,7 +203,7 @@ function modalCustomerDeposit(partnerCode) {
   refreshDepositSum();
 }
 function modalVendorDeposit(partnerCode) {
-  const vends = DB.partners.filter((p) => p.kind === 'vendor');
+  const vends = DB.partners.filter((p) => isVendor(p));
   if (!needRefs(vends, 'ยังไม่มีผู้ขายในทะเบียน', 'เพิ่มผู้ขายที่เมนูผู้ติดต่อก่อน')) return;
   const first = vends.find((p) => p.code === partnerCode) || vends[0];
   modal({
@@ -254,7 +254,7 @@ function depositGapNote(side) {
 }
 function modalDepositBalance(side) {
   const ar = side === 'ar';
-  const list = DB.partners.filter((p) => p.kind === (ar ? 'customer' : 'vendor')).map((p) => [p.code, p.name]);
+  const list = DB.partners.filter((p) => (ar ? isCustomer(p) : isVendor(p))).map((p) => [p.code, p.name]);
   if (!needRefs(list, 'ยังไม่มี' + (ar ? 'ลูกค้า' : 'ผู้ขาย') + 'ในทะเบียน', 'เพิ่มที่เมนูผู้ติดต่อก่อน')) return;
   const free = depositUnallocated(side);
   modal({

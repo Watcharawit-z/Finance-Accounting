@@ -152,7 +152,7 @@ function cmdkSources(q) {
   add('เอกสาร', docs, 8);
 
   add('ผู้ติดต่อ', DB.partners.filter((p) => has(p.name, p.code, p.taxId || '')).map((p) => ({
-    icon:'user', t: p.name, h: (p.kind === 'customer' ? 'ลูกค้า' : 'ผู้ขาย') + ' · ' + p.code, act:'partner:edit:' + p.code })), 5);
+    icon:'user', t: p.name, h: (PARTNER_KINDS[p.kind] || 'คู่ค้า') + ' · ' + p.code, act:'partner:edit:' + p.code })), 5);
   add('บัญชี', DB.accounts.filter((a) => a.postable && has(a.code, a.name)).map((a) => ({
     icon:'hash', t: a.code + ' ' + a.name, h:'ดูบัญชีแยกประเภท', act:'drill:' + a.code })), 5);
   add('สินค้า', DB.items.filter((i) => has(i.code, i.name)).map((i) => ({

@@ -7,9 +7,9 @@ function defaultDate() {
 }
 /* ตัวเลือกคู่ค้าในเอกสารใหม่ — รายที่ตั้งเลิกใช้งานไม่ขึ้น (ยังอยู่ในทะเบียนและรายงานเดิม)
    keep = รหัสที่ต้องคงไว้ในรายการแม้เลิกใช้งานแล้ว เช่นคู่ค้าเดิมของเอกสารที่กำลังแก้ */
-const optCustomers = (keep) => DB.partners.filter((p) => p.kind === 'customer' && (p.active !== false || p.code === keep))
+const optCustomers = (keep) => DB.partners.filter((p) => isCustomer(p) && (p.active !== false || p.code === keep))
   .map((p) => [p.code, p.name]);
-const optVendors   = (keep) => DB.partners.filter((p) => p.kind === 'vendor' && (p.active !== false || p.code === keep))
+const optVendors   = (keep) => DB.partners.filter((p) => isVendor(p) && (p.active !== false || p.code === keep))
   .map((p) => [p.code, p.name]);
 const optAccounts  = () => DB.accounts.filter((a) => a.postable).map((a) => [a.code, a.code + ' ' + a.name]);
 const optItems     = () => [['', '— เลือกสินค้าหรือบริการ —']]
@@ -1162,7 +1162,7 @@ function refreshExpenseSum() {
 
 function modalExpense(opts) {
   const o = opts || {};
-  const vends = DB.partners.filter((p) => p.kind === 'vendor');
+  const vends = DB.partners.filter((p) => isVendor(p));
   if (!needRefs(vends, 'ยังไม่มีผู้ขายในทะเบียน', 'เพิ่มผู้รับเงินที่เมนูผู้ติดต่อ → ผู้ขาย ก่อน')) return;
   const first = (o.requireWht ? vends.find((p) => p.whtCode) : null) || vends[0];
   const pay = payFromAccounts().map((a) => [a.code, a.code + ' ' + a.name]);

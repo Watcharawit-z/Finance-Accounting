@@ -1117,7 +1117,7 @@ function blankState() {
     bankBf: [],          // รายการค้าง ณ วันเริ่มกระทบยอด (เช็คค้างจ่าย เงินฝากระหว่างทาง)
     bankImports: [],     // ประวัติการนำเข้าไฟล์สเตทเมนต์ ใช้กันนำเข้าซ้ำและยกเลิกการนำเข้า
     audit: [],
-    settings: { hardLockDate: null },
+    settings: { hardLockDate: null, numbering: { style: 'fa', reset: 'month', prefixes: {} } },
     isDemo: false,       // true = ข้อมูลตัวอย่างที่ระบบสร้างให้ ไม่ใช่ข้อมูลจริงของผู้ใช้
   };
 }
@@ -1139,6 +1139,9 @@ function loadState(obj) {
   if (!DB.docs || typeof DB.docs !== 'object') DB.docs = fresh.docs;
   Object.keys(fresh.docs).forEach((k) => { if (!Array.isArray(DB.docs[k])) DB.docs[k] = []; });
   if (!DB.settings) DB.settings = fresh.settings;
+  /* ข้อมูลที่บันทึกก่อนมีตั้งค่าเลขที่เอกสาร ใช้รูปแบบเดิมต่อ — เลขเล่มเดียวกันไม่เปลี่ยนรูปกลางงวด
+     เปลี่ยนเป็นรูปแบบใหม่ได้เองที่ ตั้งค่า > เลขที่เอกสาร */
+  if (!DB.settings.numbering) DB.settings.numbering = { style: 'legacy', reset: 'month', prefixes: {} };
   if (DB.isDemo === undefined) {
     DB.isDemo = !!(DB.company && DB.company.name === 'บริษัท ศรีวัฒนาการค้า จำกัด');
   }
@@ -1298,17 +1301,52 @@ const SEQ_PREFIX = {
   assetSale:'FAS', assetWriteOff:'FAW', assetReceipt:'FAR',
   payRun:'PAY', payRemit:'PRM',
 };
+/* รูปแบบเลขที่แบบโปรแกรมออกเอกสารทั่วไปที่นักบัญชีคุ้น: คำนำหน้า + ปี ค.ศ. + เดือน + เลขรัน 4 หลัก (INV2026060001)
+   นับใหม่ทุกเดือน — หรือ คำนำหน้า + ปี ค.ศ. + เลขรัน 6 หลัก นับใหม่ทุกปี (INV2026000001)
+   คำนำหน้าเอกสารขาย/ซื้อตามที่ใช้กันทั่วไป ส่วนสมุดรายวันใช้คำนำหน้าเดิม · ตั้งเองได้ทุกชนิด (ไม่เกิน 6 ตัว) */
+const DOC_PREFIX_STD = {
+  invoice:'INV', receipt:'RE', quotation:'QT', billingNote:'BL', cashSale:'CA', purchaseOrder:'PO', bill:'RI',
+  expense:'EXP', whtCert:'WHT', payment:'PV', paymentBatch:'PS', goodsReceipt:'GR',
+};
+const NUMBER_STYLES = { fa: 'คำนำหน้า + ปี ค.ศ. + เดือน + เลขรัน', legacy: 'แบบเดิม (คำนำหน้า + ปีเดือน 2 หลัก - เลขรัน 5 หลัก)' };
+function numberingOf() {
+  return (DB.settings && DB.settings.numbering) || { style: 'legacy', reset: 'month', prefixes: {} };
+}
+/** คำนำหน้าที่ใช้จริงของเอกสารชนิดนี้ */
+function prefixOf(docType) {
+  const n = numberingOf();
+  const own = n.prefixes && n.prefixes[docType];
+  if (own) return own;
+  if (n.style === 'fa' && DOC_PREFIX_STD[docType]) return DOC_PREFIX_STD[docType];
+  return SEQ_PREFIX[docType] || docType.toUpperCase().slice(0, 3);
+}
+/** ตัวอย่างเลขที่ — ใช้ในหน้าตั้งค่า */
+function formatDocNo(docType, date, n, numbering) {
+  const cfg = numbering || numberingOf();
+  const prefix = numbering ? ((cfg.prefixes && cfg.prefixes[docType]) || (cfg.style === 'fa' && DOC_PREFIX_STD[docType]) || SEQ_PREFIX[docType])
+    : prefixOf(docType);
+  const period = periodOf(date);
+  if (cfg.style !== 'fa') return prefix + period.replace('-', '').slice(2) + '-' + String(n).padStart(5, '0');
+  if (cfg.reset === 'year') return prefix + period.slice(0, 4) + String(n).padStart(6, '0');
+  return prefix + period.replace('-', '') + String(n).padStart(4, '0');
+}
 /* ชนิดที่ใช้คำนำหน้าเดียวกันต้องนับด้วยตัวนับเดียวกัน — ใบสำคัญทั่วไปกับใบปรับปรุงใช้ JV ร่วมกัน
-   เดิมนับแยกตามชนิด จึงได้ JV2601-00001 สองใบ (ค่าธรรมเนียมธนาคาร กับ ปิดภาษี ภ.พ.30) */
-const SEQ_SHARE = {};
-Object.keys(SEQ_PREFIX).forEach((t) => { if (!SEQ_SHARE[SEQ_PREFIX[t]]) SEQ_SHARE[SEQ_PREFIX[t]] = t; });
+   เดิมนับแยกตามชนิด จึงได้ JV2601-00001 สองใบ (ค่าธรรมเนียมธนาคาร กับ ปิดภาษี ภ.พ.30)
+   คำนำหน้าตั้งเองได้ ผังคำนำหน้า → ชนิดหลักจึงคิดใหม่ทุกครั้ง */
+function seqCanon(prefix, docType) {
+  const types = Object.keys(SEQ_PREFIX).concat(Object.keys(DOC_PREFIX_STD));
+  for (let i = 0; i < types.length; i++) { if (prefixOf(types[i]) === prefix) return types[i]; }
+  return docType;
+}
 function nextNo(docType, date) {
   const period = periodOf(date);
-  const p = period.replace('-', '').slice(2);   // 2026-07 → 2607
-  const prefix = SEQ_PREFIX[docType] || docType.toUpperCase().slice(0, 3);
-  const canon = SEQ_SHARE[prefix] || docType;
-  const key = canon + '|' + period;
-  const own = docType + '|' + period;
+  const cfg = numberingOf();
+  const prefix = prefixOf(docType);
+  const canon = seqCanon(prefix, docType);
+  /* นับใหม่ทุกปี: ตัวนับเดียวต่อปี ค.ศ. · นับใหม่ทุกเดือน: ตัวนับต่องวด (ตัวนับเดียวกับรูปแบบเดิม เปลี่ยนรูปแบบกลางเดือนเลขก็ต่อเนื่อง) */
+  const span = cfg.style === 'fa' && cfg.reset === 'year' ? period.slice(0, 4) : period;
+  const key = canon + '|' + span;
+  const own = docType + '|' + span;
   if (canon !== docType && DB.seq[own] !== undefined) {
     DB.seq[key] = Math.max(DB.seq[key] || 0, DB.seq[own]);
     delete DB.seq[own];
@@ -1316,9 +1354,33 @@ function nextNo(docType, date) {
   let no;
   do {
     DB.seq[key] = (DB.seq[key] || 0) + 1;
-    no = prefix + p + '-' + String(DB.seq[key]).padStart(5, '0');
-  } while (docType.indexOf('je_') === 0 && DB.entries.some((e) => e.no === no));
+    no = formatDocNo(docType, date, DB.seq[key]);
+  } while (docNoTaken(docType, no));
   return no;
+}
+/** เลขนี้มีอยู่แล้วหรือไม่ — ใบสำคัญตรวจทุกครั้ง เอกสารตรวจในชนิดเดียวกัน (กันชนกับเลขที่พิมพ์เองหรือนำเข้ามา) */
+function docNoTaken(docType, no) {
+  if (docType.indexOf('je_') === 0) return DB.entries.some((e) => e.no === no);
+  const list = DB.docs && DB.docs[docType];
+  return Array.isArray(list) && list.some((d) => d && d.no === no);
+}
+/** ตั้งค่าเลขที่เอกสาร — รูปแบบ นับใหม่รายเดือน/รายปี และคำนำหน้าแต่ละชนิด (ตัวอักษรอังกฤษ/ตัวเลข ไม่เกิน 6 ตัว) */
+function saveNumbering(input) {
+  const style = NUMBER_STYLES[input.style] ? input.style : 'fa';
+  const reset = input.reset === 'year' ? 'year' : 'month';
+  const prefixes = {};
+  Object.keys(input.prefixes || {}).forEach(function (k) {
+    const v = String(input.prefixes[k] || '').trim().toUpperCase();
+    if (!v) return;
+    if (!/^[A-Z0-9]{1,6}$/.test(v)) {
+      throw new DomainError('PREFIX_INVALID', 'คำนำหน้า "' + v + '" ต้องเป็นตัวอักษรอังกฤษหรือตัวเลข 1–6 ตัว');
+    }
+    prefixes[k] = v;
+  });
+  const before = JSON.parse(JSON.stringify(numberingOf()));
+  DB.settings.numbering = { style, reset, prefixes };
+  audit('settings', 'numbering', 'update', before, DB.settings.numbering);
+  return DB.settings.numbering;
 }
 
 /** ข้อมูลที่บันทึกไว้ก่อนแก้ตัวนับ อาจมีเลขที่ใบสำคัญซ้ำ — ใบแรกคงเลขเดิม ใบหลังได้เลขใหม่
@@ -2004,13 +2066,24 @@ function partnerByCode(code) {
   return p;
 }
 
+/** คู่ค้ารายเดียวเป็นได้ทั้งลูกค้าและผู้ขาย (ผู้จำหน่ายและลูกค้า) — ตรวจบทบาทด้วยสองตัวนี้เสมอ ไม่เทียบ kind ตรง ๆ */
+const isCustomer = (p) => !!p && (p.kind === 'customer' || p.kind === 'both');
+const isVendor = (p) => !!p && (p.kind === 'vendor' || p.kind === 'both');
+const PARTNER_KINDS = { customer: 'ลูกค้า', vendor: 'ผู้ขาย', both: 'ผู้จำหน่ายและลูกค้า' };
+
 function snapshotPartner(p) {
   return {
     code: p.code, name: p.name, taxId: p.taxId, branch: p.branch,
     entityType: p.entityType, vatRegistered: partnerVatRegistered(p),
-    address: p.address, capturedAt: new Date().toISOString(),
+    address: p.address + (p.zip && String(p.address || '').indexOf(p.zip) < 0 ? ' ' + p.zip : ''),
+    contactPerson: p.contactPerson || '', phone: p.mobile || p.phone || '', email: p.email || '',
+    capturedAt: new Date().toISOString(),
   };
 }
+/* ช่องข้อความของสมุดรายชื่อ [ชื่อช่อง, ความยาวสูงสุด] */
+const PARTNER_TEXT = [['contactPerson', 80], ['email', 120], ['mobile', 30], ['fax', 30], ['website', 120], ['zip', 5],
+  ['branchName', 80], ['shipAddress', 300], ['bankName', 60], ['bankAccount', 30], ['bankAccountName', 120], ['bankBranch', 60], ['note', 500]];
+const BANK_ACCOUNT_TYPES = { saving: 'ออมทรัพย์', current: 'กระแสรายวัน', fixed: 'ฝากประจำ' };
 
 /** คู่ค้าจดทะเบียนภาษีมูลค่าเพิ่มหรือไม่ — ข้อมูลรุ่นก่อนไม่มีช่องนี้ ถือว่านิติบุคคลจดทะเบียน บุคคลธรรมดาไม่ได้จด
     ใช้ตัดสินว่าใบกำกับต้องมีเลขผู้เสียภาษีและสาขาของผู้ซื้อหรือไม่ */
@@ -2031,6 +2104,165 @@ function computeVat(lines, date) {
   });
   const vat = round2(pct(std, rateUsed));
   return { std, zero, exempt, vat, total: std + zero + exempt + vat, rate: rateUsed };
+}
+
+/* ===================================================================
+   ราคาแบบเอกสารธุรกิจ — ส่วนลดรายการ ส่วนลดท้ายบิล ราคารวม/ไม่รวมภาษี
+   แบบเดียวกับที่นักบัญชีคุ้นจากโปรแกรมออกเอกสารทั่วไป:
+   - ส่วนลดรายการ (disc ของบรรทัด) เป็นเปอร์เซ็นต์หรือบาทตาม pricing.lineDisc ทั้งใบ
+   - ส่วนลดท้ายบิล (pricing.bill) เป็นเปอร์เซ็นต์หรือบาท หักหลังส่วนลดรายการ
+   - ทุกส่วนลดหักก่อนคิดภาษี · ราคารวมภาษีถอดภาษีครั้งเดียวทั้งใบ แล้วแบ่งมูลค่าก่อนภาษีกลับไปตามสัดส่วน
+     บรรทัดสุดท้ายรับเศษ ผลรวมบรรทัดจึงเท่ายอดก่อนภาษีพอดี (วิธีเดียวกับบิลขายเงินสด)
+   ไม่มีส่วนลดและราคาไม่รวมภาษี = ได้ผลเท่ากับ computeVat ทุกสตางค์
+   =================================================================== */
+const PRICE_MODES = { exclusive: 'ราคาไม่รวมภาษี', inclusive: 'ราคารวมภาษี' };
+const DISC_KINDS = { percent: 'เปอร์เซ็นต์', amount: 'บาท' };
+/** ตั้งค่าราคาของเอกสาร — ค่าที่ไม่ส่งมาใช้ค่าเริ่มต้นของกิจการ (ตั้งค่า > เอกสาร) */
+function normPricing(p) {
+  const src = p || {};
+  const def = (DB.settings && DB.settings.docDefaults) || {};
+  const mode = PRICE_MODES[src.mode] ? src.mode : PRICE_MODES[def.priceMode] ? def.priceMode : 'exclusive';
+  const lineDisc = DISC_KINDS[src.lineDisc] ? src.lineDisc : 'percent';
+  const b = src.bill && String(src.bill.value === undefined || src.bill.value === null ? '' : src.bill.value).trim();
+  const bill = b && M(b) !== 0 ? { kind: DISC_KINDS[src.bill.kind] ? src.bill.kind : 'percent', value: b } : null;
+  return { mode, lineDisc, bill };
+}
+/** ส่วนลดเป็นบาทจากค่าที่กรอก — เปอร์เซ็นต์ 0–100 · บาทต้องไม่เกินยอดที่จะลด */
+function discountOf(base, raw, kind, what) {
+  const s = String(raw === undefined || raw === null ? '' : raw).trim().replace(/%$/, '');
+  if (!s || M(s) === 0) return 0;
+  const v = M(s);
+  if (v < 0) throw new DomainError('DISCOUNT_NEGATIVE', what + ' ติดลบไม่ได้');
+  if (kind === 'percent') {
+    if (v > M('100')) throw new DomainError('DISCOUNT_OVER', what + ' เกิน 100%');
+    return round2(pct(base, s));
+  }
+  if (base >= 0 && v > base) {
+    throw new DomainError('DISCOUNT_OVER', what + ' ' + fmt(v) + ' บาท เกินยอด ' + fmt(base) + ' บาท');
+  }
+  return round2(v);
+}
+/** แบ่งยอด total ไปตามสัดส่วน weights — บรรทัดสุดท้ายที่มีน้ำหนักรับเศษ ผลรวมเท่า total พอดี */
+function allocate(total, weights) {
+  const sum = weights.reduce((s, w) => s + (w > 0 ? w : 0), 0);
+  const out = weights.map(() => 0);
+  if (!total || !sum) return out;
+  const idx = weights.map((w, i) => i).filter((i) => weights[i] > 0);
+  let left = total;
+  idx.forEach(function (i, k) {
+    out[i] = k === idx.length - 1 ? left : round2(mulDiv(total, weights[i], sum));
+    left -= out[i];
+  });
+  return out;
+}
+/** คำนวณทั้งใบ — คืน rows (ต่อบรรทัด: gross ส่วนลด ส่วนลดท้ายบิลที่แบ่งมา net=มูลค่าก่อนภาษีหลังหักทุกส่วนลด)
+    v (รูปเดียวกับ computeVat ใช้ลงบัญชี) และ totals (ยอดที่พิมพ์ท้ายเอกสาร) */
+function priceLines(lines, date, pricing) {
+  const P = normPricing(pricing);
+  const code = (l) => l.taxCode || 'VAT7';
+  const rows = lines.map(function (l, i) {
+    const gross = round2(mulQty(M(l.price), l.qty));
+    const discount = discountOf(gross, l.disc, P.lineDisc, 'ส่วนลดบรรทัดที่ ' + (i + 1));
+    return { gross, discount, after: gross - discount };
+  });
+  const subTotal = rows.reduce((s, r) => s + r.gross, 0);
+  const lineDiscount = rows.reduce((s, r) => s + r.discount, 0);
+  const afterLine = subTotal - lineDiscount;
+  let billDiscount = 0;
+  if (P.bill) {
+    if (afterLine <= 0) throw new DomainError('DISCOUNT_OVER', 'ไม่มียอดให้หักส่วนลดท้ายบิล');
+    billDiscount = discountOf(afterLine, P.bill.value, P.bill.kind, 'ส่วนลดท้ายบิล');
+  }
+  const share = allocate(billDiscount, rows.map((r) => r.after));
+  rows.forEach(function (r, i) { r.billShare = share[i]; r.final = r.after - share[i]; });
+
+  const stdIdx = lines.map((l, i) => i).filter((i) => code(lines[i]) === 'VAT7');
+  const rate = stdIdx.length ? resolveRate('VAT7', date).rate : '0';
+  const stdGross = stdIdx.reduce((s, i) => s + rows[i].final, 0);
+  let std, vat;
+  if (P.mode === 'inclusive' && stdIdx.length) {
+    std = round2(mulDiv(stdGross, 100 * S, 100 * S + M(rate)));
+    vat = stdGross - std;
+    const nets = allocate(std, stdIdx.map((i) => rows[i].final));
+    /* บรรทัดราคาติดลบ (ส่วนลดเป็นบรรทัด) ไม่ได้น้ำหนัก — ถอดภาษีของบรรทัดนั้นเอง */
+    stdIdx.forEach(function (i, k) { rows[i].net = rows[i].final > 0 ? nets[k] : round2(mulDiv(rows[i].final, 100 * S, 100 * S + M(rate))); });
+    const drift = std - stdIdx.reduce((s, i) => s + rows[i].net, 0);
+    if (drift) { const last = stdIdx.filter((i) => rows[i].final > 0).pop(); if (last !== undefined) rows[last].net += drift; }
+  } else {
+    std = stdGross;
+    vat = round2(pct(std, rate));
+  }
+  rows.forEach(function (r, i) { if (r.net === undefined) r.net = r.final; });
+  const sumOf = (c) => rows.reduce((s, r, i) => s + (code(lines[i]) === c ? r.net : 0), 0);
+  const zero = sumOf('VAT0'), exempt = sumOf('EXEMPT');
+  const total = std + zero + exempt + vat;
+  const discount = lineDiscount + billDiscount;
+  return {
+    pricing: P, rows,
+    v: { std, zero, exempt, vat, total, rate },
+    totals: {
+      subTotal, lineDiscount, billDiscount, discount, afterDiscount: subTotal - discount,
+      /* ราคารวมภาษี: ยอดหลังหักส่วนลดรวมภาษีแล้ว · ไม่รวมภาษี: ยังไม่รวม */
+      exempt: zero + exempt, vatable: std, vat, total,
+    },
+  };
+}
+/** มีอะไรที่ต่างจากใบแบบเดิม (ส่วนลด ราคารวมภาษี) — ใช้ตัดสินว่าต้องพิมพ์บรรทัดส่วนลด/หมายเหตุราคาหรือไม่ */
+function pricingUsed(P) {
+  return !!P && (P.pricing.mode === 'inclusive' || P.totals.discount !== 0);
+}
+
+/** ส่วนลดบรรทัดที่เก็บไว้ในเอกสาร — ข้อความตามที่กรอก (ตีความด้วย pricing.lineDisc ของใบ) */
+const lineDiscText = (d) => { const t = String(d === undefined || d === null ? '' : d).trim().replace(/%$/, ''); return t && M(t) !== 0 ? t : ''; };
+
+/* ---------- หัวเอกสาร: เงื่อนไขชำระ วันครบกำหนด โปรเจกต์ พนักงานขาย เลขอ้างอิง หมายเหตุ โน้ตภายใน ----------
+   เงินสด = ครบกำหนดวันเดียวกัน · เครดิต N วัน = พิมพ์วันครบกำหนด · เครดิตไม่แสดงวันครบกำหนด = นับวันแต่ไม่พิมพ์
+   ไม่ส่งมา = ใช้เครดิตตามทะเบียนคู่ค้า (แบบเดิม) */
+const CREDIT_TYPES = { cash: 'เงินสด', credit: 'เครดิต', creditHidden: 'เครดิต (ไม่แสดงวันครบกำหนด)' };
+function docHeader(input, p, date) {
+  const src = input || {};
+  const type = CREDIT_TYPES[src.creditType] ? src.creditType : 'credit';
+  let days = type === 'cash' ? 0
+    : src.creditDays !== undefined && src.creditDays !== null && src.creditDays !== '' ? Number(src.creditDays)
+    : (p && p.termDays) || 0;
+  if (!(days >= 0) || Math.floor(days) !== days) {
+    throw new DomainError('CREDIT_DAYS_INVALID', 'จำนวนวันเครดิตต้องเป็นจำนวนเต็มตั้งแต่ 0 ขึ้นไป');
+  }
+  let due = addDays(date, days);
+  if (type !== 'cash' && src.dueDate && src.dueDate !== due) {
+    if (src.dueDate < date) throw new DomainError('DUE_BEFORE_DATE', 'วันครบกำหนดต้องไม่ก่อนวันที่เอกสาร');
+    due = src.dueDate;
+    days = Math.round((Date.parse(due) - Date.parse(date)) / 86400000);
+  }
+  const txt = (v, n) => String(v === undefined || v === null ? '' : v).trim().slice(0, n);
+  return {
+    creditType: type, creditDays: days, due,
+    project: txt(src.project, 120), salesName: txt(src.salesName, 80), reference: txt(src.reference, 60),
+    note: txt(src.note, 1000), internalNote: txt(src.internalNote, 1000),
+  };
+}
+/** ข้อมูลลูกค้า/ผู้ขายที่แก้บนเอกสารใบนี้ (ที่อยู่สาขาอื่น ชื่อผู้ติดต่อ) — ไม่แก้ทะเบียน
+    เลขผู้เสียภาษีที่แก้ต้องผ่านหลักตรวจสอบ เหมือนตอนเพิ่มในทะเบียน */
+function applyContactEdits(snap, edits) {
+  if (!edits) return snap;
+  const out = Object.assign({}, snap);
+  ['name', 'address', 'branch', 'contactPerson', 'phone', 'email'].forEach(function (k) {
+    const v = edits[k];
+    if (v !== undefined && v !== null && String(v).trim() !== '') out[k] = String(v).trim();
+  });
+  if (edits.taxId !== undefined && edits.taxId !== null && String(edits.taxId).trim() !== '') {
+    const t = String(edits.taxId).replace(/[^0-9]/g, '');
+    if (!validTaxId(t)) {
+      throw new DomainError('TAX_ID_INVALID', 'เลขประจำตัวผู้เสียภาษี ' + t + ' ไม่ผ่านการตรวจหลักที่ 13',
+        'ตรวจเลขกับหนังสือรับรองของคู่ค้าอีกครั้ง');
+    }
+    out.taxId = t;
+  }
+  if (out.branch && !/^\d{5}$/.test(out.branch)) {
+    throw new DomainError('BRANCH_INVALID', 'รหัสสาขาต้องเป็นตัวเลข 5 หลัก (สำนักงานใหญ่คือ 00000)');
+  }
+  out.edited = true;
+  return out;
 }
 
 /* ---------- ตรวจตาม ม.86/4 ก่อนออกเลข ---------- */
@@ -2112,8 +2344,8 @@ function assertBranch(branch, entityType) {
 
 /** เพิ่มหรือแก้ไขลูกค้า/ผู้ขาย — ใช้ทั้งตอนสร้างใหม่และตอนแก้ */
 function savePartner(input) {
-  const kind = input.kind === 'vendor' ? 'vendor' : 'customer';
-  const label = kind === 'vendor' ? 'ผู้ขาย' : 'ลูกค้า';
+  const kind = PARTNER_KINDS[input.kind] ? input.kind : 'customer';
+  const label = PARTNER_KINDS[kind];
   const name = String(input.name || '').trim();
   if (!name) throw new DomainError('PARTNER_NAME_REQUIRED', 'ต้องกรอกชื่อ' + label);
 
@@ -2142,7 +2374,7 @@ function savePartner(input) {
      เพราะทำให้ยอดค้างของรายเดียวกันแตกเป็นสองราย แล้วกระทบยอดไม่ได้ */
   if (taxId) {
     const dup = DB.partners.find((x) => x.taxId === taxId && (x.branch || '00000') === (branch || '00000')
-      && x.kind === kind && (!existing || x.code !== existing.code));
+      && ((isCustomer(x) && kind !== 'vendor') || (isVendor(x) && kind !== 'customer')) && (!existing || x.code !== existing.code));
     if (dup) {
       throw new DomainError('PARTNER_DUPLICATE_TAX_ID',
         label + 'เลขผู้เสียภาษี ' + taxId + ' สาขา ' + (branch || '—') + ' มีอยู่แล้วคือ '
@@ -2162,6 +2394,15 @@ function savePartner(input) {
     creditLimit: M(input.creditLimit || '0'),
     active: active,
   };
+  /* ช่องติดต่อและบัญชีธนาคารแบบสมุดรายชื่อทั่วไป — ส่งมา = ใช้ค่าใหม่ (ว่างได้) · ไม่ส่ง = คงค่าเดิม */
+  const opt = (k, n) => input[k] !== undefined && input[k] !== null ? String(input[k]).trim().slice(0, n) : existing ? existing[k] || '' : '';
+  PARTNER_TEXT.forEach(function (f) { rec[f[0]] = opt(f[0], f[1]); });
+  if (rec.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(rec.email)) {
+    throw new DomainError('EMAIL_INVALID', 'อีเมล ' + rec.email + ' รูปแบบไม่ถูกต้อง');
+  }
+  if (rec.zip && !/^\d{5}$/.test(rec.zip)) throw new DomainError('ZIP_INVALID', 'รหัสไปรษณีย์ต้องเป็นตัวเลข 5 หลัก');
+  rec.bankAccountType = BANK_ACCOUNT_TYPES[input.bankAccountType] ? input.bankAccountType
+    : existing && existing.bankAccountType ? existing.bankAccountType : 'saving';
   if (existing) {
     const before = { name: existing.name, taxId: existing.taxId, branch: existing.branch, active: existing.active !== false };
     Object.keys(rec).forEach((k) => { existing[k] = rec[k]; });
@@ -2204,11 +2445,14 @@ function deletePartner(code, reason) {
   return p;
 }
 
+/* ชนิดสินค้า: บริการ · สินค้าไม่นับสต๊อก (ขายของแต่ไม่คุมจำนวน) · สินค้านับสต๊อก */
+const ITEM_TYPES = { service: 'บริการ', nonstock: 'สินค้าไม่นับสต๊อก', stock: 'สินค้านับสต๊อก' };
+const ITEM_VAT_TYPES = { exclusive: 'ราคาไม่รวมภาษี', inclusive: 'ราคารวมภาษี', zero: 'ภาษี 0%', exempt: 'ยกเว้นภาษี' };
 /** เพิ่มหรือแก้ไขสินค้า/บริการ — จำนวนคงเหลือแก้ตรงนี้ไม่ได้ ต้องมาจากเอกสาร */
 function saveItem(input) {
   const name = String(input.name || '').trim();
   if (!name) throw new DomainError('ITEM_NAME_REQUIRED', 'ต้องกรอกชื่อสินค้าหรือบริการ');
-  const type = input.type === 'service' ? 'service' : 'stock';
+  const type = ITEM_TYPES[input.type] ? input.type : 'stock';
   const existing = input.code ? DB.items.find((x) => x.code === input.code) : null;
   if (input.code && !existing) throw new DomainError('ITEM_NOT_FOUND', 'ไม่พบสินค้ารหัส ' + input.code);
 
@@ -2217,16 +2461,33 @@ function saveItem(input) {
     throw new DomainError('ITEM_CODE_DUPLICATE', 'รหัสสินค้า ' + code + ' มีอยู่แล้ว');
   }
   /* เปลี่ยนจากสินค้าเป็นบริการทั้งที่ยังมีของในสต๊อก จะทำให้มูลค่าสินค้าคงเหลือหายจากงบ */
-  if (existing && existing.type === 'stock' && type === 'service' && existing.qty !== 0) {
+  if (existing && existing.type === 'stock' && type !== 'stock' && existing.qty !== 0) {
     throw new DomainError('ITEM_STILL_IN_STOCK',
-      'สินค้านี้ยังมีคงเหลือ ' + existing.qty + ' ' + existing.uom + ' เปลี่ยนเป็นบริการไม่ได้',
+      'สินค้านี้ยังมีคงเหลือ ' + existing.qty + ' ' + existing.uom + ' เปลี่ยนเป็น' + ITEM_TYPES[type] + 'ไม่ได้',
       'ตัดสต๊อกให้เป็นศูนย์ก่อน');
   }
+  /* ช่องเสริม: ส่งมา = ใช้ค่าใหม่ (ว่างได้) · ไม่ส่ง = คงค่าเดิม */
+  const opt = (k, n) => input[k] !== undefined && input[k] !== null ? String(input[k]).trim().slice(0, n) : existing ? existing[k] || '' : '';
+  const vatOf = (k) => { const v = input[k] !== undefined ? input[k] : existing ? existing[k] : ''; return ITEM_VAT_TYPES[v] ? v : 'exclusive'; };
+  const accOf = function (k, ok, what) {
+    const v = opt(k, 10);
+    if (v && !ok().some((a) => a.code === v)) {
+      throw new DomainError('ITEM_ACCOUNT_INVALID', 'บัญชี' + what + ' ' + v + ' ใช้กับสินค้านี้ไม่ได้');
+    }
+    return v;
+  };
   const rec = {
     code: code, name: name, type: type,
     category: String(input.category || '').trim() || 'ทั่วไป',
     uom: String(input.uom || '').trim() || (type === 'service' ? 'งาน' : 'หน่วย'),
     price: M(input.price || '0'),
+    /* แบบเอกสารธุรกิจทั่วไป: ราคาขายและราคาซื้อแยกกัน แต่ละฝั่งบอกว่าราคารวม/ไม่รวมภาษี อัตรา 0% หรือยกเว้น */
+    sellVat: vatOf('sellVat'), sellDesc: opt('sellDesc', 200),
+    buyPrice: input.buyPrice !== undefined && input.buyPrice !== null && input.buyPrice !== '' ? M(input.buyPrice) : existing ? existing.buyPrice || 0 : 0,
+    buyVat: vatOf('buyVat'), buyDesc: opt('buyDesc', 200),
+    barcode: opt('barcode', 30),
+    revenueAcc: accOf('revenueAcc', revenueAccounts, 'รายได้'),
+    expenseAcc: type === 'stock' ? '' : accOf('expenseAcc', billAccounts, 'ค่าใช้จ่าย'),
     reorder: Math.max(0, Number(input.reorder || 0) || 0),
     qty: existing ? existing.qty : 0,
     avgCost: existing ? existing.avgCost : 0,
@@ -2332,6 +2593,8 @@ function revenueAccounts() {
 /** บัญชีรายได้ปริยาย — บริการลงรายได้ค่าบริการ นอกนั้นลงรายได้จากการขาย */
 function defaultRevenueAccount(itemCode, revenueSub) {
   const it = itemCode ? DB.items.find((x) => x.code === itemCode) : null;
+  /* บัญชีรายได้ที่ตั้งไว้ในทะเบียนสินค้า มาก่อนค่าปริยายตามชนิด */
+  if (!revenueSub && it && it.revenueAcc && revenueAccounts().some((a) => a.code === it.revenueAcc)) return it.revenueAcc;
   const sub = revenueSub || (it && it.type === 'service' ? 'service_revenue' : 'sales_revenue');
   const accs = DB.accounts.filter((a) => a.postable && a.subType === sub);
   const a = accs.find((x) => x.isDefault) || accs[0];
@@ -2349,22 +2612,24 @@ function revenueLineAccount(l, i) {
 /* ---------- ขาย: ออกใบกำกับภาษี ---------- */
 function issueInvoice(input) {
   const p = partnerByCode(input.partnerCode);
-  const snap = snapshotPartner(p);
+  const snap = applyContactEdits(snapshotPartner(p), input.contact);
   const lines = input.lines.filter((l) => String(l.desc || '').trim() && M(l.price) !== 0);
   assertTaxInvoiceComplete(snap, lines);
 
-  const v = computeVat(lines, input.date);
+  const P = priceLines(lines, input.date, input.pricing);
+  const v = P.v;
+  const head = docHeader(input, p, input.date);
   /* หักเงินมัดจำที่ออกใบกำกับไปแล้วตอนรับเงิน (settle.js) — v เหลือเฉพาะมูลค่าและภาษีที่ยังไม่ได้เก็บ */
   const dep = (input.deposits || []).length ? depositDeduction('ar', p.code, input.deposits, v, input.date) : { lines: [], fields: {} };
   assertStockAvailable(lines);
   const lineAcc = lines.map((l, i) => revenueLineAccount(l, i));
-  const no = nextNo('invoice', input.date);
-  const due = addDays(input.date, p.termDays || 0);
+  const no = input.forceNo || nextNo('invoice', input.date);
+  const due = head.due;
 
   const revLines = {};
   lines.forEach(function (l, i) {
     const a = lineAcc[i];
-    revLines[a] = (revLines[a] || 0) + round2(mulQty(M(l.price), l.qty));
+    revLines[a] = (revLines[a] || 0) + P.rows[i].net;
   });
 
   const je = post({
@@ -2414,9 +2679,10 @@ function issueInvoice(input) {
     snap, lines: lines.map((l, i) => Object.assign({
       desc: l.desc, qty: Number(l.qty), price: M(l.price), uom: l.uom || '',
       taxCode: l.taxCode || 'VAT7', itemCode: l.itemCode || null, acc: lineAcc[i],
-      amount: round2(mulQty(M(l.price), l.qty)),
+      disc: lineDiscText(l.disc), gross: P.rows[i].gross, amount: P.rows[i].net,
     }, l.soLine !== undefined && l.soLine !== null ? { soLine: Number(l.soLine) } : {})),
     base: v.std + v.zero + v.exempt, vat: v.vat, total: v.total,
+    pricing: P.pricing, totals: P.totals, ...head,
     paid: 0, credited: 0, status: 'issued',
     entryNo: je.no, cogsEntryNo: cogsJe ? cogsJe.no : null,
     etax: 'accepted',
@@ -2766,7 +3032,7 @@ function docWht(whtCode, doc, date) {
   const all = doc.lines.reduce((s, l) => s + l.amount, 0);
   const goods = doc.lines.reduce(function (s, l) {
     const it = l.itemCode ? DB.items.find((x) => x.code === l.itemCode) : null;
-    return s + (it && it.type === 'stock' ? l.amount : 0);
+    return s + (it && (it.type === 'stock' || it.type === 'nonstock') ? l.amount : 0);
   }, 0);
   /* doc.base หลังหักเงินมัดจำแล้ว (ใบกำกับ) — ส่วนของค่าบริการคิดตามสัดส่วนบรรทัด */
   const base = all ? round2(mulDiv(doc.base, all - goods, all)) : 0;
@@ -2781,10 +3047,10 @@ function tradeDocParts(kind, input) {
   const cfg = TRADE_DOCS[kind];
   if (!cfg) throw new DomainError('TRADE_DOC_KIND_UNKNOWN', 'ไม่รู้จักเอกสารประเภท ' + kind);
   const p = partnerByCode(input.partnerCode);
-  if (p.kind !== cfg.side) {
+  if (cfg.side === 'customer' ? !isCustomer(p) : !isVendor(p)) {
     throw new DomainError('PARTNER_WRONG_SIDE',
       cfg.label + 'ต้องออกให้' + (cfg.side === 'customer' ? 'ลูกค้า' : 'ผู้ขาย')
-      + ' แต่ ' + p.name + ' อยู่ในทะเบียน' + (p.kind === 'customer' ? 'ลูกค้า' : 'ผู้ขาย'));
+      + ' แต่ ' + p.name + ' อยู่ในทะเบียน' + (PARTNER_KINDS[p.kind] || 'อื่น'));
   }
   const lines = (input.lines || []).filter((l) => String(l.desc || '').trim() && M(l.price) !== 0);
   if (!lines.length) throw new DomainError('NO_LINES', 'ต้องมีรายการอย่างน้อย 1 บรรทัด');
@@ -2793,12 +3059,12 @@ function tradeDocParts(kind, input) {
     if (!l.acc) return null;
     return cfg.side === 'customer' ? revenueLineAccount(l, i) : billLineAccount(l, i);
   });
-  const v = computeVat(lines, input.date);
-  return { cfg, p, v, rows: lines.map((l, i) => ({
+  const P = priceLines(lines, input.date, input.pricing);
+  return { cfg, p, v: P.v, P, rows: lines.map((l, i) => ({
     desc: l.desc, qty: Number(l.qty), price: M(l.price), uom: l.uom || '',
     taxCode: l.taxCode || 'VAT7', itemCode: l.itemCode || null, acc: accs[i],
     expenseSub: l.expenseSub || null, revenueSub: l.revenueSub || null,
-    amount: round2(mulQty(M(l.price), l.qty)),
+    disc: lineDiscText(l.disc), gross: P.rows[i].gross, amount: P.rows[i].net,
   })) };
 }
 
@@ -2811,10 +3077,11 @@ function issueTradeDoc(kind, input) {
 
   const doc = {
     no, date: input.date, validUntil,
-    partnerCode: p.code, partnerName: p.name, snap: snapshotPartner(p),
+    partnerCode: p.code, partnerName: p.name, snap: applyContactEdits(snapshotPartner(p), input.contact),
     lines: t.rows,
     base: v.std + v.zero + v.exempt, vat: v.vat, total: v.total,
-    note: input.note || '', status: 'issued', convertedTo: null, fromDoc: input.fromDoc || null,
+    pricing: t.P.pricing, totals: t.P.totals, ...docHeader(input, p, input.date),
+    status: 'issued', convertedTo: null, fromDoc: input.fromDoc || null,
   };
   Object.assign(doc, docWht(input.whtCode, doc, input.date));
   DB.docs[kind].unshift(doc);
@@ -2839,7 +3106,8 @@ function updateTradeDoc(kind, no, input) {
   /* ช่องที่ไม่ส่งมาใช้ค่าเดิม — แก้แค่หมายเหตุหรือวันยืนราคาได้โดยไม่ต้องส่งบรรทัดทั้งหมดมาใหม่ */
   const date = input.date || d.date;
   const t = tradeDocParts(kind, { partnerCode: input.partnerCode || d.partnerCode, date,
-    lines: input.lines || d.lines.map((l) => ({ ...l, price: unM(l.price) })) });
+    lines: input.lines || d.lines.map((l) => ({ ...l, price: unM(l.price) })),
+    pricing: input.pricing !== undefined ? input.pricing : d.pricing });
   const before = { partner: d.partnerName, total: fmt(d.total), lines: d.lines.length };
   /* วันยืนราคา: ระบุมา = ใช้ตามนั้น · เปลี่ยนวันที่เอกสาร = นับใหม่จากวันที่ใหม่ · ไม่เปลี่ยน = คงเดิม */
   const validUntil = !cfg.validDays ? null
@@ -2850,11 +3118,21 @@ function updateTradeDoc(kind, no, input) {
   }
   d.date = date;
   d.validUntil = validUntil;
-  d.partnerCode = t.p.code; d.partnerName = t.p.name; d.snap = snapshotPartner(t.p);
+  const sameP = t.p.code === d.partnerCode;
+  d.partnerCode = t.p.code; d.partnerName = t.p.name;
+  /* ข้อมูลลูกค้าที่แก้บนเอกสาร: ส่งมาใหม่ใช้ของใหม่ · ไม่ส่งแต่คู่ค้าเดิม คงที่แก้ไว้ · เปลี่ยนคู่ค้า เริ่มจากทะเบียน */
+  d.snap = input.contact !== undefined ? applyContactEdits(snapshotPartner(t.p), input.contact)
+    : sameP && d.snap && d.snap.edited ? d.snap : snapshotPartner(t.p);
   d.lines = t.rows;
   d.base = t.v.std + t.v.zero + t.v.exempt; d.vat = t.v.vat; d.total = t.v.total;
+  d.pricing = t.P.pricing; d.totals = t.P.totals;
+  /* หัวเอกสาร — ช่องที่ไม่ส่งมาใช้ค่าเดิม */
+  const keep = {};
+  ['creditType', 'creditDays', 'dueDate', 'project', 'salesName', 'reference', 'note', 'internalNote'].forEach(function (k) {
+    keep[k] = input[k] !== undefined ? input[k] : k === 'dueDate' ? (date !== d.date ? undefined : d.due) : d[k];
+  });
+  Object.assign(d, docHeader(keep, t.p, date));
   Object.assign(d, docWht(input.whtCode !== undefined ? input.whtCode : d.whtCode, d, date));
-  if (input.note !== undefined) d.note = input.note || '';
   d.revision = (d.revision || 0) + 1;
   d.updatedAt = new Date().toISOString();
   audit(kind, no, 'update', before, { partner: d.partnerName, total: fmt(d.total), lines: d.lines.length });
@@ -2913,13 +3191,15 @@ function convertTradeDoc(kind, no, input) {
   /* บรรทัดที่เก็บไว้เป็นจำนวนเงินสเกลแล้ว ต้องแปลงกลับเป็นข้อความก่อนส่งต่อ
      ไม่งั้นฟังก์ชันปลายทางจะคูณสเกลซ้ำ */
   const carry = d.lines.map((l) => ({ ...l, price: unM(l.price) }));
+  /* ราคา ส่วนลด หัวเอกสาร และข้อมูลลูกค้าที่แก้ไว้ ตามไปเอกสารปลายทางทั้งหมด ไม่ต้องกรอกซ้ำ */
+  const head = carryHeader(d, opts);
 
   if (kind === 'quotation' && opts.to === 'invoice') {
     /* งานเล็กที่ไม่ต้องมีใบสั่งขาย — ลูกค้าตอบรับแล้วออกใบกำกับได้เลย */
-    made = issueInvoice({ partnerCode: d.partnerCode, date, lines: carry, fromDoc: d.no, whtCode: d.whtCode || null });
+    made = issueInvoice({ ...head, partnerCode: d.partnerCode, date, lines: carry, fromDoc: d.no, whtCode: d.whtCode || null });
   } else if (cfg.next === 'salesOrder') {
     made = issueTradeDoc('salesOrder', {
-      partnerCode: d.partnerCode, date, lines: carry, note: d.note, fromDoc: d.no, whtCode: d.whtCode || null,
+      ...head, partnerCode: d.partnerCode, date, lines: carry, fromDoc: d.no, whtCode: d.whtCode || null,
     });
   } else {
     if (!opts.vendorNo) {
@@ -2931,7 +3211,7 @@ function convertTradeDoc(kind, no, input) {
        ค่าซ่อมกับค่าวัสดุในใบเดียวกันจึงปนกัน · opts.acc ใช้กับบรรทัดที่ไม่ได้เลือกบัญชีไว้ · สินค้าคงคลังเข้าบัญชีสินค้าเสมอ */
     const pick = Array.isArray(opts.lineAccs) ? opts.lineAccs : [];
     made = recordBill({
-      partnerCode: d.partnerCode, date, vendorNo: opts.vendorNo,
+      ...head, partnerCode: d.partnerCode, date, vendorNo: opts.vendorNo,
       lines: carry.map(function (l, i) {
         const it = l.itemCode ? DB.items.find((x) => x.code === l.itemCode) : null;
         const stock = it && it.type === 'stock';
@@ -2947,6 +3227,27 @@ function convertTradeDoc(kind, no, input) {
   d.convertedTo = made.no;
   audit(kind, no, 'convert', null, { to: made.no });
   return made;
+}
+
+/** หัวเอกสารที่ส่งต่อตอนแปลงเอกสาร — วันครบกำหนดนับใหม่จากวันที่ของเอกสารปลายทาง
+    ส่วนลดท้ายบิลแบบบาทของงานที่ออกไม่ครบ (บางบรรทัด/บางจำนวน) แปลงเป็นเปอร์เซ็นต์ของยอดหลังส่วนลดรายการของต้นทาง
+    ใบที่ทยอยออกจะได้ส่วนลดตามสัดส่วน ไม่ใช่ได้ส่วนลดเต็มก้อนซ้ำทุกใบ */
+function carryHeader(d, opts, partRows) {
+  const o = opts || {};
+  let pricing = d.pricing || null;
+  if (partRows && pricing && pricing.bill && pricing.bill.kind === 'amount' && d.totals) {
+    const afterLine = d.totals.subTotal - d.totals.lineDiscount;
+    const pctStr = afterLine > 0 ? unM(mulDiv(M(pricing.bill.value), 100 * S, afterLine)) : '0';
+    pricing = { ...pricing, bill: { kind: 'percent', value: pctStr } };
+  }
+  return {
+    pricing,
+    contact: d.snap && d.snap.edited ? { name: d.snap.name, address: d.snap.address, taxId: d.snap.taxId, branch: d.snap.branch,
+      contactPerson: d.snap.contactPerson, phone: d.snap.phone, email: d.snap.email } : undefined,
+    creditType: o.creditType || d.creditType, creditDays: o.creditDays !== undefined ? o.creditDays : d.creditDays,
+    project: d.project, salesName: d.salesName, reference: o.reference !== undefined ? o.reference : (d.reference || d.no),
+    note: d.note, internalNote: d.internalNote,
+  };
 }
 
 /* ===================================================================
@@ -3005,12 +3306,15 @@ function invoiceSalesOrder(soNo, input) {
       throw new DomainError('SO_OVER_INVOICE', l.desc + ' ออกใบกำกับ ' + w.qty + ' เกินที่สั่งและยังค้างอยู่ ' + left,
         'ถ้าลูกค้าสั่งเพิ่ม ให้ออกใบสั่งขายใบใหม่ หรือออกใบกำกับแยกต่างหาก');
     }
-    rows.push({ ...l, price: unM(l.price), qty: w.qty, soLine: w.line });
+    /* ส่วนลดเป็นบาทของบรรทัดที่ออกไม่ครบ แบ่งตามจำนวนที่ออก — เปอร์เซ็นต์ใช้ได้ตรง ๆ */
+    const part = so.pricing && so.pricing.lineDisc === 'amount' && l.disc && w.qty !== roundQty(l.qty)
+      ? unM(round2(mulDiv(M(l.disc), Math.round(w.qty * 1000), Math.round(roundQty(l.qty) * 1000)))) : l.disc;
+    rows.push({ ...l, price: unM(l.price), qty: w.qty, soLine: w.line, disc: part });
   });
   if (!rows.length) throw new DomainError('SO_QTY_INVALID', 'ต้องเลือกรายการที่จะออกใบกำกับอย่างน้อย 1 รายการ');
   if (so.status !== 'partially_invoiced') so.statusBeforeInvoice = so.status;
-  const inv = issueInvoice({ partnerCode: so.partnerCode, date: opts.date || TODAY, lines: rows, soNo: so.no, fromDoc: so.no,
-    whtCode: so.whtCode || null });
+  const inv = issueInvoice({ ...carryHeader(so, opts, rows), partnerCode: so.partnerCode, date: opts.date || TODAY, lines: rows,
+    soNo: so.no, fromDoc: so.no, whtCode: so.whtCode || null });
   syncSoStatus(so);
   audit('salesOrder', soNo, so.status === 'closed' ? 'convert' : 'partial_invoice', null, { to: inv.no });
   return inv;
@@ -3025,29 +3329,9 @@ function invoiceSalesOrder(soNo, input) {
    =================================================================== */
 /** ยอดของบิลขายเงินสด — ร้านค้าปลีกติดราคารวมภาษีเป็นปกติ (inclusive) จึงถอดภาษีออกจากยอดรวมครั้งเดียวทั้งบิล
     แล้วแบ่งมูลค่าก่อนภาษีกลับไปแต่ละบรรทัดตามสัดส่วน บรรทัดสุดท้ายรับเศษ ผลรวมบรรทัดจึงเท่ายอดก่อนภาษีพอดี */
-function cashSaleAmounts(lines, date, inclusive) {
-  const gross = lines.map((l) => round2(mulQty(M(l.price), l.qty)));
-  const code = (l) => l.taxCode || 'VAT7';
-  const stdIdx = lines.map((l, i) => i).filter((i) => code(lines[i]) === 'VAT7');
-  const rate = stdIdx.length ? resolveRate('VAT7', date).rate : '0';
-  const stdGross = stdIdx.reduce((s, i) => s + gross[i], 0);
-  const base = gross.slice();
-  let std, vat;
-  if (inclusive && stdIdx.length) {
-    std = round2(mulDiv(stdGross, 100 * S, 100 * S + M(rate)));
-    vat = stdGross - std;
-    let left = std;
-    stdIdx.forEach(function (i, k) {
-      base[i] = k === stdIdx.length - 1 ? left : round2(mulDiv(std, gross[i], stdGross || 1));
-      left -= base[i];
-    });
-  } else {
-    std = stdGross;
-    vat = round2(pct(std, rate));
-  }
-  const sumOf = (c) => lines.reduce((s, l, i) => s + (code(l) === c ? base[i] : 0), 0);
-  const zero = sumOf('VAT0'), exempt = sumOf('EXEMPT');
-  return { base, gross: inclusive ? gross : base, std, zero, exempt, vat, total: std + zero + exempt + vat, rate };
+function cashSaleAmounts(lines, date, inclusive, pricing) {
+  const P = priceLines(lines, date, Object.assign({}, pricing || {}, { mode: inclusive ? 'inclusive' : 'exclusive' }));
+  return Object.assign({ base: P.rows.map((r) => r.net), gross: P.rows.map((r) => r.gross), P }, P.v);
 }
 
 function issueCashSale(input) {
@@ -3059,7 +3343,7 @@ function issueCashSale(input) {
   });
   /* ลูกค้าในทะเบียนไม่บังคับ — ใส่ไว้เพื่อดูยอดซื้อของลูกค้าประจำได้ แต่ไม่ต้องมีเลขผู้เสียภาษี */
   const p = input.partnerCode ? partnerByCode(input.partnerCode) : null;
-  if (p && p.kind !== 'customer') {
+  if (p && !isCustomer(p)) {
     throw new DomainError('PARTNER_WRONG_SIDE', 'ขายเงินสดต้องระบุลูกค้า แต่ ' + p.name + ' อยู่ในทะเบียนผู้ขาย');
   }
   const buyerName = String(input.buyerName || (p ? p.name : '') || '').trim();
@@ -3070,7 +3354,8 @@ function issueCashSale(input) {
       'เลือกบัญชีเงินสดหรือบัญชีธนาคารที่รับเงินจริง');
   }
   const inclusive = input.vatInclusive !== false;
-  const a = cashSaleAmounts(lines, input.date, inclusive);
+  const a = cashSaleAmounts(lines, input.date, inclusive, input.pricing);
+  const head = docHeader(Object.assign({}, input, { creditType: 'cash' }), p, input.date);
   const lineAcc = lines.map((l, i) => revenueLineAccount(l, i));
   assertStockAvailable(lines);
   assertPostingOpen(input.date);
@@ -3120,10 +3405,11 @@ function issueCashSale(input) {
     lines: lines.map((l, i) => ({
       desc: l.desc, qty: Number(l.qty), price: M(l.price), uom: l.uom || '',
       taxCode: l.taxCode || 'VAT7', itemCode: l.itemCode || null, acc: lineAcc[i],
-      amount: a.base[i], gross: a.gross[i],
+      disc: lineDiscText(l.disc), amount: a.base[i], gross: a.gross[i],
     })),
     base: a.std + a.zero + a.exempt, vat: a.vat, total: a.total,
-    payTo, method: input.method || (pa.subType === 'cash' ? 'cash' : 'transfer'), note: input.note || '',
+    pricing: a.P.pricing, totals: a.P.totals, ...head,
+    payTo, method: input.method || (pa.subType === 'cash' ? 'cash' : 'transfer'),
     status: 'paid', entryNo: je.no, cogsEntryNo: cogsJe ? cogsJe.no : null,
   };
   DB.docs.cashSale.unshift(doc);
@@ -3158,7 +3444,9 @@ function recordBill(input) {
     }
   }
 
-  const v = computeVat(lines, input.date);
+  const P = priceLines(lines, input.date, input.pricing);
+  const v = P.v;
+  const head = docHeader(input, p, input.date);
   /* หักเงินมัดจำที่จ่ายไปแล้วและได้ใบกำกับภาษีตอนจ่าย (settle.js) — ภาษีซื้อเหลือเฉพาะส่วนที่ยังไม่ได้ขอคืน */
   const dep = (input.deposits || []).length ? depositDeduction('ap', p.code, input.deposits, v, input.date) : { lines: [], fields: {} };
   /* ไม่ได้ระบุประเภทเงินได้ = ใช้ที่ตั้งไว้ในทะเบียนผู้ขาย — ยกเว้นซื้อสินค้าเข้าคลังล้วน (ซื้อสินค้าไม่ต้องหัก ณ ที่จ่าย)
@@ -3176,7 +3464,7 @@ function recordBill(input) {
   const lineAcc = lines.map((l, i) => grn ? accBySub('grni') : billLineAccount(l, i));
   lines.forEach(function (l, i) {
     const a = lineAcc[i];
-    expLines[a] = (expLines[a] || 0) + round2(mulQty(M(l.price), l.qty));
+    expLines[a] = (expLines[a] || 0) + P.rows[i].net;
   });
   if (grn && expLines[accBySub('grni')] !== grn.total) {
     throw new DomainError('GRN_AMOUNT_MISMATCH',
@@ -3199,11 +3487,12 @@ function recordBill(input) {
       .concat([{ acc: accBySub('trade_payable'), cr: v.total, partner: p.code }]),
   });
 
-  lines.forEach(function (l) {
+  lines.forEach(function (l, i) {
     if (!l.itemCode || grn) return;
     const it = DB.items.find((x) => x.code === l.itemCode);
     if (!it || it.type !== 'stock') return;
-    const c = round2(mulQty(M(l.price), l.qty));
+    /* ต้นทุนสินค้าคือมูลค่าหลังหักส่วนลดและก่อนภาษี */
+    const c = P.rows[i].net;
     it.qty = roundQty(it.qty + roundQty(l.qty));
     it.value += c;
     it.avgCost = unitCost(it.value, it.qty);
@@ -3220,12 +3509,14 @@ function recordBill(input) {
   });
 
   const doc = {
-    no, date: input.date, due: addDays(input.date, p.termDays || 0),
+    no, date: input.date, ...head,
     vendorNo: input.vendorNo, partnerCode: p.code, partnerName: p.name,
-    lines: lines.map((l, i) => ({ desc: l.desc, qty: Number(l.qty), price: M(l.price),
-      amount: round2(mulQty(M(l.price), l.qty)), itemCode: l.itemCode || null, acc: lineAcc[i],
+    lines: lines.map((l, i) => ({ desc: l.desc, qty: Number(l.qty), price: M(l.price), uom: l.uom || '',
+      disc: lineDiscText(l.disc), gross: P.rows[i].gross,
+      amount: P.rows[i].net, itemCode: l.itemCode || null, acc: lineAcc[i],
       taxCode: l.taxCode || 'VAT7' })),
     base: v.std + v.zero + v.exempt, vat: v.vat, total: v.total,
+    pricing: P.pricing, totals: P.totals,
     claimable, paid: 0, status: 'issued', entryNo: je.no,
     whtCode, grnNo: grn ? grn.no : null,
     ...dep.fields,
@@ -3637,7 +3928,7 @@ function billingNoteStatus(bn) {
 
 function issueBillingNote(input) {
   const p = partnerByCode(input.partnerCode);
-  if (p.kind !== 'customer') {
+  if (!isCustomer(p)) {
     throw new DomainError('PARTNER_WRONG_SIDE', 'ใบวางบิลออกให้ลูกค้าเท่านั้น แต่ ' + p.name + ' อยู่ในทะเบียนผู้ขาย');
   }
   if (!input.date) throw new DomainError('DATE_REQUIRED', 'ต้องระบุวันที่วางบิล');
@@ -3739,7 +4030,7 @@ function goodsReceiptFind(no) {
 
 function issueGoodsReceipt(input) {
   const p = partnerByCode(input.partnerCode);
-  if (p.kind !== 'vendor') {
+  if (!isVendor(p)) {
     throw new DomainError('PARTNER_WRONG_SIDE', 'ใบรับสินค้าต้องรับจากผู้ขาย แต่ ' + p.name + ' อยู่ในทะเบียนลูกค้า');
   }
   if (!input.date) throw new DomainError('DATE_REQUIRED', 'ต้องระบุวันที่รับสินค้า');
@@ -3910,7 +4201,7 @@ function assertVendorInvoiceUnused(partnerCode, docNo) {
 
 function recordExpense(input) {
   const p = partnerByCode(input.partnerCode);
-  if (p.kind !== 'vendor') {
+  if (!isVendor(p)) {
     throw new DomainError('PARTNER_WRONG_SIDE', 'ผู้รับเงินต้องอยู่ในทะเบียนผู้ขาย แต่ ' + p.name + ' อยู่ในทะเบียนลูกค้า');
   }
   if (!input.date) throw new DomainError('DATE_REQUIRED', 'ต้องระบุวันที่จ่าย');
@@ -3929,7 +4220,8 @@ function recordExpense(input) {
     if (M(l.price) < 0) throw new DomainError('EXPENSE_NEGATIVE', 'บรรทัดที่ ' + (i + 1) + ' จำนวนเงินติดลบไม่ได้');
   });
 
-  const v = computeVat(lines, input.date);
+  const P = priceLines(lines, input.date, input.pricing);
+  const v = P.v;
   const base = v.std + v.zero + v.exempt;
   const claimable = !input.nonClaimableVat;
   const taxInvoiceNo = String(input.taxInvoiceNo || '').trim();
@@ -3979,7 +4271,7 @@ function recordExpense(input) {
   const no = nextNo('expense', input.date);
   const individual = p.entityType === 'individual';
   const debit = {};
-  lines.forEach(function (l) { debit[l.acc] = (debit[l.acc] || 0) + round2(mulQty(M(l.price), l.qty)); });
+  lines.forEach(function (l, i) { debit[l.acc] = (debit[l.acc] || 0) + P.rows[i].net; });
   if (!claimable && v.vat) {
     const a = accBySub('non_claimable_vat_expense');
     debit[a] = (debit[a] || 0) + v.vat;
@@ -4027,12 +4319,14 @@ function recordExpense(input) {
 
   const doc = {
     no, date: input.date, partnerCode: p.code, partnerName: p.name, taxInvoiceNo: taxInvoiceNo || null,
-    lines: lines.map((l) => ({ desc: String(l.desc).trim(), acc: l.acc, accName: acc(l.acc).name,
-      qty: Number(l.qty), price: M(l.price), amount: round2(mulQty(M(l.price), l.qty)),
-      taxCode: l.taxCode || 'VAT7' })),
+    lines: lines.map((l, i) => ({ desc: String(l.desc).trim(), acc: l.acc, accName: acc(l.acc).name,
+      qty: Number(l.qty), price: M(l.price), uom: l.uom || '', disc: lineDiscText(l.disc), gross: P.rows[i].gross,
+      amount: P.rows[i].net, taxCode: l.taxCode || 'VAT7' })),
+    pricing: P.pricing, totals: P.totals,
+    ...docHeader(Object.assign({}, input, { creditType: 'cash' }), p, input.date),
     base, vat: v.vat, total: v.total, claimable,
     whtCode, wht, whtRate, whtBase: wht ? whtBase : 0, net, channel, payFrom, method: input.method || 'transfer',
-    certNo, entryNo: je.no, status: 'paid', note: input.note || '',
+    certNo, entryNo: je.no, status: 'paid',
   };
   DB.docs.expense.unshift(doc);
   audit('expense', no, 'create', null, { payee: p.name, net: fmt(net), wht: fmt(wht), cert: certNo });
@@ -4653,7 +4947,7 @@ function invoiceServiceBase(inv) {
   if (!lineBase) return 0;
   const goods = inv.lines.reduce(function (s, l) {
     const it = l.itemCode ? DB.items.find((x) => x.code === l.itemCode) : null;
-    return s + (it && it.type === 'stock' ? l.amount : 0);
+    return s + (it && (it.type === 'stock' || it.type === 'nonstock') ? l.amount : 0);
   }, 0);
   /* ส่วนที่หักเงินมัดจำไว้ ลูกค้าหัก ณ ที่จ่ายไปแล้วตอนจ่ายมัดจำ */
   return round2(mulDiv(Math.max(0, creditableBase(inv) - (inv.depositBase || 0)), lineBase - goods, lineBase));
@@ -4870,6 +5164,10 @@ function billLineAccount(l, i) {
     }
     return l.acc;
   }
+  /* ไม่ได้เลือกบัญชีแต่เป็นสินค้านับสต๊อก — ต้องเข้าบัญชีสินค้าคงเหลือ เดิมตกไปค่าใช้จ่ายทั้งที่ของเข้าคลัง ยอดคุมสินค้าจึงไม่ตรง */
+  const it = l.itemCode ? DB.items.find((x) => x.code === l.itemCode) : null;
+  if (it && it.type === 'stock') return accBySub('inventory');
+  if (it && it.expenseAcc && !l.expenseSub && billAccounts().some((a) => a.code === it.expenseAcc)) return it.expenseAcc;
   return defaultAccountFor(l.expenseSub || 'admin_expense');
 }
 /** บัญชีเงินเดือน — ข้อมูลรุ่นก่อนที่ยังไม่แยกประเภท ใช้ค่าใช้จ่ายบริหารแทน */
@@ -5365,7 +5663,7 @@ function depositWht(input, base, total, channel) {
    Dr เงินสด/ธนาคาร (สุทธิ) · Dr ภาษีถูกหัก ณ ที่จ่าย / Cr เงินมัดจำรับ (รายลูกค้า) · Cr ภาษีขาย */
 function receiveCustomerDeposit(input) {
   const p = partnerByCode(input.partnerCode);
-  if (p.kind !== 'customer') {
+  if (!isCustomer(p)) {
     throw new DomainError('PARTNER_WRONG_SIDE', 'เงินมัดจำรับต้องเป็นของลูกค้า แต่ ' + p.name + ' อยู่ในทะเบียนผู้ขาย');
   }
   if (!input.date) throw new DomainError('DATE_REQUIRED', 'ต้องระบุวันที่รับเงิน');
@@ -5418,7 +5716,7 @@ function receiveCustomerDeposit(input) {
    Dr เงินมัดจำจ่าย (รายผู้ขาย) · Dr ภาษีซื้อ (ถ้าผู้ขายออกใบกำกับภาษีให้) / Cr ภาษีหัก ณ ที่จ่ายค้างนำส่ง · Cr เงินสด/ธนาคาร */
 function payVendorDeposit(input) {
   const p = partnerByCode(input.partnerCode);
-  if (p.kind !== 'vendor') {
+  if (!isVendor(p)) {
     throw new DomainError('PARTNER_WRONG_SIDE', 'เงินมัดจำจ่ายต้องเป็นของผู้ขาย แต่ ' + p.name + ' อยู่ในทะเบียนลูกค้า');
   }
   if (!input.date) throw new DomainError('DATE_REQUIRED', 'ต้องระบุวันที่จ่าย');
@@ -8612,7 +8910,7 @@ function saveProject(input) {
   const customer = String(input.customer || '').trim() || null;
   if (customer) {
     const c = partnerByCode(customer);
-    if (c.kind !== 'customer') throw new DomainError('PARTNER_WRONG_SIDE', c.name + ' อยู่ในทะเบียนผู้ขาย ไม่ใช่ลูกค้า');
+    if (!isCustomer(c)) throw new DomainError('PARTNER_WRONG_SIDE', c.name + ' อยู่ในทะเบียนผู้ขาย ไม่ใช่ลูกค้า');
   }
   const contract = M(String(input.contract || '0'));
   const budget = M(String(input.budget || '0'));
@@ -9607,8 +9905,8 @@ function generateTransactions() {
   const CLOSED_THROUGH = '2026-06';
   const stockItems = DB.items.filter((i) => i.type === 'stock');
   const svcItems = DB.items.filter((i) => i.type === 'service');
-  const customers = DB.partners.filter((p) => p.kind === 'customer');
-  const vendors = DB.partners.filter((p) => p.kind === 'vendor');
+  const customers = DB.partners.filter((p) => isCustomer(p));
+  const vendors = DB.partners.filter((p) => isVendor(p));
 
   months.forEach(function (mo, mi) {
     const last = Number(endOfMonth(mo + '-01').slice(-2));
@@ -13855,9 +14153,10 @@ function agingScreen(kind) {
 
 function partnerScreen(kind) {
   const scr = kind === 'customer' ? 'customers' : 'vendors';
-  const base = DB.partners.filter((p) => p.kind === kind && (hit(p.name) || hit(p.code) || hit(p.taxId)));
+  const role = (p) => (kind === 'customer' ? isCustomer(p) : isVendor(p));
+  const base = DB.partners.filter((p) => role(p) && (hit(p.name) || hit(p.code) || hit(p.taxId)));
   const list = base.filter((p) => chipPass(scr, p));
-  const off = DB.partners.filter((p) => p.kind === kind && p.active === false).length;
+  const off = DB.partners.filter((p) => role(p) && p.active === false).length;
   const to = pEnd();
   const ag = aging(kind === 'customer' ? 'ar' : 'ap', to);
   const bal = {};
@@ -13883,7 +14182,7 @@ function partnerScreen(kind) {
           + ' ' + resolveRate(p.whtCode, TODAY, {channel:'manual'}).rate + '%' : '—'] : [])
         .concat([{n: bal[p.code] || 0}, p.active === false ? {st:['late','เลิกใช้งาน']} : {st:['paid','ใช้งานอยู่']}])),
       rowAttr: (r) => 'class="row-link" data-act="partner:edit:' + r[0].mono + '"',
-      empty: DB.partners.some((x) => x.kind === kind)
+      empty: DB.partners.some((x) => role(x))
         ? 'ไม่พบรายชื่อที่ค้นหา' : 'ยังไม่มีรายชื่อในทะเบียนนี้',
       emptyAction: btn('partner:new:' + kind,
         kind === 'customer' ? 'เพิ่มลูกค้ารายแรก' : 'เพิ่มผู้ขายรายแรก', 'primary'),
@@ -16878,7 +17177,7 @@ function cmdkSources(q) {
   add('เอกสาร', docs, 8);
 
   add('ผู้ติดต่อ', DB.partners.filter((p) => has(p.name, p.code, p.taxId || '')).map((p) => ({
-    icon:'user', t: p.name, h: (p.kind === 'customer' ? 'ลูกค้า' : 'ผู้ขาย') + ' · ' + p.code, act:'partner:edit:' + p.code })), 5);
+    icon:'user', t: p.name, h: (PARTNER_KINDS[p.kind] || 'คู่ค้า') + ' · ' + p.code, act:'partner:edit:' + p.code })), 5);
   add('บัญชี', DB.accounts.filter((a) => a.postable && has(a.code, a.name)).map((a) => ({
     icon:'hash', t: a.code + ' ' + a.name, h:'ดูบัญชีแยกประเภท', act:'drill:' + a.code })), 5);
   add('สินค้า', DB.items.filter((i) => has(i.code, i.name)).map((i) => ({
@@ -17490,7 +17789,7 @@ function modalCustomerDeposit(partnerCode) {
   refreshDepositSum();
 }
 function modalVendorDeposit(partnerCode) {
-  const vends = DB.partners.filter((p) => p.kind === 'vendor');
+  const vends = DB.partners.filter((p) => isVendor(p));
   if (!needRefs(vends, 'ยังไม่มีผู้ขายในทะเบียน', 'เพิ่มผู้ขายที่เมนูผู้ติดต่อก่อน')) return;
   const first = vends.find((p) => p.code === partnerCode) || vends[0];
   modal({
@@ -17541,7 +17840,7 @@ function depositGapNote(side) {
 }
 function modalDepositBalance(side) {
   const ar = side === 'ar';
-  const list = DB.partners.filter((p) => p.kind === (ar ? 'customer' : 'vendor')).map((p) => [p.code, p.name]);
+  const list = DB.partners.filter((p) => (ar ? isCustomer(p) : isVendor(p))).map((p) => [p.code, p.name]);
   if (!needRefs(list, 'ยังไม่มี' + (ar ? 'ลูกค้า' : 'ผู้ขาย') + 'ในทะเบียน', 'เพิ่มที่เมนูผู้ติดต่อก่อน')) return;
   const free = depositUnallocated(side);
   modal({
@@ -20417,7 +20716,7 @@ function projectDetail(code) {
 }
 function modalProject(code) {
   const p = code ? DB.projects.find((x) => x.code === code) : null;
-  const custs = DB.partners.filter((x) => x.kind === 'customer');
+  const custs = DB.partners.filter((x) => isCustomer(x));
   modal({
     title: p ? 'แก้ไขโครงการ ' + p.code : 'สร้างโครงการ',
     sub: 'งบต้นทุนใช้เทียบกับต้นทุนจริงจากเอกสารที่ผูกเข้าโครงการ',
@@ -20737,9 +21036,9 @@ function defaultDate() {
 }
 /* ตัวเลือกคู่ค้าในเอกสารใหม่ — รายที่ตั้งเลิกใช้งานไม่ขึ้น (ยังอยู่ในทะเบียนและรายงานเดิม)
    keep = รหัสที่ต้องคงไว้ในรายการแม้เลิกใช้งานแล้ว เช่นคู่ค้าเดิมของเอกสารที่กำลังแก้ */
-const optCustomers = (keep) => DB.partners.filter((p) => p.kind === 'customer' && (p.active !== false || p.code === keep))
+const optCustomers = (keep) => DB.partners.filter((p) => isCustomer(p) && (p.active !== false || p.code === keep))
   .map((p) => [p.code, p.name]);
-const optVendors   = (keep) => DB.partners.filter((p) => p.kind === 'vendor' && (p.active !== false || p.code === keep))
+const optVendors   = (keep) => DB.partners.filter((p) => isVendor(p) && (p.active !== false || p.code === keep))
   .map((p) => [p.code, p.name]);
 const optAccounts  = () => DB.accounts.filter((a) => a.postable).map((a) => [a.code, a.code + ' ' + a.name]);
 const optItems     = () => [['', '— เลือกสินค้าหรือบริการ —']]
@@ -21892,7 +22191,7 @@ function refreshExpenseSum() {
 
 function modalExpense(opts) {
   const o = opts || {};
-  const vends = DB.partners.filter((p) => p.kind === 'vendor');
+  const vends = DB.partners.filter((p) => isVendor(p));
   if (!needRefs(vends, 'ยังไม่มีผู้ขายในทะเบียน', 'เพิ่มผู้รับเงินที่เมนูผู้ติดต่อ → ผู้ขาย ก่อน')) return;
   const first = (o.requireWht ? vends.find((p) => p.whtCode) : null) || vends[0];
   const pay = payFromAccounts().map((a) => [a.code, a.code + ' ' + a.name]);

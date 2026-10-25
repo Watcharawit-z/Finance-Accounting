@@ -193,7 +193,7 @@ function blankState() {
     bankBf: [],          // รายการค้าง ณ วันเริ่มกระทบยอด (เช็คค้างจ่าย เงินฝากระหว่างทาง)
     bankImports: [],     // ประวัติการนำเข้าไฟล์สเตทเมนต์ ใช้กันนำเข้าซ้ำและยกเลิกการนำเข้า
     audit: [],
-    settings: { hardLockDate: null },
+    settings: { hardLockDate: null, numbering: { style: 'fa', reset: 'month', prefixes: {} } },
     isDemo: false,       // true = ข้อมูลตัวอย่างที่ระบบสร้างให้ ไม่ใช่ข้อมูลจริงของผู้ใช้
   };
 }
@@ -215,6 +215,9 @@ function loadState(obj) {
   if (!DB.docs || typeof DB.docs !== 'object') DB.docs = fresh.docs;
   Object.keys(fresh.docs).forEach((k) => { if (!Array.isArray(DB.docs[k])) DB.docs[k] = []; });
   if (!DB.settings) DB.settings = fresh.settings;
+  /* ข้อมูลที่บันทึกก่อนมีตั้งค่าเลขที่เอกสาร ใช้รูปแบบเดิมต่อ — เลขเล่มเดียวกันไม่เปลี่ยนรูปกลางงวด
+     เปลี่ยนเป็นรูปแบบใหม่ได้เองที่ ตั้งค่า > เลขที่เอกสาร */
+  if (!DB.settings.numbering) DB.settings.numbering = { style: 'legacy', reset: 'month', prefixes: {} };
   if (DB.isDemo === undefined) {
     DB.isDemo = !!(DB.company && DB.company.name === 'บริษัท ศรีวัฒนาการค้า จำกัด');
   }
@@ -374,17 +377,52 @@ const SEQ_PREFIX = {
   assetSale:'FAS', assetWriteOff:'FAW', assetReceipt:'FAR',
   payRun:'PAY', payRemit:'PRM',
 };
+/* รูปแบบเลขที่แบบโปรแกรมออกเอกสารทั่วไปที่นักบัญชีคุ้น: คำนำหน้า + ปี ค.ศ. + เดือน + เลขรัน 4 หลัก (INV2026060001)
+   นับใหม่ทุกเดือน — หรือ คำนำหน้า + ปี ค.ศ. + เลขรัน 6 หลัก นับใหม่ทุกปี (INV2026000001)
+   คำนำหน้าเอกสารขาย/ซื้อตามที่ใช้กันทั่วไป ส่วนสมุดรายวันใช้คำนำหน้าเดิม · ตั้งเองได้ทุกชนิด (ไม่เกิน 6 ตัว) */
+const DOC_PREFIX_STD = {
+  invoice:'INV', receipt:'RE', quotation:'QT', billingNote:'BL', cashSale:'CA', purchaseOrder:'PO', bill:'RI',
+  expense:'EXP', whtCert:'WHT', payment:'PV', paymentBatch:'PS', goodsReceipt:'GR',
+};
+const NUMBER_STYLES = { fa: 'คำนำหน้า + ปี ค.ศ. + เดือน + เลขรัน', legacy: 'แบบเดิม (คำนำหน้า + ปีเดือน 2 หลัก - เลขรัน 5 หลัก)' };
+function numberingOf() {
+  return (DB.settings && DB.settings.numbering) || { style: 'legacy', reset: 'month', prefixes: {} };
+}
+/** คำนำหน้าที่ใช้จริงของเอกสารชนิดนี้ */
+function prefixOf(docType) {
+  const n = numberingOf();
+  const own = n.prefixes && n.prefixes[docType];
+  if (own) return own;
+  if (n.style === 'fa' && DOC_PREFIX_STD[docType]) return DOC_PREFIX_STD[docType];
+  return SEQ_PREFIX[docType] || docType.toUpperCase().slice(0, 3);
+}
+/** ตัวอย่างเลขที่ — ใช้ในหน้าตั้งค่า */
+function formatDocNo(docType, date, n, numbering) {
+  const cfg = numbering || numberingOf();
+  const prefix = numbering ? ((cfg.prefixes && cfg.prefixes[docType]) || (cfg.style === 'fa' && DOC_PREFIX_STD[docType]) || SEQ_PREFIX[docType])
+    : prefixOf(docType);
+  const period = periodOf(date);
+  if (cfg.style !== 'fa') return prefix + period.replace('-', '').slice(2) + '-' + String(n).padStart(5, '0');
+  if (cfg.reset === 'year') return prefix + period.slice(0, 4) + String(n).padStart(6, '0');
+  return prefix + period.replace('-', '') + String(n).padStart(4, '0');
+}
 /* ชนิดที่ใช้คำนำหน้าเดียวกันต้องนับด้วยตัวนับเดียวกัน — ใบสำคัญทั่วไปกับใบปรับปรุงใช้ JV ร่วมกัน
-   เดิมนับแยกตามชนิด จึงได้ JV2601-00001 สองใบ (ค่าธรรมเนียมธนาคาร กับ ปิดภาษี ภ.พ.30) */
-const SEQ_SHARE = {};
-Object.keys(SEQ_PREFIX).forEach((t) => { if (!SEQ_SHARE[SEQ_PREFIX[t]]) SEQ_SHARE[SEQ_PREFIX[t]] = t; });
+   เดิมนับแยกตามชนิด จึงได้ JV2601-00001 สองใบ (ค่าธรรมเนียมธนาคาร กับ ปิดภาษี ภ.พ.30)
+   คำนำหน้าตั้งเองได้ ผังคำนำหน้า → ชนิดหลักจึงคิดใหม่ทุกครั้ง */
+function seqCanon(prefix, docType) {
+  const types = Object.keys(SEQ_PREFIX).concat(Object.keys(DOC_PREFIX_STD));
+  for (let i = 0; i < types.length; i++) { if (prefixOf(types[i]) === prefix) return types[i]; }
+  return docType;
+}
 function nextNo(docType, date) {
   const period = periodOf(date);
-  const p = period.replace('-', '').slice(2);   // 2026-07 → 2607
-  const prefix = SEQ_PREFIX[docType] || docType.toUpperCase().slice(0, 3);
-  const canon = SEQ_SHARE[prefix] || docType;
-  const key = canon + '|' + period;
-  const own = docType + '|' + period;
+  const cfg = numberingOf();
+  const prefix = prefixOf(docType);
+  const canon = seqCanon(prefix, docType);
+  /* นับใหม่ทุกปี: ตัวนับเดียวต่อปี ค.ศ. · นับใหม่ทุกเดือน: ตัวนับต่องวด (ตัวนับเดียวกับรูปแบบเดิม เปลี่ยนรูปแบบกลางเดือนเลขก็ต่อเนื่อง) */
+  const span = cfg.style === 'fa' && cfg.reset === 'year' ? period.slice(0, 4) : period;
+  const key = canon + '|' + span;
+  const own = docType + '|' + span;
   if (canon !== docType && DB.seq[own] !== undefined) {
     DB.seq[key] = Math.max(DB.seq[key] || 0, DB.seq[own]);
     delete DB.seq[own];
@@ -392,9 +430,33 @@ function nextNo(docType, date) {
   let no;
   do {
     DB.seq[key] = (DB.seq[key] || 0) + 1;
-    no = prefix + p + '-' + String(DB.seq[key]).padStart(5, '0');
-  } while (docType.indexOf('je_') === 0 && DB.entries.some((e) => e.no === no));
+    no = formatDocNo(docType, date, DB.seq[key]);
+  } while (docNoTaken(docType, no));
   return no;
+}
+/** เลขนี้มีอยู่แล้วหรือไม่ — ใบสำคัญตรวจทุกครั้ง เอกสารตรวจในชนิดเดียวกัน (กันชนกับเลขที่พิมพ์เองหรือนำเข้ามา) */
+function docNoTaken(docType, no) {
+  if (docType.indexOf('je_') === 0) return DB.entries.some((e) => e.no === no);
+  const list = DB.docs && DB.docs[docType];
+  return Array.isArray(list) && list.some((d) => d && d.no === no);
+}
+/** ตั้งค่าเลขที่เอกสาร — รูปแบบ นับใหม่รายเดือน/รายปี และคำนำหน้าแต่ละชนิด (ตัวอักษรอังกฤษ/ตัวเลข ไม่เกิน 6 ตัว) */
+function saveNumbering(input) {
+  const style = NUMBER_STYLES[input.style] ? input.style : 'fa';
+  const reset = input.reset === 'year' ? 'year' : 'month';
+  const prefixes = {};
+  Object.keys(input.prefixes || {}).forEach(function (k) {
+    const v = String(input.prefixes[k] || '').trim().toUpperCase();
+    if (!v) return;
+    if (!/^[A-Z0-9]{1,6}$/.test(v)) {
+      throw new DomainError('PREFIX_INVALID', 'คำนำหน้า "' + v + '" ต้องเป็นตัวอักษรอังกฤษหรือตัวเลข 1–6 ตัว');
+    }
+    prefixes[k] = v;
+  });
+  const before = JSON.parse(JSON.stringify(numberingOf()));
+  DB.settings.numbering = { style, reset, prefixes };
+  audit('settings', 'numbering', 'update', before, DB.settings.numbering);
+  return DB.settings.numbering;
 }
 
 /** ข้อมูลที่บันทึกไว้ก่อนแก้ตัวนับ อาจมีเลขที่ใบสำคัญซ้ำ — ใบแรกคงเลขเดิม ใบหลังได้เลขใหม่

@@ -121,7 +121,7 @@ function depositWht(input, base, total, channel) {
    Dr เงินสด/ธนาคาร (สุทธิ) · Dr ภาษีถูกหัก ณ ที่จ่าย / Cr เงินมัดจำรับ (รายลูกค้า) · Cr ภาษีขาย */
 function receiveCustomerDeposit(input) {
   const p = partnerByCode(input.partnerCode);
-  if (p.kind !== 'customer') {
+  if (!isCustomer(p)) {
     throw new DomainError('PARTNER_WRONG_SIDE', 'เงินมัดจำรับต้องเป็นของลูกค้า แต่ ' + p.name + ' อยู่ในทะเบียนผู้ขาย');
   }
   if (!input.date) throw new DomainError('DATE_REQUIRED', 'ต้องระบุวันที่รับเงิน');
@@ -174,7 +174,7 @@ function receiveCustomerDeposit(input) {
    Dr เงินมัดจำจ่าย (รายผู้ขาย) · Dr ภาษีซื้อ (ถ้าผู้ขายออกใบกำกับภาษีให้) / Cr ภาษีหัก ณ ที่จ่ายค้างนำส่ง · Cr เงินสด/ธนาคาร */
 function payVendorDeposit(input) {
   const p = partnerByCode(input.partnerCode);
-  if (p.kind !== 'vendor') {
+  if (!isVendor(p)) {
     throw new DomainError('PARTNER_WRONG_SIDE', 'เงินมัดจำจ่ายต้องเป็นของผู้ขาย แต่ ' + p.name + ' อยู่ในทะเบียนลูกค้า');
   }
   if (!input.date) throw new DomainError('DATE_REQUIRED', 'ต้องระบุวันที่จ่าย');

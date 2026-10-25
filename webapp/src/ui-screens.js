@@ -724,9 +724,10 @@ function agingScreen(kind) {
 
 function partnerScreen(kind) {
   const scr = kind === 'customer' ? 'customers' : 'vendors';
-  const base = DB.partners.filter((p) => p.kind === kind && (hit(p.name) || hit(p.code) || hit(p.taxId)));
+  const role = (p) => (kind === 'customer' ? isCustomer(p) : isVendor(p));
+  const base = DB.partners.filter((p) => role(p) && (hit(p.name) || hit(p.code) || hit(p.taxId)));
   const list = base.filter((p) => chipPass(scr, p));
-  const off = DB.partners.filter((p) => p.kind === kind && p.active === false).length;
+  const off = DB.partners.filter((p) => role(p) && p.active === false).length;
   const to = pEnd();
   const ag = aging(kind === 'customer' ? 'ar' : 'ap', to);
   const bal = {};
@@ -752,7 +753,7 @@ function partnerScreen(kind) {
           + ' ' + resolveRate(p.whtCode, TODAY, {channel:'manual'}).rate + '%' : '—'] : [])
         .concat([{n: bal[p.code] || 0}, p.active === false ? {st:['late','เลิกใช้งาน']} : {st:['paid','ใช้งานอยู่']}])),
       rowAttr: (r) => 'class="row-link" data-act="partner:edit:' + r[0].mono + '"',
-      empty: DB.partners.some((x) => x.kind === kind)
+      empty: DB.partners.some((x) => role(x))
         ? 'ไม่พบรายชื่อที่ค้นหา' : 'ยังไม่มีรายชื่อในทะเบียนนี้',
       emptyAction: btn('partner:new:' + kind,
         kind === 'customer' ? 'เพิ่มลูกค้ารายแรก' : 'เพิ่มผู้ขายรายแรก', 'primary'),

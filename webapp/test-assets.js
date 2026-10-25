@@ -119,7 +119,7 @@ console.log('\n=== 4. ขายทรัพย์สินรับเงิน�
   ok('ราคาตามบัญชี ณ วันขาย 110,000 · ขาดทุน 10,000 · ภาษีขาย 7,000', pv.nbv === M('110000') && pv.gain === -M('10000') && pv.vat === M('7000'));
   const n0 = DB.entries.length;
   const d = ctx.disposeAsset({ assetCode: a.code, kind: 'sale', date: '2026-05-20', proceeds: '100000', partnerCode: cus.code, payTo: '1113' });
-  ok('ได้เลขที่เอกสารขายทรัพย์สิน', /^FAS2605-\d{5}$/.test(d.no), d.no);
+  ok('ได้เลขที่เอกสารขายทรัพย์สิน', /^FAS202605\d{4}$/.test(d.no), d.no);
   const dep = DB.entries.find((e) => e.no === d.depEntryNo);
   const je = DB.entries.find((e) => e.no === d.entryNo);
   ok('สร้างใบสำคัญ 2 ใบ: ค่าเสื่อมถึงเดือนที่ขาย และการขาย', DB.entries.length === n0 + 2 && dep && je);
