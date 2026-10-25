@@ -130,8 +130,8 @@ const overflowInfo = (page) => page.evaluate(() => {
   await page.waitForSelector('#modal.show');
   await page.selectOption('[name="partner"]', 'VEN-0012');
   await page.fill('[name="vendorNo"]', 'TEST-9001');
-  await page.fill('[name="b0_desc"]', 'ค่าเช่าสำนักงานเดือนกรกฎาคม');
-  await page.fill('[name="b0_price"]', '60000');
+  await page.fill('[name="l0_desc"]', 'ค่าเช่าสำนักงานเดือนกรกฎาคม');
+  await page.fill('[name="l0_price"]', '60000');
   await page.selectOption('[name="wht"]', 'WHT_RENT');
   await page.click('[data-act="modal:submit"]');
   await closed(page);
@@ -142,8 +142,8 @@ const overflowInfo = (page) => page.evaluate(() => {
   await page.waitForSelector('#modal.show');
   await page.selectOption('[name="partner"]', 'VEN-0012');
   await page.fill('[name="vendorNo"]', 'TEST-9001');
-  await page.fill('[name="b0_desc"]', 'รายการซ้ำ');
-  await page.fill('[name="b0_price"]', '60000');
+  await page.fill('[name="l0_desc"]', 'รายการซ้ำ');
+  await page.fill('[name="l0_price"]', '60000');
   await page.click('[data-act="modal:submit"]');
   await page.waitForTimeout(300);
   const dupBlocked = await page.evaluate(() =>
@@ -1202,15 +1202,15 @@ const overflowInfo = (page) => page.evaluate(() => {
 
   /* ค่าใช้จ่าย + หัก ณ ที่จ่าย 3% → 50 ทวิ อัตโนมัติ (ตามหมายเหตุในใบขอ) */
   await openNew('expenses', 'new:expense');
-  await page.selectOption('[name="expPartner"]', 'VEN-0012');
+  await page.selectOption('[name="partner"]', 'VEN-0012');
   ok('เลือกผู้รับเงินแล้วเติมประเภทหัก ณ ที่จ่ายจากทะเบียนให้',
     (await page.$eval('[name="wht"]', (e) => e.value)) === 'WHT_RENT');
   await page.selectOption('[name="wht"]', 'WHT_SERVICE');
   await page.fill('[name="taxInvoiceNo"]', 'TNP-UI-0001');
-  await page.fill('[name="e0_desc"]', 'ค่าซ่อมเครื่องปรับอากาศ');
-  await page.selectOption('[name="e0_acc"]', '5325');
-  await page.fill('[name="e0_price"]', '10000');
-  const expSum = await page.$eval('#expSum', (e) => e.textContent);
+  await page.fill('[name="l0_desc"]', 'ค่าซ่อมเครื่องปรับอากาศ');
+  await page.selectOption('[name="l0_acc"]', '5325');
+  await page.fill('[name="l0_price"]', '10000');
+  const expSum = await page.$eval('#modal .doc-tot', (e) => e.textContent);
   ok('ฟอร์มสรุปยอดให้ระหว่างกรอก หัก 3% ของ 10,000 = 300', expSum.indexOf('300.00') >= 0 && expSum.indexOf('10,400.00') >= 0, expSum);
   await submit();
   const ex = await page.evaluate(() => {
@@ -1228,10 +1228,10 @@ const overflowInfo = (page) => page.evaluate(() => {
   ok('หนังสือรับรองขึ้นในแถบหัก ณ ที่จ่าย พร้อมเลขที่ค่าใช้จ่ายต้นทาง', certListed);
 
   await openNew('expenses', 'new:expense');
-  await page.selectOption('[name="expPartner"]', 'VEN-0025');
-  await page.fill('[name="e0_desc"]', 'กระดาษถ่ายเอกสาร');
-  await page.selectOption('[name="e0_acc"]', '5324');
-  await page.fill('[name="e0_price"]', '2000');
+  await page.selectOption('[name="partner"]', 'VEN-0025');
+  await page.fill('[name="l0_desc"]', 'กระดาษถ่ายเอกสาร');
+  await page.selectOption('[name="l0_acc"]', '5324');
+  await page.fill('[name="l0_price"]', '2000');
   await page.click('[data-act="modal:submit"]');
   await page.waitForTimeout(300);
   ok('มีภาษีซื้อแต่ไม่กรอกเลขใบกำกับ ระบบไม่ยอมบันทึก', await page.evaluate(() =>
@@ -1242,11 +1242,11 @@ const overflowInfo = (page) => page.evaluate(() => {
   await openNew('whtcert', 'new:whtcert');
   ok('ปุ่มในแถบหัก ณ ที่จ่ายเปิดฟอร์มออกหนังสือรับรอง',
     (await page.$eval('.modal-h h3', (e) => e.textContent)).indexOf('หนังสือรับรอง') >= 0);
-  await page.selectOption('[name="expPartner"]', 'VEN-0015');
+  await page.selectOption('[name="partner"]', 'VEN-0015');
   await page.fill('[name="taxInvoiceNo"]', 'MDP-UI-0001');
-  await page.fill('[name="e0_desc"]', 'ค่าจัดทำป้ายโฆษณาหน้าร้าน');
-  await page.selectOption('[name="e0_acc"]', '5220');
-  await page.fill('[name="e0_price"]', '20000');
+  await page.fill('[name="l0_desc"]', 'ค่าจัดทำป้ายโฆษณาหน้าร้าน');
+  await page.selectOption('[name="l0_acc"]', '5220');
+  await page.fill('[name="l0_price"]', '20000');
   await submit();
   const wc = await page.evaluate(() => ({ c: DB.docs.whtCert[0], screen: STATE.screen, sel: STATE.sel }));
   ok('★ สร้างจากแถบหัก ณ ที่จ่าย: ออก 50 ทวิ พร้อมบันทึกการจ่ายเงินให้ในครั้งเดียว',
@@ -1598,9 +1598,9 @@ const overflowInfo = (page) => page.evaluate(() => {
     part.st === 'partially_received' && part.got === 20 && part.btn && part.txt, JSON.stringify(part));
   await page.evaluate(() => { STATE.screen = 'bills'; STATE.sel = null; render(); });
   await page.click('#main [data-act="new:bill"]');
-  await page.waitForSelector('#modal.show [name="b0_acc"]');
-  const accOpt = await page.evaluate(() => ({ def: document.querySelector('#modal [name="b0_acc"]').value,
-    has5311: [...document.querySelectorAll('#modal [name="b0_acc"] option')].some((o) => o.value === '5321') }));
+  await page.waitForSelector('#modal.show [name="l0_acc"]');
+  const accOpt = await page.evaluate(() => ({ def: document.querySelector('#modal [name="l0_acc"]').value,
+    has5311: [...document.querySelectorAll('#modal [name="l0_acc"] option')].some((o) => o.value === '5321') }));
   ok('★ ฟอร์มตั้งหนี้ให้เลือกบัญชีค่าใช้จ่ายเจาะจง ค่าเริ่มต้นเป็นค่าใช้จ่ายเบ็ดเตล็ด ไม่ใช่บัญชีเงินเดือน', accOpt.def === '5358' && accOpt.has5311, accOpt.def);
   await page.keyboard.press('Escape');
 
