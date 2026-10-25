@@ -9,7 +9,10 @@
 const SETTLE_LAST = { in: {}, out: {} };
 function cashAccDefault(dir, method) {
   const accs = payFromAccounts();
-  const kind = method === 'cash' ? 'cash' : 'bank';
+  /* จ่ายด้วยเงินสดย่อย → บัญชีเงินสดที่ชื่อเป็นเงินสดย่อย (ไม่มี = บัญชีเงินสดตามปกติ) */
+  const petty = method === 'petty' && accs.find((a) => a.subType === 'cash' && /ย่อย/.test(a.name || ''));
+  if (petty) return petty.code;
+  const kind = method === 'cash' || method === 'petty' ? 'cash' : 'bank';
   /* เปิดจากหน้ากระทบยอดธนาคาร — เงินเข้า/ออกบัญชีที่กำลังกระทบยอดอยู่ จะได้จับคู่กับบรรทัดสเตทเมนต์ได้ทันที */
   if (kind === 'bank' && STATE.screen === 'bank' && STATE.bankAcc && accs.some((a) => a.code === STATE.bankAcc)) return STATE.bankAcc;
   const last = SETTLE_LAST[dir] && SETTLE_LAST[dir][kind];
@@ -39,7 +42,6 @@ const PAYMENT_DIFF_OPTS = [
   ['discount', 'ผู้ขายลดให้ — ปิดยอดเป็นส่วนลดรับ'],
   ['other_income', 'ผู้ขายยกให้ — ปิดยอดเป็นรายได้อื่น'],
 ];
-const addRowBtn = (kind) => '<div style="padding:6px 16px 0">' + btn('settle:addrow:' + kind, '+ เพิ่มบรรทัด') + '</div>';
 
 /* ---------- ยอดสรุประหว่างกรอก — ใช้สูตรเดียวกับตอนลงบัญชี ตัวเลขที่เห็นจึงตรงกับที่จะบันทึก ---------- */
 const sumSpan = (label, v, cls) => '<span' + (cls ? ' class="' + cls + '"' : '') + '>' + esc(label) + ' <b>' + fmt(v) + '</b></span>';
@@ -86,6 +88,8 @@ function refreshPaySum() {
     const ch = val('channel') === 'e_wht' ? 'e_wht' : 'manual';
     let w = billWhtFor(b, gross + diff, val('date') || TODAY, ch, code, val('whtBase') || undefined);
     if (diff && !val('whtBase') && w.wht) w = billWhtFor(b, gross + diff, val('date') || TODAY, ch, code, unM(round2(mulDiv(w.share, gross, gross + diff))));
+    /* ภาษีหัก ณ ที่จ่ายที่กรอกเป็นจำนวนเงินเอง แทนที่ตัวเลขที่คิดจากอัตรา (สูตรเดียวกับ payBill) */
+    if (code && val('whtAmount')) w = Object.assign({}, w, { wht: round2(M(val('whtAmount'))), rate: resolveRate(code, val('date') || TODAY, { channel: ch }).rate });
     const fee = val('fee') ? M(val('fee')) : 0;
     el.innerHTML = sumSpan('คงค้าง', out) + sumSpan('หัก ณ ที่จ่าย' + (w.rate ? ' ' + w.rate + '%' : ''), w.wht)
       + sumSpan('จ่ายสุทธิให้ผู้ขาย', gross - w.wht) + (fee ? sumSpan('ค่าธรรมเนียม', fee) : '')
@@ -109,22 +113,6 @@ function previewDeposits(side, v, date) {
   if (std) v.vat = round2(pct(Math.max(0, v.std), resolveRate('VAT7', date).rate));
   v.total = v.std + v.zero + v.exempt + v.vat;
   return ded;
-}
-function refreshBillSum() {
-  const el = document.getElementById('billSum');
-  if (!el) return;
-  try {
-    const date = val('date') || TODAY;
-    const lines = collectBillLines().filter((l) => l.desc && M(l.price) !== 0);
-    const v = computeVat(lines, date);
-    const full = v.std + v.zero + v.exempt;
-    const ded = previewDeposits('ap', v, date);
-    const base = v.std + v.zero + v.exempt;
-    const code = val('wht');
-    const wht = code && base >= M('1000') ? round2(pct(base, resolveRate(code, date, { channel: 'manual' }).rate)) : 0;
-    el.innerHTML = sumSpan(lines.length + ' บรรทัด · ก่อนภาษี', full) + (ded ? sumSpan('หักเงินมัดจำ', ded) : '')
-      + sumSpan('ภาษีซื้อ', v.vat) + sumSpan('ตั้งหนี้', v.total) + sumSpan('หัก ณ ที่จ่ายตอนจ่าย (ประมาณ)', wht);
-  } catch (e) { el.textContent = ''; }
 }
 
 /* ---------- เลือกเงินมัดจำที่จะหักในใบกำกับ (ลูกค้า) หรือรายการตั้งหนี้ (ผู้ขาย) ---------- */
@@ -901,16 +889,6 @@ EXTRA_DISPATCH.push(function (head, rest) {
     if (rest[1] === 'receivemany') modalReceiveMany();
     return true;
   }
-  if (what === 'addrow') {
-    const body = document.getElementById(rest[1] === 'bill' ? 'billRows' : 'expRows');
-    if (body) {
-      const n = body.querySelectorAll('tr').length;
-      body.insertAdjacentHTML('beforeend', rest[1] === 'bill' ? billRow(n) : expenseRow(n));
-      const f = body.querySelector('[name="' + (rest[1] === 'bill' ? 'b' : 'e') + n + '_desc"]');
-      if (f) f.focus();
-    }
-    return true;
-  }
   if (what === 'apply') { modalApplyCredit(rest[1], rest[2] === 'tgt' ? { targetNo: rest.slice(3).join(':') } : { sourceNo: rest.slice(3).join(':') }); return true; }
   if (what === 'refund') { modalRefundCredit(rest.slice(1).join(':')); return true; }
   if (what === 'baddebt') { modalBadDebt(rest.slice(1).join(':')); return true; }
@@ -924,27 +902,8 @@ EXTRA_CHANGE.push(function (t) {
   if (n === 'method') {
     const sel = document.querySelector('[name="bankAccount"]') || document.querySelector('[name="payFrom"]');
     if (sel) sel.value = cashAccDefault(document.querySelector('[name="cashDir"]') ? val('cashDir') : 'out', t.value);
-  } else if (n === 'partner' && t.closest('[data-billform]')) {
-    const p = DB.partners.find((x) => x.code === t.value);
-    const w = document.querySelector('[name="wht"]');
-    if (p && w) w.value = p.whtCode || '';
-    const box = document.getElementById('billDeps');
-    if (box) box.innerHTML = depositPicker('ap', t.value);
-    handled = true;
   } else if (n === 'partner' && document.getElementById('invDeps')) {
     document.getElementById('invDeps').innerHTML = depositPicker('ar', t.value);
-  } else if (t.classList && t.classList.contains('billitem')) {
-    const i = t.getAttribute('data-i');
-    const it = DB.items.find((x) => x.code === t.value);
-    const q = (k) => document.querySelector('[name="b' + i + '_' + k + '"]');
-    if (it) {
-      if (q('desc') && !q('desc').value) q('desc').value = it.name;
-      if (q('price') && !q('price').value && it.avgCost) q('price').value = fmt(it.avgCost);
-      if (q('qty') && !q('qty').value) q('qty').value = '1';
-      /* สินค้าคงคลังต้องลงบัญชีสินค้าคงเหลือ ระบบจะรับเข้าคลังให้ */
-      if (it.type === 'stock' && q('acc')) { try { q('acc').value = accBySub('inventory'); } catch (e) { /* ผังไม่มีบัญชีสินค้า */ } }
-    }
-    handled = true;
   } else if (n === 'vdPartner') {
     const p = DB.partners.find((x) => x.code === t.value);
     const w = document.querySelector('[name="wht"]');
@@ -960,7 +919,6 @@ EXTRA_CHANGE.push(function (t) {
   }
   if (document.getElementById('rcSum')) refreshReceiptSum();
   else if (document.getElementById('pvSum')) refreshPaySum();
-  else if (document.getElementById('billSum')) { refreshBillSum(); handled = handled || /^b\d+_/.test(n) || n === 'depPick'; }
   else if (document.getElementById('depSum')) refreshDepositSum();
   else if (document.getElementById('vcnSum')) refreshVcnSum();
   return handled;
@@ -968,10 +926,8 @@ EXTRA_CHANGE.push(function (t) {
 EXTRA_INPUT.push(function (t) {
   if (document.getElementById('rcSum')) refreshReceiptSum();
   else if (document.getElementById('pvSum')) refreshPaySum();
-  else if (document.getElementById('billSum')) refreshBillSum();
   else if (document.getElementById('depSum')) refreshDepositSum();
   else if (document.getElementById('vcnSum')) refreshVcnSum();
-  else if (t.name === 'whtBase' && document.getElementById('expSum')) { refreshExpenseSum(); return true; }
   else return false;
-  return /^(amount|whtBase|fee|base|vr\d+|b\d+_(qty|price)|depAmt_.*)$/.test(t.name || '');
+  return /^(amount|whtBase|whtAmount|fee|base|vr\d+|depAmt_.*)$/.test(t.name || '');
 });

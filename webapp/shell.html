@@ -608,6 +608,10 @@ details.adv .flds{margin-bottom:10px}
 .doc-tot .bill-disc input{text-align:right; font-variant-numeric:tabular-nums}
 .doc-tot caption.tot-err{caption-side:bottom; text-align:left; padding:6px 0; color:var(--color-neg); font-size:var(--text-sm)}
 .doc-notes{padding-top:var(--space-sm)}
+/* ฟอร์มซื้อ: แบบ ภ.ง.ด. ของผู้รับเงิน · เลขที่และวันที่หน้าเช็ค · โน้ตภายในในหน้ารายละเอียด (ไม่พิมพ์) */
+.pnd-tag{color:var(--color-ink-2); font-weight:500}
+.cheque-f .pair{display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:var(--space-xs)}
+.note.internal{border-style:dashed; background:var(--color-paper)}
 .doc-tot .bill-disc input:focus,.doc-tot .bill-disc select:focus,.ln-opts select:focus{outline:2px solid var(--color-focus); outline-offset:1px; border-color:var(--color-ink-2)}
 @media (min-width:48rem){
   .doc-foot{grid-template-columns:minmax(0,1fr) minmax(0,24rem); align-items:start}
@@ -883,6 +887,12 @@ button.st-btn:focus-visible{outline:2px solid var(--color-focus); outline-offset
 .sheet .p-memo{white-space:pre-line}
 .sheet .p-sign{margin-top:auto; padding-top:18mm; display:grid; gap:12mm; grid-template-columns:repeat(var(--n,3),1fr); text-align:center; font-size:12pt}
 .sheet .p-sign div{border-top:1px dotted var(--print-ink); padding-top:4px}
+.sheet .p-sign.tight{padding-top:12mm}
+/* ใบสำคัญซื้อ/ค่าใช้จ่าย: การบันทึกบัญชีอยู่ช่องซ้ายของยอดท้ายเอกสาร ใต้จำนวนเงินตัวอักษร */
+.sheet .p-words.with-je{flex-direction:column; align-items:stretch; justify-content:flex-start; gap:6px; text-align:left; font-weight:400}
+.sheet .p-words.with-je > div:first-child{text-align:center; font-weight:700}
+.sheet .p-je{font-size:10.5pt}
+.sheet .p-je-t th,.sheet .p-je-t td{font-size:10.5pt; padding:2px 6px}
 .sheet .p-sign small{display:block; font-size:10.5pt}
 .sheet .p-foot{margin-top:6mm; font-size:9.5pt; color:var(--print-foot); display:flex; justify-content:space-between; gap:12px}
 .sheet .p-foot .p-page{font-weight:700; color:var(--print-ink)}

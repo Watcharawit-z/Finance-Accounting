@@ -207,9 +207,9 @@ const T = require('./uitestlib');
   await submit();
   const poNo = await page.evaluate(() => STATE.sel);
   await page.click('#main [data-act="trade:purchaseOrder:convert:' + poNo + '"]');
-  await page.waitForSelector('#modal.show [name="ca1"]');
-  ok('ฟอร์มตั้งหนี้แสดงบัญชีของแต่ละบรรทัดตามใบสั่งซื้อ', (await page.$eval('[name="ca0"]', (e) => e.value)) === '5321'
-    && (await page.$eval('[name="ca1"]', (e) => e.value)) === '5325');
+  await page.waitForSelector('#modal.show [name="l1_acc"]');
+  ok('ฟอร์มตั้งหนี้แสดงบัญชีของแต่ละบรรทัดตามใบสั่งซื้อ', (await page.$eval('[name="l0_acc"]', (e) => e.value)) === '5321'
+    && (await page.$eval('[name="l1_acc"]', (e) => e.value)) === '5325');
   await page.fill('[name="vendorNo"]', 'INV-V-001');
   await submit();
   const bill = await page.evaluate(() => { const b = DB.docs.bill[0]; const e = DB.entries.find((x) => x.no === b.entryNo);

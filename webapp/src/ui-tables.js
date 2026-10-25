@@ -218,6 +218,7 @@ function openActionMenu(title, items, x, y) {
     : '<button class="rm-i' + (i[3] ? ' ' + i[3] : '')
     + '" role="menuitem" data-act="rowgo:' + esc(i[0]) + '">' + icon(i[2] || 'arrow') + esc(i[1]) + '</button>').join('');
   m.classList.add('show');
+  m.setAttribute('data-at', String(Date.now()));
   const w = m.offsetWidth, h = m.offsetHeight;
   m.style.left = Math.round(Math.max(8, Math.min(window.innerWidth - w - 8, x))) + 'px';
   m.style.top = Math.round(Math.max(8, Math.min(window.innerHeight - h - 8, y))) + 'px';
@@ -262,6 +263,11 @@ function bindTableEvents() {
     else if (ev.key === 'ArrowDown') { ev.preventDefault(); (btns[i + 1] || btns[0]).focus(); }
     else if (ev.key === 'ArrowUp') { ev.preventDefault(); (btns[i - 1] || btns[btns.length - 1]).focus(); }
   });
-  window.addEventListener('scroll', closeRowMenu, true);
+  /* เลื่อนหน้าจอแล้วเมนูปิด — ยกเว้นการเลื่อนที่เบราว์เซอร์ทำเองทันทีหลังกด (โฟกัสปุ่มสถานะที่ล้นขอบกรอบตาราง)
+     ไม่งั้นเมนูปิดทันทีที่เปิด */
+  window.addEventListener('scroll', function () {
+    const m = document.getElementById('rowMenu');
+    if (m && Date.now() - Number(m.getAttribute('data-at') || 0) > 400) closeRowMenu();
+  }, true);
   window.addEventListener('resize', closeRowMenu);
 }

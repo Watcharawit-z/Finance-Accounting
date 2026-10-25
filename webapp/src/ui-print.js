@@ -254,13 +254,14 @@ const DOC_PRINT = {
     find: (no) => DB.docs.goodsReceipt.find((d) => d.no === no),
     build: function (d) {
       return pSheet(pHead('ใบรับสินค้า', 'GOODS RECEIPT NOTE')
-        + '<div class="p-meta">' + pParty('ผู้ขาย', partnerOf(d.partnerCode))
-        + pInfo([['เลขที่', d.no], ['วันที่รับ', thDate(d.date)], ['ใบส่งของ', d.vendorDoNo || ''], ['ใบสั่งซื้อ', d.poNo || ''],
+        + '<div class="p-meta">' + pParty('ผู้ขาย', d.snap || partnerOf(d.partnerCode))
+        + purInfo(d, [['เลขที่', d.no], ['วันที่รับ', thDate(d.date)], ['ใบส่งของ', d.vendorDoNo || ''], ['ใบสั่งซื้อ', d.poNo || ''],
           ['ตั้งหนี้', d.billNo || 'รอใบกำกับจากผู้ขาย']]) + '</div>'
         + pTable([{ t:'ลำดับ', w:'11mm', c:1 }, { t:'รหัส', w:'22mm', c:1 }, { t:'รายการ' }, { t:'จำนวน', w:'18mm', n:1 },
           { t:'หน่วย', w:'16mm', c:1 }, { t:'ต้นทุนต่อหน่วย', w:'28mm', n:1 }, { t:'มูลค่า', w:'30mm', n:1, sum:1 }],
-          d.lines.map((l, i) => [String(i + 1), l.itemCode, l.desc, String(l.qty), l.uom || '', pm(l.price), pm(l.amount)]), 8, PAGED)
+          d.lines.map((l, i) => [String(i + 1), l.itemCode, l.desc, String(l.qty), l.uom || '', unitPm(l.price), pm(l.amount)]), 8, PAGED)
         + pTotals(d.total, [['มูลค่ารับเข้าคลัง (ก่อนภาษี)', pm(d.total), true]])
+        + purNotes(d)
         + pEntry(d.entryNo)
         + pSign(['ผู้ส่งสินค้า', 'ผู้ตรวจรับสินค้า', 'ผู้บันทึกบัญชี']), d.no, isVoid(d) ? 'ยกเลิก' : '');
     },
@@ -270,15 +271,22 @@ const DOC_PRINT = {
     find: (no) => DB.docs.payment.find((d) => d.no === no),
     build: function (d) {
       const b = DB.docs.bill.find((x) => x.no === d.billNo) || {};
+      const how = (PAYMENT_METHODS[d.method] || 'โอนเงิน') + (d.chequeNo ? ' เลขที่ ' + d.chequeNo : '')
+        + (d.chequeDate ? ' ลงวันที่ ' + thDate(d.chequeDate) : '');
       return pSheet(pHead('ใบสำคัญจ่าย', 'PAYMENT VOUCHER')
-        + '<div class="p-meta">' + pParty('จ่ายให้', partnerOf(d.partnerCode))
-        + pInfo([['เลขที่', d.no], ['วันที่', thDate(d.date)], ['อ้างตั้งหนี้', d.billNo], ['ใบเตรียมจ่าย', d.batchNo || ''],
+        + '<div class="p-meta">' + pParty('จ่ายให้', b.snap || partnerOf(d.partnerCode))
+        + pInfo([['เลขที่', d.no], ['วันที่', thDate(d.date)], ['ชำระโดย', how], ['จ่ายจาก', d.bankAccount ? acc(d.bankAccount).name : ''],
+          ['อ้างตั้งหนี้', d.billNo], ['ใบเตรียมจ่าย', d.batchNo || ''], ['โปรเจกต์', b.project || ''], ['อ้างอิง', b.reference || ''],
           ['นำส่งภาษี', d.channel === 'e_wht' ? 'e-Withholding Tax' : 'หักและนำส่งเอง']]) + '</div>'
         + pTable([{ t:'ลำดับ', w:'11mm', c:1 }, { t:'รายการ' }, { t:'จำนวนเงิน', w:'34mm', n:1 }],
-          [['1', 'ชำระหนี้ตามใบกำกับภาษีเลขที่ ' + (b.vendorNo || '') + (b.date ? ' ลงวันที่ ' + thDate(b.date) : ''), pm(d.gross)]], 4)
-        + pTotals(d.net, [['ยอดจ่ายก่อนหักภาษี', pm(d.gross)],
-          ['หัก ภาษีหัก ณ ที่จ่าย' + (d.whtRate ? ' ' + d.whtRate + '%' : ''), pm(d.wht)], ['จ่ายสุทธิ', pm(d.net), true]])
+          [['1', (b.vendorNo ? 'ชำระหนี้ตามใบกำกับภาษีเลขที่ ' + b.vendorNo : 'ชำระหนี้ตามรายการตั้งหนี้ ' + d.billNo)
+            + (b.vendorDate || b.date ? ' ลงวันที่ ' + thDate(b.vendorDate || b.date) : ''), pm(d.gross)]]
+            .concat(d.diff ? [['2', (PAYMENT_DIFF[d.diffType] || {}).label + ' (ปิดยอดคงค้าง)', pm(d.diff)]] : []), 4)
+        + pTotals(d.net, [['ยอดชำระก่อนหักภาษี', pm(d.gross)],
+          ['หัก ภาษีหัก ณ ที่จ่าย' + (d.whtRate ? ' ' + d.whtRate + '%' : ''), pm(d.wht)], ['จ่ายสุทธิ', pm(d.net), true]]
+          .concat(d.fee ? [['ค่าธรรมเนียมที่บริษัทจ่ายเพิ่ม', pm(d.fee)]] : []))
         + (d.certNo ? '<div class="p-note">ออกหนังสือรับรองการหักภาษี ณ ที่จ่ายเลขที่ ' + esc(d.certNo) + '</div>' : '')
+        + (d.note ? '<div class="p-note">หมายเหตุ: ' + esc(d.note) + '</div>' : '')
         + pEntry(d.entryNo)
         + pSign(['ผู้จัดทำ', 'ผู้ตรวจสอบ', 'ผู้อนุมัติ', 'ผู้รับเงิน']), d.no, isVoid(d) ? 'ยกเลิก' : '');
     },
@@ -287,16 +295,19 @@ const DOC_PRINT = {
     title:'ใบสำคัญจ่าย (ค่าใช้จ่าย)',
     find: (no) => DB.docs.expense.find((d) => d.no === no),
     build: function (d) {
+      const how = (PAYMENT_METHODS[d.method] || 'โอนเงิน') + (d.chequeNo ? ' เลขที่ ' + d.chequeNo : '')
+        + (d.chequeDate ? ' ลงวันที่ ' + thDate(d.chequeDate) : '');
       return pSheet(pHead('ใบสำคัญจ่าย', 'PAYMENT VOUCHER — EXPENSE')
-        + '<div class="p-meta">' + pParty('จ่ายให้', partnerOf(d.partnerCode))
-        + pInfo([['เลขที่', d.no], ['วันที่', thDate(d.date)], ['ใบกำกับผู้ขาย', d.taxInvoiceNo || 'ไม่มี'],
-          ['จ่ายจาก', acc(d.payFrom).name], ['50 ทวิ', d.certNo || '']]) + '</div>'
-        + pTable([{ t:'ลำดับ', w:'11mm', c:1 }, { t:'รายการ' }, { t:'บันทึกเข้าบัญชี', w:'52mm' }, { t:'จำนวนเงิน', w:'30mm', n:1, sum:1 }],
-          d.lines.map((l, i) => [String(i + 1), l.desc, l.acc + ' ' + l.accName, pm(l.amount)]), 5, PAGED)
-        + pTotals(d.net, [['มูลค่าก่อนภาษี', pm(d.base)], ['ภาษีซื้อ', pm(d.vat)], ['รวมทั้งสิ้น', pm(d.total)],
-          ['หัก ภาษีหัก ณ ที่จ่าย' + (d.whtRate ? ' ' + d.whtRate + '%' : ''), pm(d.wht)], ['จ่ายสุทธิ', pm(d.net), true]])
-        + pEntry(d.entryNo)
-        + pSign(['ผู้จัดทำ', 'ผู้ตรวจสอบ', 'ผู้อนุมัติ', 'ผู้รับเงิน']), d.no, isVoid(d) ? 'ยกเลิก' : '');
+        + '<div class="p-meta">' + pPartyPlus('จ่ายให้', d.snap || partnerOf(d.partnerCode),
+          ['ชำระโดย ' + how + ' จาก ' + acc(d.payFrom).name, d.certNo ? 'หนังสือรับรองหัก ณ ที่จ่ายเลขที่ ' + d.certNo : ''])
+        + purInfo(Object.assign({}, d, { creditType: null }), [['เลขที่', d.no], ['วันที่', thDate(d.date)],
+          ['ใบกำกับผู้ขาย', d.taxInvoiceNo ? d.taxInvoiceNo + (d.taxInvoiceDate ? ' (' + thDateNum(d.taxInvoiceDate) + ')' : '') : 'ไม่มี'],
+          ['ใบสั่งซื้อ', d.fromDoc || '']]) + '</div>'
+        + pTable(purLineCols(d, true), purLineRows(d, (l) => l.acc + ' ' + l.accName), purFill(purSums(d), 2), PAGED)
+        + pTotalsEntry(d.net, purSums(d).concat([['หัก ภาษีหัก ณ ที่จ่าย' + (d.whtRate ? ' ' + d.whtRate + '%' : ''), pm(d.wht)],
+          ['จ่ายสุทธิ', pm(d.net), true]]), d.entryNo)
+        + purNotes(d)
+        + pSignTight(['ผู้จัดทำ', 'ผู้ตรวจสอบ', 'ผู้อนุมัติ', 'ผู้รับเงิน']), d.no, isVoid(d) ? 'ยกเลิก' : '');
     },
   },
   paymentBatch: {
@@ -473,6 +484,108 @@ function whtCertPrint(c, copy) {
     + (c.expenseNo || c.paymentNo ? '<div class="p-note" style="font-size:10.5pt">อ้างอิงรายการจ่ายเงิน ' + esc(c.expenseNo || c.paymentNo) + '</div>' : ''),
     c.no, isVoid(c) ? 'ยกเลิก' : '');
 }
+
+/* ---------- เอกสารฝั่งซื้อ: ใบสั่งซื้อ ใบตั้งหนี้ ใบรับสินค้า ค่าใช้จ่าย ใบสำคัญจ่าย ----------
+   หน่วยทุกบรรทัด · คอลัมน์ส่วนลดเฉพาะใบที่มีส่วนลด · ยอดท้ายเอกสารเต็ม (รวมเป็นเงิน ส่วนลด หลังหักส่วนลด มูลค่าที่เสียภาษี ภาษี รวม)
+   เงื่อนไขชำระ โปรเจกต์ เลขอ้างอิง หมายเหตุ — โน้ตภายในไม่พิมพ์เด็ดขาด */
+/** ราคาต่อหน่วย — ต้นทุนที่ได้จากส่วนลด/ถอดภาษีมีทศนิยมได้ 4 ตำแหน่ง แสดงให้ครบ ไม่ปัดจนคูณกลับไม่ตรง */
+const unitPm = (v) => (v % 100 ? fmt(v, 4).replace(/0+$/, '') : pm(v));
+/** ช่องข้อมูลเอกสารด้านขวา + เงื่อนไขชำระ (เครดิตไม่แสดงวันครบกำหนดไม่พิมพ์วันครบกำหนด) โปรเจกต์ เลขอ้างอิง ผู้จัดทำ */
+function purInfo(d, first) {
+  const credit = !d.creditType ? '' : d.creditType === 'cash' ? 'เงินสด' : 'เครดิต ' + (d.creditDays || 0) + ' วัน'
+    + (d.creditType === 'credit' && d.due ? ' · ครบ ' + thDateNum(d.due) : '');
+  return pInfo(first.concat([
+    credit ? ['เงื่อนไขชำระ', credit] : null,
+    d.project ? ['โปรเจกต์', d.project] : null,
+    d.reference ? ['อ้างอิง', d.reference] : null,
+    d.salesName ? ['ผู้จัดทำ', d.salesName] : null,
+  ]));
+}
+/** คอลัมน์ตารางรายการ — acc = มีคอลัมน์บัญชี/หมวดค่าใช้จ่าย */
+function purLineCols(d, acc) {
+  const disc = (d.lines || []).some((l) => lineDiscText(l.disc));
+  return [{ t:'ลำดับ', w:'11mm', c:1 }, { t:'รายการ' }].concat(acc ? [{ t:'บันทึกเข้าบัญชี', w:'40mm' }] : [])
+    .concat([{ t:'จำนวน', w:'16mm', n:1 }, { t:'หน่วย', w:'14mm', c:1 }, { t:'ราคา/หน่วย', w:'25mm', n:1 }])
+    .concat(disc ? [{ t:'ส่วนลด', w:'17mm', n:1 }] : [])
+    .concat([{ t:'จำนวนเงิน', w:'27mm', n:1, sum:1 }]);
+}
+/** บรรทัดรายการ — จำนวนเงินต่อบรรทัด = ราคา × จำนวน − ส่วนลดรายการ ตามแบบราคาของใบ (รวม/ไม่รวมภาษี)
+    คิดด้วยสูตรเดียวกับตอนบันทึก (priceLines) · ใบรุ่นก่อนไม่มีตั้งค่าราคา ใช้มูลค่าที่ลงบัญชี */
+function purLineRows(d, accOf) {
+  const disc = (d.lines || []).some((l) => lineDiscText(l.disc));
+  const unit = d.pricing && d.pricing.lineDisc === 'amount' ? '' : '%';
+  let rows = null;
+  try {
+    if (d.pricing) rows = priceLines(d.lines.map((l) => ({ qty: l.qty, price: unM(l.price), disc: l.disc, taxCode: l.taxCode })), d.date, d.pricing).rows;
+  } catch (e) { rows = null; }
+  return d.lines.map((l, i) => [String(i + 1), l.desc].concat(accOf ? [accOf(l)] : [])
+    .concat([String(l.qty), l.uom || '', unitPm(l.price)])
+    .concat(disc ? [lineDiscText(l.disc) ? lineDiscText(l.disc) + unit : ''] : [])
+    .concat([pm(rows ? rows[i].gross - rows[i].discount : l.amount)]));
+}
+/** ยอดท้ายเอกสารแบบเต็ม — ใบไม่มีส่วนลดและราคาไม่รวมภาษี ได้หน้าตาเดิม (vatSums) */
+function purSums(d) {
+  const t = d.totals;
+  const incl = d.pricing && d.pricing.mode === 'inclusive';
+  if (!t || (!t.discount && !incl)) return vatSums(d);
+  const out = [['รวมเป็นเงิน' + (incl ? ' (ราคารวมภาษี)' : ''), pm(t.subTotal)]];
+  if (t.discount) {
+    const bill = d.pricing.bill;
+    out.push(['ส่วนลด' + (bill && bill.kind === 'percent' && !t.lineDiscount ? ' ' + bill.value + '%' : ''), pm(t.discount)]);
+    out.push(['ราคาหลังหักส่วนลด', pm(t.afterDiscount)]);
+  }
+  /* มูลค่าที่เสียภาษี ภาษี และรวมทั้งสิ้น (หลังหักเงินมัดจำ) ตามแบบเดิม */
+  return out.concat(vatSums(d).slice(1));
+}
+/** จำนวนบรรทัดว่างเติมตาราง — ยอดท้ายเอกสารยาว (ส่วนลด หัก ณ ที่จ่าย) เติมน้อยลง ใบสั้นจะได้จบในหน้าเดียว */
+const purFill = (sums, base) => Math.max(0, base - Math.max(0, sums.length - 5));
+/** ยอดท้ายเอกสารที่มีการบันทึกบัญชีอยู่ข้างกัน (ช่องซ้ายใต้จำนวนเงินตัวอักษร) — ใบสำคัญซื้อ/จ่ายจบในหน้าเดียว
+    นักบัญชียังตรวจได้ทันทีว่าลงบัญชีอะไร เหมือน pEntry แต่ไม่กินความสูงเพิ่ม */
+function pTotalsEntry(amountForWords, sums, entryNo) {
+  const e = DB.entries.find((x) => x.no === entryNo);
+  const tb = e ? '<div class="p-je"><b>การบันทึกบัญชี</b> · ใบสำคัญ ' + esc(e.no) + '</div><table class="p-je-t"><thead><tr><th>บัญชี</th><th>เดบิต</th><th>เครดิต</th></tr></thead><tbody>'
+    + e.lines.map((l) => '<tr><td>' + esc(l.acc + ' ' + acc(l.acc).name) + '</td><td class="num">' + (l.dr ? pm(l.dr) : '') + '</td><td class="num">'
+      + (l.cr ? pm(l.cr) : '') + '</td></tr>').join('') + '</tbody></table>' : '';
+  return pTotals(amountForWords, sums).replace('<div class="p-words">(' + esc(bahtText(amountForWords)) + ')</div>',
+    '<div class="p-words with-je"><div>(' + esc(bahtText(amountForWords)) + ')</div>' + tb + '</div>');
+}
+/** ช่องลงนามแบบกระชับ — ใบสำคัญที่มีตารางบันทึกบัญชีด้วย จะได้จบในหน้าเดียว */
+const pSignTight = (list) => pSign(list).replace('class="p-sign"', 'class="p-sign tight"');
+/** กล่องคู่ค้าพร้อมบรรทัดเพิ่ม (เช่น วิธีจ่าย) — ใช้ที่ว่างของกล่องซ้ายแทนการเพิ่มแถวในกล่องขวา */
+const pPartyPlus = (label, p, lines) => pParty(label, p).replace(/<\/div>$/, lines.filter(Boolean).map((x) => '<div>' + esc(x) + '</div>').join('') + '</div>');
+/** หมายเหตุที่พิมพ์ — ราคารวมภาษี และหมายเหตุของเอกสาร (โน้ตภายในไม่พิมพ์) */
+function purNotes(d) {
+  return (d.pricing && d.pricing.mode === 'inclusive' ? '<div class="p-note">ราคาสินค้าและบริการข้างต้นรวมภาษีมูลค่าเพิ่มแล้ว</div>' : '')
+    + (d.note ? '<div class="p-note">หมายเหตุ: ' + esc(d.note) + '</div>' : '');
+}
+DOC_PRINT.purchaseOrder.build = function (d, copy) {
+  const st = tradeDocStatus('purchaseOrder', d);
+  const sums = purSums(d).concat(whtSums(d, 'vendor'));
+  return pSheet(pHead('ใบสั่งซื้อ', 'PURCHASE ORDER', copy)
+    + '<div class="p-meta">' + pParty('ผู้ขาย', d.snap)
+    + purInfo(d, [['เลขที่', d.no], ['วันที่', thDate(d.date)]]) + '</div>'
+    + pTable(purLineCols(d), purLineRows(d), purFill(sums, 7), PAGED)
+    + pTotals(d.total, sums) + whtNote(d) + purNotes(d)
+    + pSign(['ผู้สั่งซื้อ', 'ผู้อนุมัติ', 'ผู้ขายยืนยัน']), d.no, st === 'cancelled' || st === 'rejected' ? 'ยกเลิก' : '');
+};
+/* ใบตั้งหนี้ — เอกสารภายในที่แนบใบกำกับของผู้ขาย: ลงบัญชีอะไร เท่าไร ครบกำหนดเมื่อไร */
+DOC_PRINT.bill = {
+  title:'ใบบันทึกซื้อ / ตั้งหนี้',
+  find: (no) => DB.docs.bill.find((d) => d.no === no),
+  build: function (d) {
+    const accOf = (l) => (l.acc ? l.acc + ' ' + acc(l.acc).name : d.grnNo ? 'พักรับสินค้า' : '');
+    return pSheet(pHead('ใบบันทึกซื้อ / ตั้งหนี้', 'PURCHASE RECORD')
+      + '<div class="p-meta">' + pParty('ผู้ขาย', d.snap || partnerOf(d.partnerCode))
+      + purInfo(d, [['เลขที่', d.no], ['วันที่', thDate(d.date)],
+        ['ใบกำกับผู้ขาย', d.vendorNo ? d.vendorNo + (d.vendorDate ? ' (' + thDateNum(d.vendorDate) + ')' : '') : 'ไม่มี'],
+        ['ใบรับสินค้า', d.grnNo || ''], ['ใบสั่งซื้อ', d.fromDoc && !d.grnNo ? d.fromDoc : '']]) + '</div>'
+      + pTable(purLineCols(d, true), purLineRows(d, accOf), purFill(purSums(d), 2), PAGED)
+      + pTotalsEntry(d.total, purSums(d), d.entryNo)
+      + (d.claimable ? '' : '<div class="p-note">ภาษีซื้อต้องห้ามตามมาตรา 82/5 — บันทึกเป็นค่าใช้จ่าย ไม่นำไปหักในแบบ ภ.พ.30</div>')
+      + purNotes(d)
+      + pSignTight(['ผู้จัดทำ', 'ผู้ตรวจสอบ', 'ผู้อนุมัติ']), d.no, isVoid(d) ? 'ยกเลิก' : '');
+  },
+};
 
 /* ---------- ตัวอย่างก่อนพิมพ์ ---------- */
 function printDoc(kind, no) {
