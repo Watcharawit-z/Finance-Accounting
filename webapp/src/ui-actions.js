@@ -204,8 +204,10 @@ function refreshLineSum() {
       if (e) e.textContent = fmt(x.gross - x.discount);
     });
     const t = r.totals;
-    set('tSub', fmt(t.subTotal));
-    set('tDisc', t.discount ? 'ส่วนลดรวม ' + fmt(t.discount) + (t.lineDiscount && t.billDiscount ? ' (รายการ ' + fmt(t.lineDiscount) + ')' : '') : '');
+    /* รวมเป็นเงิน = ผลรวมจำนวนเงินของบรรทัด (หักส่วนลดรายการแล้ว) ตรงกับคอลัมน์จำนวนเงินและเอกสารที่พิมพ์ */
+    set('tSub', fmt(t.subTotal - t.lineDiscount));
+    set('tDisc', (t.billDiscount ? 'ส่วนลดท้ายบิล ' + fmt(t.billDiscount) : '')
+      + (t.lineDiscount ? (t.billDiscount ? ' · ' : '') + 'ส่วนลดรายการ ' + fmt(t.lineDiscount) + ' หักในบรรทัดแล้ว' : ''));
     set('tAfter', fmt(t.afterDiscount));
     set('tExempt', fmt(t.exempt));
     show('exempt', t.exempt !== 0);
@@ -289,64 +291,137 @@ EXTRA_CHANGE.push(function (t) {
   return false;
 });
 
-/* ---------- ขาย: ใบกำกับภาษีเต็มรูป (ขายเชื่อ) หรือขายเงินสดใบกำกับอย่างย่อ — ฟอร์มเดียวกัน สลับได้ ---------- */
-function modalInvoice(kind) {
+/* ---------- ขาย: ใบกำกับภาษีเต็มรูป (ขายเชื่อ) หรือขายเงินสดใบกำกับอย่างย่อ — ฟอร์มเดียวกัน สลับได้ ----------
+   opts.edit = เลขที่ใบกำกับที่ยังรอดำเนินการ (แก้ไขด้วยเลขเดิม)
+   opts.from = { kind:'quotation'|'billingNote', no } แปลงจากต้นทาง — ทุกช่องเติมไว้ให้ แก้ก่อนบันทึกได้ ต้นทางปิดและชี้มาที่ใบนี้
+   แก้ไขและแปลงเอกสารล็อกประเภทการขายไว้ — สลับไปมาแล้วราคารวม/ไม่รวมภาษีของต้นทางจะเปลี่ยนความหมาย */
+const SALE_FROM = { quotation:'ใบเสนอราคา', billingNote:'ใบวางบิล' };
+const optRcvMethods = () => Object.keys(RECEIPT_METHODS).filter((k) => k !== 'promptpay').map((k) => [k, RECEIPT_METHODS[k]]);
+function modalInvoice(kind, opts) {
+  const o = opts || {};
+  const edit = o.edit ? DB.docs.invoice.find((x) => x.no === o.edit) : null;
+  if (o.edit && !edit) return;
+  /* ใบที่นับจำนวนกับใบสั่งขายหรือหักเงินมัดจำไว้ แก้ได้เฉพาะหัวเอกสาร */
+  if (edit && (edit.soNo || (edit.deposits || []).length)) { modalInvoiceHead(edit); return; }
+  const from = o.from ? (DB.docs[o.from.kind] || []).find((x) => x.no === o.from.no) : null;
+  if (o.from && !from) return;
+  const d = edit || from;
   const cash = kind === 'cash';
-  const custs = optCustomers();
+  const locked = !!d;
+  const custs = optCustomers(d && d.partnerCode);
   const money = payFromAccounts().map((a) => [a.code, a.code + ' ' + a.name]);
   const show = (on) => (on ? '' : ' style="display:none"');
+  const fromLabel = from ? SALE_FROM[o.from.kind] + ' ' + from.no : '';
+  const firstCust = d ? d.partnerCode : (custs[0] || [])[0];
   modal({
-    title:'ขายสินค้า/บริการ — ออกใบกำกับภาษี',
-    sub:'ขายเชื่อออกใบกำกับเต็มรูป (ม.86/4) · ขายปลีกหน้าร้านรับเงินทันทีออกใบกำกับอย่างย่อ (ม.86/6)',
-    body:'<div class="flds">'
-      + field({ name:'saleKind', label:'ประเภทการขาย', type:'select', wide:true, value: cash ? 'cash' : 'credit',
+    title: edit ? 'แก้ไขใบกำกับภาษี ' + edit.no
+      : from ? (cash ? 'ขายเงินสดจาก' : 'ออกใบกำกับภาษีจาก') + fromLabel : 'ขายสินค้า/บริการ — ออกใบกำกับภาษี',
+    sub: edit ? 'ยังรอดำเนินการ (ยังไม่ส่งลูกค้า) · บันทึกแล้วระบบกลับรายการใบสำคัญเดิมและลงใหม่ด้วยเลขที่เดิมในครั้งเดียว'
+      : from ? 'ข้อมูลทุกช่องเติมจาก' + fromLabel + ' แล้ว แก้ก่อนบันทึกได้ · ' + fromLabel + ' จะปิดและชี้มาที่เอกสารใบนี้'
+      : 'ขายเชื่อออกใบกำกับเต็มรูป (ม.86/4) · ขายปลีกหน้าร้านรับเงินทันทีออกใบกำกับอย่างย่อ (ม.86/6)',
+    body:(locked ? '<input type="hidden" name="saleKind" value="' + (cash ? 'cash' : 'credit') + '">'
+      : '<div class="flds">' + field({ name:'saleKind', label:'ประเภทการขาย', type:'select', wide:true, value: cash ? 'cash' : 'credit',
           options:[['credit','ขายเชื่อ — ใบกำกับภาษีเต็มรูป/ใบส่งของ'], ['cash','ขายเงินสด — ใบกำกับภาษีอย่างย่อ (ม.86/6) ไม่ต้องมีข้อมูลผู้ซื้อ']] })
-      + '</div>'
+        + '</div>')
       + '<div data-sk="credit"' + show(!cash) + '>'
-      + docHead({ side:'customer', parties: custs,
+      + docHead({ side:'customer', parties: custs, d: from ? Object.assign({}, from, { reference: from.reference || from.no }) : edit, date: edit ? edit.date : defaultDate(), partner: firstCust,
           partnerHint:'ผู้ซื้อที่จด VAT ต้องมีเลขผู้เสียภาษีและสาขา · บุคคลธรรมดามีชื่อและที่อยู่ก็ออกได้' })
       + '</div>'
       + '<div class="flds" data-sk="cash"' + show(cash) + '>'
       + field({ name:'cashDate', label:'วันที่ขาย', type:'date', value: defaultDate(),
           hint:'ต้องอยู่ในงวดที่ยังเปิดอยู่ ระบบจะเลือกอัตราภาษีตามวันที่นี้' })
-      + '</div>'
-      + '<div class="flds" data-sk="cash"' + show(cash) + '>'
-      + field({ name:'buyer', label:'ลูกค้า (ไม่บังคับ)', type:'select',
+      + field({ name:'buyer', label:'ลูกค้า (ไม่บังคับ)', type:'select', value: d ? d.partnerCode : '',
           options: [['', '— ลูกค้าทั่วไป ไม่ระบุชื่อ —']].concat(custs) })
-      + field({ name:'buyerName', label:'ชื่อผู้ซื้อที่จะพิมพ์ (ไม่บังคับ)', placeholder:'เว้นว่างได้' })
+      + field({ name:'buyerName', label:'ชื่อผู้ซื้อที่จะพิมพ์ (ไม่บังคับ)', placeholder:'เว้นว่างได้', value: d && d.snap ? d.snap.name : '' })
       + field({ name:'payTo', label:'รับเงินเข้าบัญชี', type:'select', options: money,
           value: (DB.accounts.find((a) => a.postable && a.subType === 'cash') || {}).code })
       + field({ name:'method', label:'รับชำระโดย', type:'select', value:'cash',
-          options:[['cash','เงินสด'], ['transfer','โอนเงิน/พร้อมเพย์'], ['card','บัตรเครดิต/เดบิต']] })
+          options:[['cash','เงินสด'], ['transfer','โอนเงิน/พร้อมเพย์'], ['card','บัตรเครดิต/เดบิต'], ['other','ช่องทางอื่น']] })
+      + field({ name:'csReference', label:'เลขที่อ้างอิง', value: d ? (from ? d.reference || d.no : d.reference || '') : '', placeholder:'ไม่บังคับ' })
+      + field({ name:'csProject', label:'โปรเจกต์', value: d ? d.project || '' : '', placeholder:'ไม่บังคับ' })
+      + field({ name:'csSalesName', label:'พนักงานขาย', value: d ? d.salesName || '' : lsGet(LS_SALES_NAME) || '', placeholder:'ไม่บังคับ' })
       + '</div>'
-      + lineEditor(4, 'sale', null, { mode: cash ? 'inclusive' : undefined },
-          '<div class="wide" data-sk="credit"' + show(!cash) + '>' + docWhtField('customer', partnerWht((custs[0] || [])[0])) + '</div>')
-      /* เงินมัดจำที่รับไว้แล้วของลูกค้ารายนี้ หักในใบกำกับ (เฉพาะขายเชื่อ) */
-      + '<div id="invDeps" data-sk="credit"' + show(!cash) + '>' + depositPicker('ar', (custs[0] || [])[0]) + '</div>'
-      + docNotes(null, 'เงื่อนไขการชำระเงิน เลขบัญชีสำหรับโอน ฯลฯ'),
-    submitLabel: cash ? 'รับเงินและออกใบกำกับอย่างย่อ' : 'ลงบัญชีและออกเลขที่',
-    note:'เลขที่เอกสารจะถูกจองเมื่อลงบัญชีสำเร็จเท่านั้น',
+      + (edit ? '<span data-wht-edit hidden></span>' : '')
+      + lineEditor(4, 'sale', d ? d.lines : null, d ? d.pricing : { mode: cash ? 'inclusive' : undefined },
+          '<div class="wide" data-sk="credit"' + show(!cash) + '>' + docWhtField('customer', d ? (d.whtCode || '') : partnerWht(firstCust)) + '</div>')
+      /* เงินมัดจำที่รับไว้แล้วของลูกค้ารายนี้ หักในใบกำกับ (เฉพาะขายเชื่อ ใบใหม่) */
+      + (edit ? '' : '<div id="invDeps" data-sk="credit"' + show(!cash) + '>' + depositPicker('ar', firstCust) + '</div>')
+      /* ออกใบกำกับพร้อมรับเงิน — ใบเสร็จออกในชุดเดียวกัน สถานะเก็บเงินแล้ว */
+      + (edit ? '' : '<div class="flds" data-sk="credit"' + show(!cash) + '>'
+        + field({ name:'paidNow', label:'การรับชำระ', type:'select', value:'', wide:true,
+            options:[['', 'ยังไม่ได้รับชำระ — ตั้งลูกหนี้ รอเก็บเงิน'], ['yes', 'รับชำระเงินแล้ว — ออกใบเสร็จรับเงินพร้อมกัน']],
+            hint:'รับเงินแล้วระบบออกใบเสร็จให้ในชุดเดียว ใบกำกับเป็น "เก็บเงินแล้ว" ทันที (ลูกค้าหัก ณ ที่จ่ายตามที่ระบุไว้ด้านบน)' })
+        + '</div><div class="flds" id="paidBox" data-sk="credit" hidden>'
+        + field({ name:'rcvMethod', label:'รับชำระโดย', type:'select', value:'transfer', options: optRcvMethods() })
+        + field({ name:'rcvAcc', label:'รับเงินเข้าบัญชี', type:'select', value: cashAccDefault('in', 'transfer'), options: money })
+        + '</div>')
+      + docNotes(d, 'เงื่อนไขการชำระเงิน เลขบัญชีสำหรับโอน ฯลฯ'),
+    submitLabel: edit ? 'บันทึกการแก้ไข' : cash ? 'รับเงินและออกใบกำกับอย่างย่อ' : 'ลงบัญชีและออกเลขที่',
+    note: edit ? 'เลขที่เดิม · ใบสำคัญเดิมยังอยู่และขึ้นว่ากลับรายการ' : 'เลขที่เอกสารจะถูกจองเมื่อลงบัญชีสำเร็จเท่านั้น',
     onSubmit: function () {
       submitAction(function () {
+        const conv = from ? (o.from.kind === 'billingNote' ? convertItemBilling : convertQuotation) : null;
         if (val('saleKind') === 'cash') {
           const pr = collectPricing();
-          const cs = issueCashSale({ date: val('cashDate'), partnerCode: val('buyer') || null, buyerName: val('buyerName'),
+          const input = { date: val('cashDate'), partnerCode: val('buyer') || null, buyerName: val('buyerName'),
             payTo: val('payTo'), method: val('method'), vatInclusive: pr.mode === 'inclusive', pricing: pr, lines: collectLines(),
-            note: val('note'), internalNote: val('internalNote') });
-          STATE.screen = 'cashsales'; STATE.sel = cs.no;
-          toast('ขายเงินสด ' + cs.no + ' แล้ว', 'ok', 'รับเงิน ' + fmt(cs.total) + ' บาท · ภาษีขาย ' + fmt(cs.vat) + ' บาท');
+            reference: val('csReference'), project: val('csProject'), salesName: val('csSalesName'),
+            note: val('note'), internalNote: val('internalNote') };
+          if (input.salesName) lsSet(LS_SALES_NAME, input.salesName);
+          const cs = conv ? conv(from.no, Object.assign({ to: 'cashSale' }, input)) : issueCashSale(input);
+          STATE.screen = 'cashsales'; STATE.sel = cs.no; STATE.period = periodOf(cs.date);
+          toast('ขายเงินสด ' + cs.no + ' แล้ว', 'ok', 'รับเงิน ' + fmt(cs.total) + ' บาท · ภาษีขาย ' + fmt(cs.vat) + ' บาท'
+            + (from ? ' · ' + fromLabel + ' ปิดรายการแล้ว' : ''));
           return cs;
         }
         if (!val('partner')) {
           throw new DomainError('PARTNER_REQUIRED', 'ต้องเลือกลูกค้าก่อนออกใบกำกับเต็มรูป',
             'เพิ่มลูกค้าที่เมนูผู้ติดต่อ หรือเปลี่ยนเป็นขายเงินสดถ้าเป็นลูกค้าหน้าร้าน');
         }
-        const doc = issueInvoice(Object.assign(collectDoc(), {
-          deposits: collectDepositPicks(), whtCode: val('docWht') || null,
-        }));
-        STATE.screen = 'invoices'; STATE.sel = doc.no;
-        toast('ออกใบกำกับภาษี ' + doc.no + ' แล้ว', 'ok', 'รวมทั้งสิ้น ' + fmt(doc.total) + ' บาท');
+        const input = Object.assign(collectDoc(), { whtCode: val('docWht') || null });
+        if (!edit) input.deposits = collectDepositPicks();
+        const pay = !edit && val('paidNow') === 'yes' ? { method: val('rcvMethod'), bankAccount: val('rcvAcc') } : null;
+        let doc;
+        if (edit) doc = editInvoice(edit.no, input);
+        else if (conv) doc = conv(from.no, Object.assign(input, { to: 'invoice', payment: pay }));
+        else doc = pay ? issuePaidInvoice(Object.assign(input, { payment: pay })) : issueInvoice(input);
+        if (pay) rememberCashAcc('in', pay.bankAccount);
+        STATE.screen = 'invoices'; STATE.sel = doc.no; STATE.period = periodOf(doc.date);
+        toast((edit ? 'แก้ไขใบกำกับภาษี ' : 'ออกใบกำกับภาษี ') + doc.no + ' แล้ว', 'ok', 'รวมทั้งสิ้น ' + fmt(doc.total) + ' บาท'
+          + (pay ? ' · ออกใบเสร็จ ' + (doc.receiptNos || []).join(', ') + ' เก็บเงินแล้ว' : '')
+          + (edit ? ' · กลับรายการใบสำคัญเดิมและลงใหม่แล้ว (แก้ไขครั้งที่ ' + doc.revision + ')' : '')
+          + (from ? ' · ' + fromLabel + ' ปิดรายการแล้ว' : ''));
         return doc;
+      });
+    },
+  });
+  /* ฟอร์มที่เติมรายการไว้แล้ว (แก้ไข/แปลงเอกสาร) แสดงยอดท้ายเอกสารทันที */
+  refreshLineSum();
+}
+/** แก้หัวเอกสารของใบกำกับที่ผูกใบสั่งขายหรือหักเงินมัดจำ — รายการและยอดผูกกับเอกสารอื่น จึงแก้ได้เฉพาะเงื่อนไขชำระ โปรเจกต์ ฯลฯ */
+function modalInvoiceHead(inv) {
+  const type = inv.creditType || 'credit';
+  const why = inv.soNo ? 'ผูกกับใบสั่งขาย ' + inv.soNo + ' (นับจำนวนที่ออกใบกำกับแล้ว)' : 'หักเงินมัดจำ ' + (inv.deposits || []).map((r) => r.no).join(', ') + ' ไว้';
+  modal({
+    title:'แก้ไขหัวเอกสาร ' + inv.no,
+    sub: 'ใบนี้' + why + ' — แก้ได้เฉพาะเงื่อนไขชำระ โปรเจกต์ พนักงานขาย เลขอ้างอิง และหมายเหตุ ถ้ารายการผิดให้ยกเลิกแล้วออกใหม่',
+    body:'<div class="flds doc-head"><input type="hidden" name="date" value="' + esc(inv.date) + '">'
+      + field({ name:'creditType', label:'เงื่อนไขชำระ', type:'select', value: type, options: CREDIT_OPTS })
+      + '<div class="fld-w credit-pair"' + (type === 'cash' ? ' hidden' : '') + '><label for="f_creditDays">เครดิต (วัน) / วันครบกำหนด</label>'
+      + '<span class="pair"><input id="f_creditDays" name="creditDays" type="number" min="0" step="1" inputmode="numeric" value="' + esc(inv.creditDays || 0) + '">'
+      + '<input id="f_dueDate" name="dueDate" type="date" value="' + esc(inv.due) + '" aria-label="วันครบกำหนด"></span></div>'
+      + field({ name:'project', label:'โปรเจกต์', value: inv.project || '', placeholder:'ไม่บังคับ' })
+      + field({ name:'salesName', label:'พนักงานขาย', value: inv.salesName || '', placeholder:'ไม่บังคับ' })
+      + field({ name:'reference', label:'เลขที่อ้างอิง', value: inv.reference || '', placeholder:'ไม่บังคับ' })
+      + '</div>' + docNotes(inv),
+    submitLabel:'บันทึกการแก้ไข',
+    onSubmit: function () {
+      submitAction(function () {
+        const t = val('creditType');
+        const r = editInvoice(inv.no, { creditType: t, creditDays: t === 'cash' ? undefined : val('creditDays'), dueDate: t === 'cash' ? undefined : val('dueDate'),
+          project: val('project'), salesName: val('salesName'), reference: val('reference'), note: val('note'), internalNote: val('internalNote') });
+        toast('แก้ไขหัวเอกสาร ' + r.no + ' แล้ว', 'ok', 'ยอดและใบสำคัญเดิม · ' + creditTermText(r));
+        return r;
       });
     },
   });
@@ -367,6 +442,22 @@ EXTRA_DISPATCH.push(function (head, rest) {
   }
   return false;
 });
+/* รับชำระแล้ว → แสดงช่องวิธีรับและบัญชีที่รับ · เปลี่ยนวิธีรับ บัญชีเปลี่ยนตาม (เงินสด → เงินสดในมือ) */
+EXTRA_CHANGE.push(function (t) {
+  if (t.name === 'paidNow') {
+    const box = document.getElementById('paidBox');
+    if (box) box.hidden = t.value !== 'yes';
+    const sb = document.querySelector('#modal [data-act="modal:submit"]');
+    if (sb) sb.textContent = t.value === 'yes' ? 'ลงบัญชีและออกใบเสร็จ' : 'ลงบัญชีและออกเลขที่';
+    return true;
+  }
+  if (t.name === 'rcvMethod') {
+    const a = document.querySelector('#modal [name="rcvAcc"]');
+    if (a) a.value = cashAccDefault('in', t.value);
+    return true;
+  }
+  return false;
+});
 
 /* ---------- ตัวเลือกเอกสารอ้างอิง — ใช้ตอนกดสร้างจากหน้ารายการ ไม่ได้เข้ามาจากหน้าใบกำกับ ---------- */
 const optInvoices = (keep) => DB.docs.invoice.filter((d) => d.status !== 'void' && keep(d))
@@ -383,51 +474,143 @@ function needRefs(opts, msg, hint) {
   return false;
 }
 
+/* ---------- รับชำระเงิน — ช่องครบแบบที่นักบัญชีคุ้น ----------
+   วันที่ · ช่องทาง (เงินสด โอน เช็ค บัตรเครดิต อื่น ๆ) · บัญชีที่รับ · ธนาคารผู้โอน · เลข/วันที่/ธนาคารของเช็ค
+   ยอดที่ชำระ · ลูกค้าหัก ณ ที่จ่าย (ประเภทเงินได้ อัตรา หรือจำนวนเงิน) · ค่าธรรมเนียม · รายการปรับลด
+   ยอดที่ได้รับจริง → ส่วนต่าง (เงินขาด/เกิน หรือค่าธรรมเนียมธนาคาร) · หมายเหตุ — สรุปยอดใช้สูตรเดียวกับตอนลงบัญชี (receiptMath) */
+const RC_ADJ_OPTS = Object.keys(RECEIPT_ADJ).map((k) => [k, RECEIPT_ADJ[k].label]);
+const rcWhtOpts = () => optWht('ไม่ได้ถูกหัก').concat(RECEIPT_WHT_RATES.map((r) => ['rate:' + r, 'หัก ' + r + '% (ตามอัตรา)']),
+  [['amount', 'ระบุจำนวนเงินที่ถูกหักเอง (ตาม 50 ทวิ)']]);
+function rcAdjRow(i) {
+  return '<tr data-adj="' + i + '"><td><select name="adj' + i + '_type" aria-label="ประเภทรายการปรับลด">' + selOpts(RC_ADJ_OPTS, 'special_discount') + '</select></td>'
+    + '<td><input name="adj' + i + '_amt" class="r" inputmode="decimal" placeholder="0.00" aria-label="จำนวนเงิน"></td>'
+    + '<td><button class="icon-btn" data-act="rcadj:del:' + i + '" aria-label="ลบรายการปรับลดที่ ' + (i + 1) + '" title="ลบรายการนี้">✕</button></td></tr>';
+}
+/** อ่านฟอร์มรับชำระเป็นข้อมูลที่ส่งเข้า receivePayment / receiptMath ได้ตรง ๆ */
+function receiptFormInput() {
+  const w = val('wht');
+  const m = val('method');
+  const adjustments = [];
+  document.querySelectorAll('#rcAdj tbody tr[data-adj]').forEach(function (tr) {
+    const i = tr.getAttribute('data-adj');
+    if (val('adj' + i + '_amt').trim()) adjustments.push({ type: val('adj' + i + '_type'), amount: val('adj' + i + '_amt') });
+  });
+  return {
+    amount: val('amount'), date: val('date'), method: m, bankAccount: val('bankAccount'),
+    whtCode: w && w.indexOf('rate:') !== 0 && w !== 'amount' ? w : null,
+    whtRate: w.indexOf('rate:') === 0 ? w.slice(5) : null,
+    whtAmount: w === 'amount' ? val('whtAmount') : null,
+    whtBase: w ? val('whtBase') : null,
+    fee: val('fee'), adjustments, received: val('received'), gapType: val('gapType') || null,
+    diffType: val('diffType') || null,
+    payerBank: m === 'transfer' ? val('payerBank') : '',
+    chequeNo: m === 'cheque' ? val('chequeNo') : '', chequeDate: m === 'cheque' ? val('chequeDate') || null : null,
+    chequeBank: m === 'cheque' ? val('chequeBank') : '', note: val('note'),
+  };
+}
+/** ช่องที่ขึ้นตามช่องทางรับเงิน (โอน → ธนาคารผู้โอน · เช็ค → เลข/วันที่/ธนาคาร) และตามวิธีหัก ณ ที่จ่าย */
+function rcToggle() {
+  const m = val('method'), w = val('wht'), rec = val('received').trim();
+  document.querySelectorAll('#modal [data-rcm]').forEach((e) => { e.hidden = e.getAttribute('data-rcm') !== m; });
+  document.querySelectorAll('#modal [data-rcw]').forEach((e) => { e.hidden = e.getAttribute('data-rcw') === 'amount' ? w !== 'amount' : !w; });
+  document.querySelectorAll('#modal [data-rcg]').forEach((e) => { e.hidden = !rec; });
+}
 function modalReceive(no) {
   const inv = no ? DB.docs.invoice.find((d) => d.no === no) : null;
   if (no && !inv) return;
   const refs = inv ? [] : optInvoices((d) => invOutstanding(d) > 0);
   if (!inv && !needRefs(refs, 'ไม่มีใบกำกับภาษีที่ค้างชำระ', 'ออกใบกำกับภาษีก่อน แล้วจึงรับชำระ')) return;
   const out = inv ? invOutstanding(inv) : 0;
+  const tag = (attr, html) => html.replace(/^<div class="fld-w/, '<div ' + attr + ' class="fld-w');
   modal({
     title: inv ? 'รับชำระเงินจากใบกำกับ ' + no : 'ออกใบเสร็จรับเงิน',
     sub: inv ? inv.partnerName + ' · คงเหลือ ' + fmt(out) + ' บาท'
       : 'เลือกใบกำกับภาษีที่ลูกค้าชำระ ใบเสร็จต้องอ้างใบกำกับเสมอ',
     body:'<div class="flds" data-rcform="' + esc(no || '') + '">'
       + (inv ? '' : field({ name:'invoiceNo', label:'อ้างใบกำกับภาษี', type:'select', wide:true, options: refs }))
-      + field({ name:'amount', label:'จำนวนเงินที่รับ (ก่อนหักภาษี ณ ที่จ่าย)', value: inv ? fmt(out) : '',
-          placeholder: inv ? '' : 'เว้นว่าง = รับเต็มยอดคงค้าง' })
       + field({ name:'date', label:'วันที่รับชำระ', type:'date', value: defaultDate() })
-      + field({ name:'method', label:'วิธีรับชำระ', type:'select', value:'transfer',
-          options:[['transfer','โอนเงินเข้าบัญชี'],['cheque','เช็ค'],['cash','เงินสด']] })
+      + field({ name:'method', label:'ช่องทางรับชำระ', type:'select', value:'transfer',
+          options:[['transfer','โอนเงินเข้าบัญชี'], ['cash','เงินสด'], ['cheque','เช็ค'], ['card','บัตรเครดิต'], ['other','ช่องทางอื่น']] })
       + cashAccField('in', 'transfer', 'รับเงินเข้าบัญชี')
-      + field({ name:'wht', label:'ลูกค้าหักภาษี ณ ที่จ่ายหรือไม่', type:'select',
-          options: optWht('ไม่ได้ถูกหัก'), value: inv ? (inv.whtCode || '') : '',
+      + tag('data-rcm="transfer"', field({ name:'payerBank', label:'ธนาคารของผู้โอน', placeholder:'เช่น กสิกรไทย (ไม่บังคับ)' }))
+      + tag('data-rcm="cheque" hidden', field({ name:'chequeNo', label:'เลขที่เช็ค', placeholder:'ไม่บังคับ' }))
+      + tag('data-rcm="cheque" hidden', field({ name:'chequeDate', label:'วันที่บนเช็ค', type:'date' }))
+      + tag('data-rcm="cheque" hidden', field({ name:'chequeBank', label:'ธนาคาร/สาขาของเช็ค', placeholder:'ไม่บังคับ' }))
+      + field({ name:'amount', label:'ยอดที่ชำระ (ก่อนหักภาษี ณ ที่จ่าย)', value: inv ? fmt(out) : '',
+          placeholder: inv ? '' : 'เว้นว่าง = รับเต็มยอดคงค้าง', hint:'ยอดที่นำไปตัดลูกหนี้ของใบกำกับนี้ · รับไม่ครบ = แบ่งจ่าย' })
+      + field({ name:'wht', label:'ลูกค้าหักภาษี ณ ที่จ่าย', type:'select',
+          options: rcWhtOpts(), value: inv ? (inv.whtCode || '') : '',
           hint: inv && inv.whtCode ? 'ใบกำกับระบุว่าลูกค้าจะหัก ' + inv.whtRate + '% — เปลี่ยนได้ถ้า 50 ทวิ ที่ได้รับไม่ตรง'
-            : 'ถ้าถูกหัก ระบบจะบันทึกเป็นสินทรัพย์รอเครดิตภาษีปลายปี' })
-      + field({ name:'whtBase', label:'ฐานที่ลูกค้าหัก (ตาม 50 ทวิ)', placeholder:'เว้นว่าง = ให้ระบบคิด',
+            : 'เลือกประเภทเงินได้ อัตรา หรือระบุจำนวนเงินตาม 50 ทวิ · บันทึกเป็นสินทรัพย์รอเครดิตภาษีปลายปี' })
+      + tag('data-rcw="base"' + (inv && inv.whtCode ? '' : ' hidden'), field({ name:'whtBase', label:'ฐานที่ลูกค้าหัก (ตาม 50 ทวิ)', placeholder:'เว้นว่าง = ให้ระบบคิด',
           hint: inv ? 'ระบบคิดจากค่าบริการก่อนภาษี ไม่รวมค่าสินค้า · รับเต็มยอดนี้ = ' + fmt(receiptServiceShare(inv, out)) + ' บาท'
-            : 'ระบบคิดจากค่าบริการก่อนภาษีในยอดที่รับ ไม่รวมค่าสินค้า (ซื้อสินค้าไม่ต้องหัก ณ ที่จ่าย)' })
-      + field({ name:'diffType', label:'ถ้ายอดที่รับไม่เท่ายอดคงค้าง', type:'select', wide:true, value:'', options: RECEIPT_DIFF_OPTS,
+            : 'ระบบคิดจากค่าบริการก่อนภาษีในยอดที่รับ ไม่รวมค่าสินค้า (ซื้อสินค้าไม่ต้องหัก ณ ที่จ่าย)' }))
+      + tag('data-rcw="amount" hidden', field({ name:'whtAmount', label:'จำนวนภาษีที่ถูกหัก', placeholder:'0.00' }))
+      + field({ name:'fee', label:'ค่าธรรมเนียมธนาคาร', placeholder:'0.00', hint:'ธนาคารหักจากเงินที่โอนเข้า — ลงค่าธรรมเนียมธนาคาร' })
+      + field({ name:'diffType', label:'ถ้ายอดที่ชำระไม่เท่ายอดคงค้าง', type:'select', wide:true, value:'', options: RECEIPT_DIFF_OPTS,
           hint:'ลูกค้าโอนขาดเพราะค่าธรรมเนียมหรือส่วนลด ปิดยอดได้เลย ใบกำกับจะไม่ค้างเศษ · จ่ายเกินเก็บเป็นเครดิตใช้หักใบถัดไปหรือคืนเงินได้' })
+      + '</div>'
+      + '<div class="sub-h">รายการปรับลด<span class="grow"></span><span class="dim">ส่วนลดพิเศษ · ค่านายหน้า · ค่าดำเนินการ · ปัดเศษ</span></div>'
+      + '<div class="scroll"><table class="lines rc-adj" id="rcAdj" data-next="1"><thead><tr><th>รายการ</th><th class="r" style="width:140px">จำนวนเงิน</th>'
+      + '<th style="width:44px"></th></tr></thead><tbody>' + rcAdjRow(0) + '</tbody></table></div>'
+      + '<div style="padding:6px 16px 0">' + btn('rcadj:add', '+ เพิ่มรายการปรับลด') + '</div>'
+      + '<div class="flds">'
+      + field({ name:'received', label:'ยอดเงินที่ได้รับจริง', placeholder:'เว้นว่าง = ตามที่คำนวณ',
+          hint:'ได้รับไม่เท่ายอดที่คำนวณ ส่วนต่างต้องจัดประเภท' })
+      + tag('data-rcg hidden', field({ name:'gapType', label:'ส่วนต่างที่เกิดขึ้น', type:'select', value:'short_over',
+          options: Object.keys(RECEIPT_GAP).map((k) => [k, RECEIPT_GAP[k].label]) }))
+      + areaField({ name:'note', label:'หมายเหตุ (พิมพ์บนใบเสร็จ)', wide:true, placeholder:'เช่น เลขที่อ้างอิงการโอน' })
       + '</div><div class="jv-tot" id="rcSum"></div>',
     submitLabel:'รับชำระและลงบัญชี',
     onSubmit: function () {
       submitAction(function () {
-        const r = receivePayment({ invoiceNo: no || val('invoiceNo'), amount: val('amount'), date: val('date'),
-          method: val('method'), bankAccount: val('bankAccount'), whtCode: val('wht') || null,
-          whtBase: val('wht') ? val('whtBase') : null, diffType: val('diffType') || null });
+        const r = receivePayment(Object.assign(receiptFormInput(), { invoiceNo: no || val('invoiceNo') }));
         rememberCashAcc('in', r.bankAccount);
         toast('บันทึกใบเสร็จ ' + r.no + ' แล้ว', 'ok',
           'รับสุทธิ ' + fmt(r.net) + ' บาท' + (r.wht ? ' (ถูกหักไว้ ' + fmt(r.wht) + ')' : '')
+          + (r.fee ? ' · ค่าธรรมเนียม ' + fmt(r.fee) : '')
+          + (r.adjustments.length ? ' · ปรับลด ' + fmt(r.adjustments.reduce((s, a) => s + a.amount, 0)) : '')
+          + (r.gap ? ' · ' + RECEIPT_GAP[r.gapType].label + ' ' + fmt(Math.abs(r.gap)) : '')
           + (r.diff ? ' · ปิดส่วนต่าง ' + fmt(r.diff) + ' บาท' : '')
           + (r.excess ? ' · เก็บเงินรับเกิน ' + fmt(r.excess) + ' บาทเป็นเครดิตของลูกค้า' : ''));
         return r;
       });
     },
   });
+  rcToggle();
   refreshReceiptSum();
 }
+EXTRA_DISPATCH.push(function (head, rest) {
+  if (head !== 'rcadj') return false;
+  const t = document.getElementById('rcAdj');
+  if (!t) return true;
+  const body = t.querySelector('tbody');
+  if (rest[0] === 'add') {
+    const i = Number(t.getAttribute('data-next')) || body.children.length;
+    t.setAttribute('data-next', String(i + 1));
+    body.insertAdjacentHTML('beforeend', rcAdjRow(i));
+    const f = body.querySelector('[name="adj' + i + '_type"]');
+    if (f) f.focus();
+  }
+  if (rest[0] === 'del') {
+    const tr = body.querySelector('tr[data-adj="' + rest[1] + '"]');
+    if (tr) tr.remove();
+    if (!body.children.length) dispatch('rcadj:add');
+  }
+  refreshReceiptSum();
+  return true;
+});
+EXTRA_CHANGE.push(function (t) {
+  if (!document.querySelector('#modal [data-rcform]')) return false;
+  if (t.name === 'method' || t.name === 'wht' || t.name === 'received') rcToggle();
+  if (/^adj\d+_type$/.test(t.name || '') || t.name === 'gapType') { refreshReceiptSum(); return true; }
+  return false;
+});
+EXTRA_INPUT.push(function (t) {
+  if (!document.querySelector('#modal [data-rcform]')) return false;
+  if (t.name === 'received') { rcToggle(); return true; }
+  return /^adj\d+_amt$/.test(t.name || '') || t.name === 'whtAmount';
+});
 
 /** ตัวเลือกอัตราภาษีของใบลดหนี้/เพิ่มหนี้ — แสดงเฉพาะใบกำกับที่มีหลายอัตรา */
 function noteCodeField(inv, cn) {
@@ -771,6 +954,7 @@ function modalTradeDoc(kind, no) {
       });
     },
   });
+  refreshLineSum();
 }
 
 /** แปลงเอกสารไปขั้นถัดไป — to = 'invoice' ใช้กับใบเสนอราคาที่ออกใบกำกับเลยโดยไม่ผ่านใบสั่งขาย */
@@ -864,7 +1048,8 @@ EXTRA_DISPATCH.push(function (head, rest) {
   if (what === 'edit') { modalTradeDoc(kind, docNo); return true; }
   if (what === 'toinvoice' || what === 'invoice') {
     if (!periodIsOpen()) { toast('งวด ' + thPeriod(STATE.period) + ' ปิดแล้ว', 'err', 'เลือกงวดที่ยังเปิดอยู่ก่อน'); return true; }
-    if (what === 'toinvoice') modalConvertTradeDoc(kind, docNo, 'invoice');
+    /* ใบเสนอราคา → ใบกำกับภาษี: เปิดฟอร์มใบกำกับที่เติมทุกช่องจากใบเสนอราคาไว้ให้ แก้ก่อนบันทึกได้ */
+    if (what === 'toinvoice') modalInvoice('credit', { from: { kind: 'quotation', no: docNo } });
     else modalInvoiceSalesOrder(docNo);
     return true;
   }
@@ -1024,11 +1209,12 @@ function bnInvoiceRows(partnerCode) {
     + '</tbody></table></div>';
 }
 
-function modalBillingNote() {
-  const custs = optCustomers();
+/** ใบวางบิลรวมใบกำกับที่ออกแล้ว — partnerCode = เปิดจากใบกำกับของลูกค้ารายนี้ (เมนูสถานะ สร้างใบวางบิล) */
+function modalBillingNote(partnerCode) {
+  const custs = optCustomers(partnerCode);
   if (!needRefs(custs, 'ยังไม่มีลูกค้าในทะเบียน', 'เพิ่มลูกค้าที่เมนูผู้ติดต่อก่อน')) return;
   const hasOpen = (code) => DB.docs.invoice.some((d) => d.partnerCode === code && d.status !== 'void' && invOutstanding(d) > 0);
-  const first = (custs.find((c) => hasOpen(c[0])) || custs[0])[0];
+  const first = partnerCode && custs.some((c) => c[0] === partnerCode) ? partnerCode : (custs.find((c) => hasOpen(c[0])) || custs[0])[0];
   const d = defaultDate();
   modal({
     title:'ออกใบวางบิล',
@@ -1070,7 +1256,7 @@ function modalReceiveBillingNote(no) {
     body:'<div class="flds">'
       + field({ name:'date', label:'วันที่รับชำระ', type:'date', value: defaultDate() })
       + field({ name:'method', label:'วิธีรับชำระ', type:'select', value:'cheque',
-          options:[['cheque','เช็ค'],['transfer','โอนเงินเข้าบัญชี'],['cash','เงินสด']] })
+          options:[['cheque','เช็ค'],['transfer','โอนเงินเข้าบัญชี'],['cash','เงินสด'],['card','บัตรเครดิต'],['other','ช่องทางอื่น']] })
       + cashAccField('in', 'cheque', 'รับเงินเข้าบัญชี')
       + field({ name:'wht', label:'ลูกค้าหักภาษี ณ ที่จ่ายหรือไม่', type:'select', wide:true, value: bnWhtDefault(bn),
           options: optWht('ไม่ได้ถูกหัก'), hint:'ใช้อัตราเดียวกันกับทุกใบกำกับในใบวางบิลนี้' })
@@ -1090,6 +1276,162 @@ function modalReceiveBillingNote(no) {
     },
   });
 }
+
+/* ---------- ใบวางบิล/ใบแจ้งหนี้ (มีรายการ ออกก่อนใบกำกับ) — ฟอร์มกลางเดียวกับใบเสนอราคา ----------
+   opts.edit = เลขที่ (แก้ไขได้ตอนรอวางบิล) · opts.from = เลขที่ใบเสนอราคา (เติมทุกช่องให้ แก้ก่อนบันทึกได้) */
+function modalItemBilling(opts) {
+  const o = opts || {};
+  const edit = o.edit ? DB.docs.billingNote.find((x) => x.no === o.edit) : null;
+  if (o.edit && !edit) return;
+  const from = o.from ? DB.docs.quotation.find((x) => x.no === o.from) : null;
+  if (o.from && !from) return;
+  const d = edit || (from ? Object.assign({}, from, { reference: from.reference || from.no }) : null);
+  const custs = optCustomers(d && d.partnerCode);
+  if (!needRefs(custs, 'ยังไม่มีลูกค้าในทะเบียน', 'เพิ่มลูกค้าที่เมนูผู้ติดต่อก่อน')) return;
+  const first = d ? d.partnerCode : custs[0][0];
+  modal({
+    title: edit ? 'แก้ไขใบวางบิล/ใบแจ้งหนี้ ' + edit.no : from ? 'สร้างใบวางบิล/ใบแจ้งหนี้จากใบเสนอราคา ' + from.no : 'ออกใบวางบิล/ใบแจ้งหนี้',
+    sub:'แจ้งยอดเรียกเก็บก่อนออกใบกำกับภาษี — ยังไม่ลงบัญชีและไม่เข้ารายงานภาษี เปิดบิลเป็นใบกำกับหรือขายเงินสดภายหลัง'
+      + (from ? ' · ใบเสนอราคาจะปิดและชี้มาที่ใบนี้' : ''),
+    body: docHead({ side:'customer', parties: custs, d, date: edit ? edit.date : defaultDate(), partner: first })
+      + (edit ? '<span data-wht-edit hidden></span>' : '')
+      + lineEditor(4, 'sale', d ? d.lines : null, d ? d.pricing : null, docWhtField('customer', d ? (d.whtCode || '') : partnerWht(first)))
+      + docNotes(d, 'เงื่อนไขการชำระเงิน เลขบัญชีสำหรับโอน ฯลฯ'),
+    submitLabel: edit ? 'บันทึกการแก้ไข' : 'บันทึกใบวางบิล',
+    note:'ยังไม่ลงบัญชี — ตัวเลขเข้าบัญชีตอนเปิดบิลเป็นใบกำกับภาษี',
+    onSubmit: function () {
+      submitAction(function () {
+        const input = Object.assign(collectDoc(), { whtCode: val('docWht') || null });
+        const doc = edit ? updateItemBilling(edit.no, input)
+          : from ? convertQuotation(from.no, Object.assign(input, { to: 'billingNote' })) : issueItemBilling(input);
+        STATE.screen = 'billingnotes'; STATE.sel = doc.no;
+        toast((edit ? 'แก้ไขใบวางบิล ' : 'ออกใบวางบิล ') + doc.no + ' แล้ว', 'ok', 'รวมทั้งสิ้น ' + fmt(doc.total) + ' บาท'
+          + (from ? ' · ใบเสนอราคา ' + from.no + ' ปิดรายการแล้ว' : '') + ' · ยังไม่ลงบัญชี');
+        return doc;
+      });
+    },
+  });
+  refreshLineSum();
+}
+
+/* ===================================================================
+   ป้ายสถานะคือเมนู — เอกสารขาย (STATUS_ACTIONS / docStatusCell ใน ui-docform.js)
+   เรียงตามลำดับการไหล: เปลี่ยนสถานะ → สร้างเอกสารถัดไป → รับชำระ → ยกเลิกท้ายสุด
+   แสดงเฉพาะสิ่งที่ทำได้จริงในสถานะตอนนี้ (ยกเลิกเอกสารขึ้นเมื่อผ่านการตรวจก่อนยกเลิก)
+   =================================================================== */
+const salesCanVoid = (kind, d) => { try { voidCheck(kind, d.no); return true; } catch (e) { return false; } };
+const salesVoidItem = (kind, d) => (salesCanVoid(kind, d) ? [['void:' + kind + ':' + d.no, 'ยกเลิกเอกสาร…', 'lock', 'danger']] : []);
+STATUS_ACTIONS.quotation = function (d) {
+  const st = tradeDocStatus('quotation', d), n = d.no, a = [];
+  if (st === 'issued' || st === 'expired') {
+    a.push(['trade:quotation:edit:' + n, 'แก้ไข', 'file'], ['trade:quotation:approved:' + n, 'อนุมัติ', 'check'],
+      ['trade:quotation:rejected:' + n, 'ไม่อนุมัติ', 'arrow']);
+  }
+  if (st === 'approved') {
+    a.push(['trade:quotation:convert:' + n, 'สร้างใบสั่งขาย', 'sale'], ['qt:billing:' + n, 'สร้างใบวางบิล/ใบแจ้งหนี้', 'sale'],
+      ['qt:invoice:' + n, 'สร้างใบกำกับภาษี', 'receipt'], ['qt:cash:' + n, 'สร้างขายเงินสด', 'cash']);
+  }
+  if (st === 'approved' || st === 'rejected') a.push(['trade:quotation:reset:' + n, 'รีเซ็ตเป็นรออนุมัติ', 'arrow']);
+  if (st !== 'closed' && st !== 'cancelled') a.push(['trade:quotation:cancelled:' + n, 'ยกเลิก', 'lock', 'danger']);
+  return a;
+};
+STATUS_ACTIONS.salesOrder = function (d) {
+  const st = d.status, n = d.no, a = [];
+  if (st === 'issued') {
+    a.push(['trade:salesOrder:edit:' + n, 'แก้ไข', 'file'], ['trade:salesOrder:approved:' + n, 'อนุมัติ', 'check'],
+      ['trade:salesOrder:rejected:' + n, 'ไม่อนุมัติ', 'arrow']);
+  }
+  if (st === 'approved' || st === 'partially_invoiced') {
+    a.push(['trade:salesOrder:invoice:' + n, st === 'approved' ? 'สร้างใบกำกับภาษี' : 'ออกใบกำกับส่วนที่เหลือ', 'receipt']);
+  }
+  if (st === 'approved' || st === 'rejected') a.push(['trade:salesOrder:reset:' + n, 'รีเซ็ตเป็นรออนุมัติ', 'arrow']);
+  if (st === 'issued' || st === 'approved' || st === 'rejected') a.push(['trade:salesOrder:cancelled:' + n, 'ยกเลิก', 'lock', 'danger']);
+  if (st === 'partially_invoiced') a.push(['trade:salesOrder:cancelled:' + n, 'ยกเลิกส่วนที่ยังไม่ได้ออก', 'lock', 'danger']);
+  return a;
+};
+STATUS_ACTIONS.billingNote = function (d) {
+  const st = billingNoteStatus(d), n = d.no;
+  if (isItemBilling(d)) {
+    if (st === 'closed' || st === 'cancelled') return [];
+    return (st === 'issued' ? [['bn:edit:' + n, 'แก้ไข', 'file'], ['bn:delivered:' + n, 'วางบิลแล้ว', 'check']] : [])
+      .concat([['bn:toinvoice:' + n, 'สร้างใบกำกับภาษี', 'receipt'], ['bn:tocash:' + n, 'สร้างขายเงินสด', 'cash']])
+      .concat(st === 'delivered' ? [['bn:reset:' + n, 'รีเซ็ตเป็นรอวางบิล', 'arrow']] : [])
+      .concat([['bn:cancel:' + n, 'ยกเลิก', 'lock', 'danger']]);
+  }
+  if (st !== 'issued' && st !== 'partially_paid') return [];
+  const rcLive = (d.receipts || []).some((r) => liveDoc(DB.docs.receipt.find((x) => x.no === r)));
+  return (!d.delivered ? [['bn:delivered:' + n, 'วางบิลแล้ว', 'check']] : [])
+    .concat([['bn:receive:' + n, 'รับชำระตามใบวางบิล', 'cash']])
+    .concat(d.delivered && !rcLive ? [['bn:reset:' + n, 'รีเซ็ตเป็นรอวางบิล', 'arrow']] : [])
+    .concat([['bn:cancel:' + n, 'ยกเลิก', 'lock', 'danger']]);
+};
+STATUS_ACTIONS.invoice = function (d) {
+  if (isVoid(d)) return [];
+  const n = d.no, out = invOutstanding(d), a = [];
+  if (d.delivered === false) a.push(['inv:edit:' + n, 'แก้ไข', 'file'], ['inv:deliver:' + n, 'ส่งให้ลูกค้าแล้ว (รอเก็บเงิน)', 'check']);
+  if (out > 0 && d.delivered !== false) a.push(['inv:billing:' + n, 'สร้างใบวางบิล', 'sale']);
+  if (out > 0) a.push(['pay:' + n, 'รับชำระเงิน', 'cash']);
+  if (out < 0) a.push(['refund:' + n, 'คืนเงินลูกค้า', 'cash']);
+  if (creditableBase(d) > 0) a.push(['cn:' + n, 'ออกใบลดหนี้', 'sale']);
+  a.push(['dn:' + n, 'ออกใบเพิ่มหนี้', 'sale']);
+  if (d.delivered !== false && invoiceResettable(d)) a.push(['inv:reset:' + n, 'รีเซ็ตเป็นรอดำเนินการ', 'arrow']);
+  return a.concat(salesVoidItem('invoice', d));
+};
+STATUS_ACTIONS.cashSale = (d) => (isVoid(d) ? [] : salesVoidItem('cashSale', d));
+STATUS_ACTIONS.receipt = (d) => (isVoid(d) ? [] : [['open:invoices:' + d.invoiceNo, 'ดูใบกำกับ ' + d.invoiceNo, 'receipt']].concat(salesVoidItem('receipt', d)));
+STATUS_ACTIONS.creditNote = (d) => (isVoid(d) ? [] : [['open:invoices:' + d.invoiceNo, 'ดูใบกำกับ ' + d.invoiceNo, 'receipt']].concat(salesVoidItem('creditNote', d)));
+STATUS_ACTIONS.debitNote = (d) => (isVoid(d) ? [] : [['open:invoices:' + d.invoiceNo, 'ดูใบกำกับ ' + d.invoiceNo, 'receipt']].concat(salesVoidItem('debitNote', d)));
+
+/* การกระทำของเอกสารขายที่เพิ่มรอบนี้ — ใบกำกับ (inv:) ใบเสนอราคา (qt:) ใบวางบิล (bn: แบบใหม่) และรีเซ็ตใบเสนอราคา/ใบสั่งขาย */
+EXTRA_DISPATCH.push(function (head, rest) {
+  const no = rest.slice(1).join(':');
+  const needOpen = () => {
+    if (periodIsOpen()) return true;
+    toast('งวด ' + thPeriod(STATE.period) + ' ปิดแล้ว', 'err', 'เลือกงวดที่ยังเปิดอยู่ก่อน');
+    return false;
+  };
+  if (head === 'new' && rest[0] === 'billingdoc') { modalItemBilling(); return true; }
+  if (head === 'inv') {
+    const what = rest[0];
+    if (what === 'edit') { modalInvoice('credit', { edit: no }); return true; }
+    if (what === 'deliver') runAction(function () { setInvoiceDelivered(no, true); toast('ใบกำกับ ' + no + ' — ส่งให้ลูกค้าแล้ว', 'ok', 'สถานะรอเก็บเงิน'); });
+    if (what === 'reset') runAction(function () { setInvoiceDelivered(no, false); toast('ใบกำกับ ' + no + ' — รีเซ็ตเป็นรอดำเนินการ', 'ok', 'แก้ไขได้แล้ว (เลขที่เดิม)'); });
+    if (what === 'billing') {
+      const inv = DB.docs.invoice.find((x) => x.no === no);
+      if (inv) modalBillingNote(inv.partnerCode);
+    }
+    return true;
+  }
+  if (head === 'qt') {
+    const what = rest[0];
+    if (what === 'billing') modalItemBilling({ from: no });
+    if (what === 'invoice' && needOpen()) modalInvoice('credit', { from: { kind: 'quotation', no } });
+    if (what === 'cash' && needOpen()) modalInvoice('cash', { from: { kind: 'quotation', no } });
+    return true;
+  }
+  if (head === 'bn' && ['edit', 'delivered', 'reset', 'toinvoice', 'tocash'].indexOf(rest[0]) >= 0) {
+    const what = rest[0];
+    if (what === 'edit') modalItemBilling({ edit: no });
+    if (what === 'delivered') runAction(function () { setBillingNoteStatus(no, 'delivered'); toast('ใบวางบิล ' + no + ' — วางบิลแล้ว', 'ok'); });
+    if (what === 'reset') runAction(function () { setBillingNoteStatus(no, 'issued'); toast('ใบวางบิล ' + no + ' — รีเซ็ตเป็นรอวางบิล', 'ok'); });
+    if (what === 'toinvoice' && needOpen()) modalInvoice('credit', { from: { kind: 'billingNote', no } });
+    if (what === 'tocash' && needOpen()) modalInvoice('cash', { from: { kind: 'billingNote', no } });
+    return true;
+  }
+  if (head === 'trade' && rest[1] === 'reset' && (rest[0] === 'quotation' || rest[0] === 'salesOrder')) {
+    const docNo = rest.slice(2).join(':');
+    runAction(function () { resetSalesDoc(rest[0], docNo); toast(TRADE_DOCS[rest[0]].label + ' ' + docNo + ' — รีเซ็ตเป็นรออนุมัติ', 'ok', 'แก้ไขได้แล้ว'); });
+    return true;
+  }
+  return false;
+});
+/* เมนูสร้างเอกสาร: ใบวางบิล/ใบแจ้งหนี้ (ก่อนออกใบกำกับ) ต่อจากใบวางบิลรวม */
+(function () {
+  const sale = CREATE_MENU.find((x) => x.s === 'เอกสารขาย');
+  if (!sale) return;
+  const i = sale.items.findIndex((x) => x[0] === 'new:billingnote');
+  sale.items.splice(i >= 0 ? i + 1 : sale.items.length, 0, ['new:billingdoc', 'ใบวางบิล/ใบแจ้งหนี้ (ก่อนออกใบกำกับ)']);
+})();
 
 /** ยกเลิกเอกสาร — เหตุผลเข้าร่องรอยการตรวจสอบ */
 function modalReason(o) {

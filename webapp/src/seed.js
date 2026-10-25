@@ -425,7 +425,7 @@ function generateTransactions() {
       }
       if (!lines.length) continue;
       issueInvoice({ date: mo + '-' + String(rint(2, Math.min(28, last))).padStart(2, '0'),
-                     partnerCode: c.code, lines });
+                     partnerCode: c.code, lines, delivered: true });
     }
 
     // ---- เติมสต๊อกตามที่ขายไปจริง (นโยบายจุดสั่งซื้อ) ----

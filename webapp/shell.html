@@ -543,6 +543,13 @@ details.adv .flds{margin-bottom:10px}
 .kv div{padding:12px var(--space-md); border-bottom:1px solid var(--color-rule); border-right:1px solid var(--color-rule)}
 .kv span{display:block; font-size:var(--text-xs); color:var(--color-muted)}
 .kv b{font-weight:600; font-size:14px}
+/* หัวเอกสารในหน้ารายละเอียด — หมายเหตุและโน้ตภายในเต็มแถว · โน้ตภายในมีเส้นนำหน้าให้รู้ว่าไม่พิมพ์ */
+.kv.doc-info{border-top:1px solid var(--color-rule)}
+.kv .wide{grid-column:1/-1}
+.kv p{margin:var(--space-3xs) 0 0; font-size:14px; color:var(--color-ink); white-space:pre-line; overflow-wrap:anywhere}
+.kv .internal{box-shadow:inset 3px 0 0 var(--color-warn); background:var(--color-warn-soft)}
+.kv .internal span{color:var(--color-ink-2); font-weight:600}
+.rc-adj select{min-width:200px}
 .chips{display:flex; flex-wrap:wrap; gap:6px}
 .set-rows{display:grid; gap:0}
 .set-rows > div{display:grid; grid-template-columns:1fr; gap:6px 16px; align-items:center; padding:12px var(--space-md); border-top:1px solid var(--color-rule)}
@@ -824,6 +831,7 @@ button.st-btn:focus-visible{outline:2px solid var(--color-focus); outline-offset
 .sheet .p-sum div:first-child{border-top:0}
 .sheet .p-sum .g{font-weight:700; border-top:1.5px solid var(--print-ink); background:var(--print-fill)}
 .sheet .p-note{margin-top:8px; font-size:12pt}
+.sheet .p-memo{white-space:pre-line}
 .sheet .p-sign{margin-top:auto; padding-top:18mm; display:grid; gap:12mm; grid-template-columns:repeat(var(--n,3),1fr); text-align:center; font-size:12pt}
 .sheet .p-sign div{border-top:1px dotted var(--print-ink); padding-top:4px}
 .sheet .p-sign small{display:block; font-size:10.5pt}

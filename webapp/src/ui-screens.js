@@ -50,13 +50,13 @@ function fsRows(lines, ctx) {
 const NOJE = (why) => [['none', why]];
 const PAGE_INFO = {
   close:        { d:'ตรวจรายการก่อนปิดให้ผ่านครบแล้วจึงปิดงวด — งวดที่ปิดแล้วลงรายการย้อนหลังไม่ได้ (พ.ร.บ.การบัญชี ม.20)' },
-  quotations:   { d:'เสนอราคาให้ลูกค้า ยืนราคา 30 วัน ลูกค้าตอบรับแล้วแปลงเป็นใบสั่งขายได้ในปุ่มเดียว', je: NOJE('ยังไม่ลงบัญชี') },
+  quotations:   { d:'เสนอราคาให้ลูกค้า ยืนราคา 30 วัน อนุมัติแล้วกดป้ายสถานะเพื่อสร้างใบสั่งขาย ใบวางบิล/ใบแจ้งหนี้ ใบกำกับภาษี หรือขายเงินสด — ข้อมูลตามไปครบ', je: NOJE('ยังไม่ลงบัญชี') },
   salesorders:  { d:'ยืนยันคำสั่งซื้อของลูกค้า แปลงเป็นใบกำกับภาษีเมื่อส่งมอบสินค้าหรือบริการ', je: NOJE('ยังไม่ลงบัญชี') },
-  invoices:     { d:'ขายเชื่อ ออกครบตามมาตรา 86/4 ระบบตัดสต๊อกและต้นทุนขายให้เอง',
+  invoices:     { d:'ขายเชื่อ ออกครบตามมาตรา 86/4 ระบบตัดสต๊อกและต้นทุนขายให้เอง · ใบใหม่รอดำเนินการ (แก้ไขได้) จนกดส่งให้ลูกค้า · ออกพร้อมรับเงินได้',
                   je: [['dr','ลูกหนี้การค้า'], ['cr','รายได้จากการขาย · ภาษีขาย']], book:'สมุดรายวันขาย' },
   cashsales:    { d:'ขายปลีกหน้าร้าน รับเงินทันที ออกใบกำกับภาษีอย่างย่อ (ม.86/6) ไม่ต้องมีข้อมูลผู้ซื้อ — ตัดสต๊อกและเข้ารายงานภาษีขายให้เอง',
                   je: [['dr','เงินสด / เงินฝากธนาคาร'], ['cr','รายได้ · ภาษีขาย']], book:'สมุดรายวันรับ' },
-  billingnotes: { d:'รวบใบกำกับที่ค้างของลูกค้ารายเดียวไปวางเก็บเงินครั้งเดียว พร้อมวันนัดชำระ', je: NOJE('ไม่ลงบัญชี — ใช้นัดเก็บเงิน') },
+  billingnotes: { d:'ใบวางบิล/ใบแจ้งหนี้ก่อนออกใบกำกับภาษี (เปิดบิลเป็นใบกำกับเมื่อพร้อม) หรือรวบใบกำกับที่ค้างของลูกค้ารายเดียวไปวางเก็บเงินครั้งเดียว', je: NOJE('ไม่ลงบัญชี — ตัวเลขเข้าบัญชีตอนออกใบกำกับหรือรับชำระ') },
   receipts:     { d:'รับชำระหนี้จากลูกค้า ต้องอ้างใบกำกับเสมอ ภาษีที่ลูกค้าหักไว้เก็บเป็นเครดิตภาษีปลายปี',
                   je: [['dr','เงินฝากธนาคาร · ภาษีถูกหัก ณ ที่จ่าย'], ['cr','ลูกหนี้การค้า']], book:'สมุดรายวันรับ' },
   creditnotes:  { d:'ลดหนี้ตามมาตรา 86/10 — รับคืนสินค้า ลดราคา หรือคิดเงินเกิน ต้องอ้างใบกำกับเดิม',
@@ -462,34 +462,39 @@ function invoiceDetail(no) {
   const cns = DB.docs.creditNote.filter((c) => c.invoiceNo === no);
   const dns = DB.docs.debitNote.filter((c) => c.invoiceNo === no);
   const rfs = (DB.docs.customerRefund || []).filter((c) => c.invoiceNo === no);
+  const src = docSourceOf(d);
+  /* รอดำเนินการ = ยังไม่ส่งให้ลูกค้า แก้ไขได้ · ส่งแล้วรีเซ็ตกลับได้ถ้ายังไม่มีเอกสารอ้างถึง */
+  const pending = !isVoid(d) && d.delivered === false;
+  const bns = DB.docs.billingNote.filter((b) => !isItemBilling(b) && b.invoices.some((i) => i.no === no));
   return card({
     title: 'ใบกำกับภาษี/ใบส่งของ เลขที่ ' + d.no,
-    sub: 'ออกวันที่ ' + thDate(d.date) + ' · ครบกำหนด ' + thDate(d.due)
-      + (d.fromDoc ? ' · จาก' + (d.soNo ? 'ใบสั่งขาย ' : 'ใบเสนอราคา ') + d.fromDoc : ''),
-    actions: (out > 0 ? btn('pay:' + d.no, 'รับชำระเงิน', 'primary') : '')
+    sub: 'ออกวันที่ ' + thDate(d.date) + ' · ' + (showDue(d) ? 'ครบกำหนด ' + thDate(d.due) : creditTermText(d))
+      + ' · ' + docStatusLabel('invoice', d)
+      + (src ? ' · จาก' + src.label + ' ' + src.no : '') + (d.revision ? ' · แก้ไขแล้ว ' + d.revision + ' ครั้ง' : ''),
+    actions: (pending ? btn('inv:edit:' + d.no, 'แก้ไข') + btn('inv:deliver:' + d.no, 'ส่งให้ลูกค้าแล้ว') : '')
+      + (out > 0 ? btn('pay:' + d.no, 'รับชำระเงิน', 'primary') : '')
       + (out < 0 ? btn('refund:' + d.no, 'คืนเงินลูกค้า ' + fmt(-out), 'primary') : '')
       + (!isVoid(d) && creditableBase(d) > 0 ? btn('cn:' + d.no, 'ออกใบลดหนี้') : '')
       + (d.status !== 'void' ? btn('dn:' + d.no, 'ออกใบเพิ่มหนี้') : '')
       + settleInvoiceActions(d)
+      + (!pending && invoiceResettable(d) ? btn('inv:reset:' + d.no, 'รีเซ็ตเป็นรอดำเนินการ') : '')
+      + (src ? btn('open:' + src.screen + ':' + src.no, 'ดู' + src.label + ' ' + src.no) : '')
       + printBtn('invoice', d.no) + btn('entry:' + d.entryNo, 'ดูใบสำคัญ') + voidBtn('invoice', d) + btn('sel:', 'ปิด'),
     body: voidBanner(d)
+      + (pending ? '<div class="note">รอดำเนินการ — ยังไม่ได้ส่งให้ลูกค้า แก้ไขได้ด้วยเลขที่เดิม (ระบบกลับรายการใบสำคัญเดิมและลงใหม่ให้)'
+        + ' · กด "ส่งให้ลูกค้าแล้ว" เมื่อส่งเอกสารออกไป</div>' : '')
       + '<div class="docgrid">'
       + '<div><div class="dim">ผู้ขาย (ตามที่พิมพ์บนใบกำกับ)</div><b>' + esc(DB.company.name) + '</b>'
       + '<div>' + esc(DB.company.address) + '</div>'
       + '<div>เลขประจำตัวผู้เสียภาษี ' + esc(DB.company.taxId) + ' · ' + esc(DB.company.branchName) + '</div></div>'
-      + '<div><div class="dim">ผู้ซื้อ (ข้อมูล ณ วันที่ออกเอกสาร)</div><b>' + esc(d.snap.name) + '</b>'
+      + '<div><div class="dim">ผู้ซื้อ (ข้อมูล ณ วันที่ออกเอกสาร' + (d.snap.edited ? ' · แก้บนใบนี้' : '') + ')</div><b>' + esc(d.snap.name) + '</b>'
       + '<div>' + esc(d.snap.address) + '</div>'
-      + '<div>' + esc(buyerIdLine(d.snap)) + '</div></div>'
+      + '<div>' + esc(buyerIdLine(d.snap)) + '</div>'
+      + (d.snap.contactPerson || d.snap.phone ? '<div>' + esc([d.snap.contactPerson, d.snap.phone].filter(Boolean).join(' · ')) + '</div>' : '') + '</div>'
       + '</div>'
-      + tbl({
-          cols:[{t:'รายการ'},{t:'จำนวน',a:'r'},{t:'หน่วย'},{t:'ราคาต่อหน่วย',a:'r'},{t:'ภาษี'},{t:'บัญชีรายได้'},{t:'จำนวนเงิน',a:'r'}],
-          rows: d.lines.map((l) => [l.desc, {n:M(String(l.qty))}, l.uom || '—', {n:l.price},
-            l.taxCode === 'VAT7' ? 'VAT 7%' : l.taxCode === 'VAT0' ? 'อัตรา 0%' : 'ยกเว้น', accLabel(l.acc), {n:l.amount}]),
-        })
-      + '<div class="totals">' + settleInvoiceTotals(d, 'top')
-      + '<div><span>มูลค่าก่อนภาษี</span><b>' + fmt(d.base) + '</b></div>'
-      + '<div><span>ภาษีมูลค่าเพิ่ม 7%</span><b>' + fmt(d.vat) + '</b></div>'
-      + '<div class="gt"><span>จำนวนเงินรวมทั้งสิ้น</span><b>' + fmt(d.total) + '</b></div>'
+      + docInfoHtml(d, 'customer')
+      + docLinesTable(d, [{t:'บัญชีรายได้'}], (l) => [accLabel(l.acc)])
+      + '<div class="totals">' + docTotalsHtml(d)
       + whtTotalsHtml(d, 'customer')
       + (d.paid ? '<div><span>รับชำระแล้ว</span><b>' + fmt(d.paid) + '</b></div>' : '')
       + (d.credited ? '<div><span>ลดหนี้แล้ว</span><b>' + fmt(d.credited) + '</b></div>' : '')
@@ -515,11 +520,31 @@ function invoiceDetail(no) {
           rows: rfs.map((c) => [{mono:c.no}, thDateNum(c.date), PAY_METHOD[c.method] || c.method, {n:c.amount},
             statusPill(c.status || 'posted'), {html: isVoid(c) ? '' : btn('void:customerRefund:' + c.no, 'ยกเลิก', 'danger')}]),
           rowAttr: (r, i) => isVoid(rfs[i]) ? 'class="is-void"' : '' }) : '')
+      + (bns.length ? '<div class="sub-h">ใบวางบิลที่มีใบนี้</div>' + tbl({
+          cols:[{t:'เลขที่'},{t:'วันที่วางบิล'},{t:'นัดชำระ'},{t:'สถานะ'}],
+          rows: bns.map((b) => [{mono:b.no}, thDateNum(b.date), thDateNum(b.dueDate), {st: DOC_STATUS.billingNote(b)}]),
+          rowAttr: (r) => 'class="row-link" data-act="open:billingnotes:' + r[0].mono + '"' }) : '')
+      + revisionsHtml(d)
       + settleInvoiceSection(d),
     foot: isVoid(d)
       ? 'ใบกำกับที่ยกเลิกยังอยู่ในรายงานภาษีขายด้วยยอดศูนย์ เลขที่จึงเรียงต่อเนื่องไม่ขาดช่วง · ถ้าต้องเก็บเงินจริงให้ออกใบกำกับใบใหม่'
       : 'ครบองค์ประกอบตามมาตรา 86/4 · ส่งกรมสรรพากรแบบ e-Tax Invoice แล้ว (จำลอง)'
         + ' · ยกเลิกได้เฉพาะใบที่ยังไม่มีเอกสารอ้างถึงและยังไม่ยื่น ภ.พ.30 ถ้ายื่นแล้วให้ออกใบลดหนี้',
+  });
+}
+/** รีเซ็ตเป็นรอดำเนินการได้หรือไม่ (ไม่มีเอกสารอ้างถึง งวดเปิด ยังไม่ยื่น ภ.พ.30) — ใช้ซ่อน/แสดงปุ่ม */
+function invoiceResettable(d) {
+  if (!d || isVoid(d)) return false;
+  try { assertInvoiceEditable(d, 'รีเซ็ต'); return true; } catch (e) { return false; }
+}
+/** ประวัติการแก้ไขของเอกสาร — ยอดเดิม ใบสำคัญเดิม (กลับรายการแล้ว) และเหตุผล */
+function revisionsHtml(d) {
+  const rv = d.revisions || [];
+  if (!rv.length) return '';
+  return '<div class="sub-h">ประวัติการแก้ไข</div>' + tbl({
+    cols:[{t:'ครั้งที่',a:'c'},{t:'แก้เมื่อ'},{t:'วันที่เดิม'},{t:'ลูกค้าเดิม'},{t:'ยอดเดิม',a:'r'},{t:'ใบสำคัญเดิม'},{t:'เหตุผล'}],
+    rows: rv.slice().reverse().map((r) => [{c:String(r.rev)}, thDate(String(r.at).slice(0, 10)), thDateNum(r.date), r.partnerName,
+      {n:r.total}, r.entryNo ? {html: btn('entry:' + r.entryNo, r.entryNo)} : '—', r.reason || {dim:'—'}]),
   });
 }
 
@@ -531,6 +556,103 @@ function buyerIdLine(snap) {
     + (s.branch ? ' · ' + (s.branch === '00000' ? 'สำนักงานใหญ่' : 'สาขาที่ ' + s.branch) : '');
 }
 const accLabel = (code) => { const a = code && DB.accounts.find((x) => x.code === code); return a ? a.code + ' ' + a.name : '—'; };
+
+/* ---------- หัวเอกสารและยอดท้ายเอกสารแบบเอกสารธุรกิจ — ใช้ทั้งหน้ารายละเอียดและเอกสารพิมพ์ ----------
+   ใบที่บันทึกก่อนมีส่วนลด/เงื่อนไขชำระ (ไม่มี totals creditType) คิดจากบรรทัดและวันครบกำหนดเดิม */
+/** เงื่อนไขชำระ: เงินสด · เครดิต N วัน · เครดิต (ไม่แสดงวันครบกำหนด) — ใบรุ่นก่อนนับวันจากวันครบกำหนด */
+function creditTermText(d, forPrint) {
+  const days = d.creditDays !== undefined && d.creditDays !== null ? d.creditDays
+    : d.due ? Math.round((Date.parse(d.due) - Date.parse(d.date)) / 86400000) : 0;
+  const t = d.creditType || (days > 0 ? 'credit' : 'cash');
+  if (t === 'cash') return 'เงินสด';
+  if (t === 'creditHidden') return forPrint ? 'เครดิต' : 'เครดิต ' + days + ' วัน (ไม่พิมพ์วันครบกำหนด)';
+  return days > 0 ? 'เครดิต ' + days + ' วัน' : 'เงินสด';
+}
+/** วันครบกำหนดที่แสดงได้ — เงินสดและเครดิตไม่แสดงวันครบกำหนด ไม่มี */
+const showDue = (d) => !!d.due && d.creditType !== 'cash' && d.creditType !== 'creditHidden' && creditTermText(d) !== 'เงินสด';
+/** ยอดท้ายเอกสาร: รวมเป็นเงิน (หลังส่วนลดรายการ) → ส่วนลด → ราคาหลังหักส่วนลด → [หักเงินมัดจำ] → ยอดยกเว้น/0%
+    → มูลค่าที่คำนวณภาษี → ภาษี → รวมทั้งสิ้น · หักเงินมัดจำแล้วมูลค่าและภาษีเป็นยอดที่ลงบัญชีจริง */
+function docTotalsOf(d) {
+  const lines = d.lines || [];
+  const t = d.totals;
+  const bucket = (code) => (code === 'VAT0' || code === 'EXEMPT' ? 'ex' : 'std');
+  const sumBy = (b) => lines.reduce((s, l) => s + (bucket(l.taxCode || 'VAT7') === b ? l.amount : 0), 0);
+  const incl = t ? (d.pricing && d.pricing.mode === 'inclusive') : !!d.vatInclusive;
+  const subTotal = t ? t.subTotal - t.lineDiscount
+    : lines.reduce((s, l) => s + (incl && l.gross !== undefined ? l.gross : l.amount), 0);
+  const billDiscount = t ? t.billDiscount : 0;
+  const afterDiscount = t ? t.afterDiscount : subTotal;
+  const dep = { std: 0, ex: 0 };
+  (d.deposits || []).forEach((r) => { dep[bucket(r.taxCode || 'VAT7')] += r.base; });
+  const vatable = (t ? t.vatable : sumBy('std')) - dep.std;
+  const exempt = (t ? t.exempt : sumBy('ex')) - dep.ex;
+  const bill = d.pricing && d.pricing.bill;
+  return { incl, subTotal, lineDiscount: t ? t.lineDiscount : 0, billDiscount, afterDiscount,
+    billLabel: bill && bill.kind === 'percent' ? 'ส่วนลด ' + bill.value + '%' : 'ส่วนลด',
+    deposit: d.depositBase || 0, depositNos: (d.deposits || []).map((r) => r.no),
+    exempt, vatable, vat: d.vat, total: d.total, rate: (resolveRate('VAT7', d.date) || {}).rate || '7' };
+}
+/** แถวยอดท้ายเอกสาร [ชื่อ, จำนวนเงิน, ตัวหนา?] — ชุดเดียวกันทั้งจอและเอกสารพิมพ์ */
+function docTotalsRows(d) {
+  const x = docTotalsOf(d);
+  const out = [['รวมเป็นเงิน', x.subTotal], [x.billLabel, x.billDiscount], ['ราคาหลังหักส่วนลด', x.afterDiscount]];
+  if (x.deposit) out.push(['หัก เงินมัดจำ ' + x.depositNos.join(', '), x.deposit]);
+  if (x.exempt) out.push(['ยอดยกเว้นภาษี / อัตรา 0%', x.exempt]);
+  out.push(['มูลค่าที่คำนวณภาษี', x.vatable], ['ภาษีมูลค่าเพิ่ม ' + x.rate + '%', x.vat], ['จำนวนเงินรวมทั้งสิ้น', x.total, true]);
+  return out;
+}
+const docTotalsHtml = (d) => docTotalsRows(d).map((r) => '<div' + (r[2] ? ' class="gt"' : '') + '><span>' + esc(r[0]) + '</span><b>'
+  + fmt(r[1]) + '</b></div>').join('');
+/** หัวเอกสารในหน้ารายละเอียด — เงื่อนไขชำระ วันครบกำหนด โปรเจกต์ พนักงานขาย เลขอ้างอิง หมายเหตุ และโน้ตภายใน (ไม่พิมพ์) */
+function docInfoHtml(d, side) {
+  const rows = [['เงื่อนไขชำระ', creditTermText(d)], showDue(d) ? ['ครบกำหนด', thDate(d.due)] : null,
+    d.pricing && d.pricing.mode === 'inclusive' ? ['ราคา', 'ราคารวมภาษีมูลค่าเพิ่มแล้ว'] : null,
+    d.project ? ['โปรเจกต์', d.project] : null, d.salesName ? [side === 'vendor' ? 'ผู้จัดทำ' : 'พนักงานขาย', d.salesName] : null,
+    d.reference ? ['เลขที่อ้างอิง', d.reference] : null].filter(Boolean);
+  return '<div class="kv doc-info">' + rows.map((r) => '<div><span>' + esc(r[0]) + '</span><b>' + esc(r[1]) + '</b></div>').join('')
+    + (d.note ? '<div class="wide"><span>หมายเหตุ (พิมพ์บนเอกสาร)</span><p>' + esc(d.note) + '</p></div>' : '')
+    + (d.internalNote ? '<div class="wide internal"><span>โน้ตภายใน — ไม่พิมพ์ เห็นเฉพาะในระบบ</span><p>' + esc(d.internalNote) + '</p></div>' : '')
+    + '</div>';
+}
+/** ตารางรายการแบบเอกสารธุรกิจ — คอลัมน์ส่วนลดขึ้นเมื่อมีบรรทัดที่มีส่วนลด · จำนวนเงิน = หลังหักส่วนลดรายการ ตามแบบราคาของใบ */
+function docLinesTable(d, extraCols, extraCells) {
+  const disc = (d.lines || []).some((l) => lineDiscText(l.disc));
+  const pctUnit = !d.pricing || d.pricing.lineDisc !== 'amount';
+  const incl = docTotalsOf(d).incl;
+  const amt = (l) => lineShownAmount(d, l, incl);
+  return tbl({
+    cols: [{t:'รายการ'}, {t:'จำนวน',a:'r'}, {t:'หน่วย'}, {t:'ราคาต่อหน่วย',a:'r'}]
+      .concat(disc ? [{t:'ส่วนลด' + (pctUnit ? ' (%)' : ''),a:'r'}] : [])
+      .concat([{t:'ภาษี'}]).concat(extraCols || []).concat([{t: incl ? 'จำนวนเงิน (รวมภาษี)' : 'จำนวนเงิน',a:'r'}]),
+    rows: d.lines.map((l, i) => [l.desc, {n:M(String(l.qty))}, l.uom || '—', {n:l.price}]
+      .concat(disc ? [lineDiscText(l.disc) ? {c: lineDiscText(l.disc) + (pctUnit ? '%' : '')} : ''] : [])
+      .concat([l.taxCode === 'VAT7' ? 'VAT 7%' : l.taxCode === 'VAT0' ? 'อัตรา 0%' : 'ยกเว้น'])
+      .concat(extraCells ? extraCells(l, i) : []).concat([{n: amt(l)}])),
+  });
+}
+/** ส่วนลดของบรรทัดเป็นบาท — คิดใหม่จากที่กรอก (เปอร์เซ็นต์หรือบาทตามใบ) ด้วยสูตรเดียวกับตอนลงบัญชี */
+function lineDiscAmount(d, l) {
+  try { return discountOf(l.gross, l.disc, (d.pricing && d.pricing.lineDisc) || 'percent', 'ส่วนลด'); } catch (e) { return 0; }
+}
+/** จำนวนเงินของบรรทัดที่แสดง/พิมพ์ = จำนวน × ราคา − ส่วนลดรายการ (ตามแบบราคาของใบ) — รวมกันเท่า "รวมเป็นเงิน" พอดี */
+function lineShownAmount(d, l, incl) {
+  if (d.totals && l.gross !== undefined) return l.gross - lineDiscAmount(d, l);
+  return incl && l.gross !== undefined ? l.gross : l.amount;
+}
+/** การกระทำที่เปิดเอกสารเลขที่นี้ (ใบเสนอราคา ใบสั่งขาย ใบวางบิล ใบกำกับ ขายเงินสด รายการตั้งหนี้) — ไม่พบ = null */
+function openDocAct(no) {
+  const map = [['invoice', 'invoices'], ['salesOrder', 'salesorders'], ['billingNote', 'billingnotes'], ['cashSale', 'cashsales'],
+    ['quotation', 'quotations'], ['bill', 'bills']];
+  const hit = map.find((m) => (DB.docs[m[0]] || []).some((x) => x.no === no));
+  return hit ? 'open:' + hit[1] + ':' + no : null;
+}
+/** เอกสารต้นทางของเอกสารนี้ { kind, no, screen, label } — ใบรุ่นก่อนไม่มีชนิด หาจากเลขที่ */
+function docSourceOf(d) {
+  if (!d || !d.fromDoc) return null;
+  const kind = d.fromKind || (d.soNo ? 'salesOrder' : ['quotation', 'salesOrder', 'billingNote'].find((k) => (DB.docs[k] || []).some((x) => x.no === d.fromDoc)));
+  const meta = { quotation:['quotations','ใบเสนอราคา'], salesOrder:['salesorders','ใบสั่งขาย'], billingNote:['billingnotes','ใบวางบิล'] }[kind];
+  return meta ? { kind, no: d.fromDoc, screen: meta[0], label: meta[1] } : null;
+}
 
 function scInvoices() {
   /* ตัวกรอง "ค้างชำระทุกเดือน" ดูใบที่ยังค้างจากทุกงวด — ใบเก่าที่ยังไม่ได้เก็บเงินต้องไม่หายไปเพราะเปลี่ยนเดือน
@@ -547,8 +669,8 @@ function scInvoices() {
       filters: listFilters('invoices', 'ค้นหาเลขที่หรือชื่อลูกค้า', base),
       body: tbl({
         cols:[{t:'เลขที่'},{t:'วันที่'},{t:'ลูกค้า'},{t:'ครบกำหนด'},{t:'ก่อนภาษี',a:'r'},{t:'ภาษี',a:'r'},{t:'รวม',a:'r'},{t:'คงเหลือ',a:'r'},{t:'สถานะ'}],
-        rows: rows.map((d) => [{mono:d.no}, thDateNum(d.date), d.partnerName, thDateNum(d.due),
-          {n:d.base}, {n:d.vat}, {n:d.total}, {n:invOutstanding(d)}, statusPill(d.status)]),
+        rows: rows.map((d) => [{mono:d.no}, thDateNum(d.date), d.partnerName, showDue(d) ? thDateNum(d.due) : {dim: creditTermText(d)},
+          {n:d.base}, {n:d.vat}, {n:d.total}, {n:invOutstanding(d)}, docStatusCell('invoice', d)]),
         rowAttr: (r, i) => rowCls(rows[i]) + ' data-act="sel:' + r[0].mono + '"',
         foot: ['รวม', '', '', '', {n:totals.base}, {n:totals.vat}, {n:totals.total}, {n:liveOnly(rows).reduce((s, d) => s + invOutstanding(d), 0)}, ''],
         empty: 'ยังไม่มีใบกำกับภาษีในงวดนี้',
@@ -565,22 +687,20 @@ function cashSaleDetail(no) {
   const d = DB.docs.cashSale.find((x) => x.no === no);
   if (!d) return '';
   const payAcc = DB.accounts.find((a) => a.code === d.payTo);
+  const src = docSourceOf(d);
   return card({
     title:'ใบกำกับภาษีอย่างย่อ เลขที่ ' + d.no,
     sub:'ขายเงินสดวันที่ ' + thDate(d.date) + ' · ' + (d.buyerName || 'ลูกค้าทั่วไป')
-      + ' · ' + (d.vatInclusive ? 'ราคารวมภาษีแล้ว' : 'ราคายังไม่รวมภาษี'),
-    actions: printBtn('cashSale', d.no) + btn('entry:' + d.entryNo, 'ดูใบสำคัญ') + voidBtn('cashSale', d) + btn('sel:', 'ปิด'),
+      + ' · ' + (d.vatInclusive ? 'ราคารวมภาษีแล้ว' : 'ราคายังไม่รวมภาษี') + (src ? ' · จาก' + src.label + ' ' + src.no : ''),
+    actions: (src ? btn('open:' + src.screen + ':' + src.no, 'ดู' + src.label + ' ' + src.no) : '')
+      + printBtn('cashSale', d.no) + btn('entry:' + d.entryNo, 'ดูใบสำคัญ') + voidBtn('cashSale', d) + btn('sel:', 'ปิด'),
     body: voidBanner(d)
-      + tbl({
-          cols:[{t:'รายการ'},{t:'จำนวน',a:'r'},{t:'ราคาต่อหน่วย',a:'r'},{t:'ภาษี'},{t:'บัญชีรายได้'},{t:'ก่อนภาษี',a:'r'},
-            {t: d.vatInclusive ? 'รวมภาษี' : 'จำนวนเงิน', a:'r'}],
-          rows: d.lines.map((l) => [l.desc, {n:M(String(l.qty))}, {n:l.price},
-            l.taxCode === 'VAT7' ? 'VAT 7%' : l.taxCode === 'VAT0' ? 'อัตรา 0%' : 'ยกเว้น', accLabel(l.acc), {n:l.amount}, {n:l.gross}]),
-        })
-      + '<div class="totals">'
-      + '<div><span>มูลค่าก่อนภาษี</span><b>' + fmt(d.base) + '</b></div>'
-      + '<div><span>ภาษีมูลค่าเพิ่ม</span><b>' + fmt(d.vat) + '</b></div>'
-      + '<div class="gt"><span>รับเงินทั้งสิ้น</span><b>' + fmt(d.total) + '</b></div>'
+      + (d.snap ? '<div class="docgrid"><div><div class="dim">ผู้ซื้อ' + (d.snap.edited ? ' (แก้บนใบนี้)' : '') + '</div><b>' + esc(d.buyerName || d.snap.name) + '</b>'
+        + '<div>' + esc(d.snap.address || '') + '</div><div>' + esc(buyerIdLine(d.snap)) + '</div></div></div>' : '')
+      + docInfoHtml(d, 'customer')
+      + docLinesTable(d, [{t:'บัญชีรายได้'}], (l) => [accLabel(l.acc)])
+      + '<div class="totals">' + docTotalsHtml(d)
+      + '<div><span>รับชำระโดย</span><b>' + esc(RECEIPT_METHODS[d.method] || d.method) + '</b></div>'
       + '<div><span>รับเข้าบัญชี</span><b>' + esc(payAcc ? payAcc.code + ' ' + payAcc.name : d.payTo) + '</b></div>'
       + '</div>',
     foot: isVoid(d) ? 'ยกเลิกแล้ว — รายงานภาษีขายแสดงใบนี้ว่า "ยกเลิก" ยอดเป็นศูนย์ และคืนสินค้าเข้าคลังแล้ว'
@@ -601,8 +721,8 @@ function scCashSales() {
     body: tbl({
       cols:[{t:'เลขที่'},{t:'วันที่'},{t:'ผู้ซื้อ'},{t:'รับชำระโดย'},{t:'ก่อนภาษี',a:'r'},{t:'ภาษี',a:'r'},{t:'รับเงิน',a:'r'},{t:'สถานะ'}],
       rows: rows.map((d) => [{mono:d.no}, thDateNum(d.date), d.buyerName || {dim:'ลูกค้าทั่วไป'},
-        ({ cash:'เงินสด', transfer:'โอนเงิน', card:'บัตร' })[d.method] || d.method,
-        {n:d.base}, {n:d.vat}, {n:d.total}, statusPill(d.status)]),
+        RECEIPT_METHODS[d.method] || d.method,
+        {n:d.base}, {n:d.vat}, {n:d.total}, docStatusCell('cashSale', d)]),
       rowAttr: (r, i) => rowCls(rows[i]) + ' data-act="sel:' + r[0].mono + '"',
       foot: rows.length ? ['รวม', '', '', '', {n:t.base}, {n:t.vat}, {n:t.total}, ''] : null,
       empty:'ยังไม่มีการขายเงินสดในงวดนี้',
@@ -634,12 +754,19 @@ function receiptDetail(no) {
     actions: btn('open:invoices:' + d.invoiceNo, 'ดูใบกำกับ ' + d.invoiceNo)
       + (d.excess ? btn('open:deposits:' + d.no, 'ดูเครดิตรับเกิน') : ''),
     kv:[['อ้างใบกำกับภาษี', d.invoiceNo], d.billingNoteNo ? ['ตามใบวางบิล', d.billingNoteNo] : null,
-      ['วิธีรับเงิน', PAY_METHOD[d.method] || d.method],
-      d.bankAccount ? ['รับเข้าบัญชี', d.bankAccount + ' ' + acc(d.bankAccount).name] : null, ['รับก่อนหัก', fmt(d.gross)],
-      ['ลูกค้าหัก ณ ที่จ่าย' + (d.whtRate ? ' ' + d.whtRate + '%' : ''), fmt(d.wht)],
+      ['วิธีรับเงิน', RECEIPT_METHODS[d.method] || PAY_METHOD[d.method] || d.method],
+      d.payerBank ? ['ธนาคารของผู้โอน', d.payerBank] : null,
+      d.chequeNo || d.chequeBank ? ['เช็ค', [d.chequeNo ? 'เลขที่ ' + d.chequeNo : '', d.chequeDate ? 'ลงวันที่ ' + thDate(d.chequeDate) : '',
+        d.chequeBank || ''].filter(Boolean).join(' · ')] : null,
+      d.bankAccount ? ['รับเข้าบัญชี', d.bankAccount + ' ' + acc(d.bankAccount).name] : null, ['ยอดที่ชำระ (ก่อนหัก)', fmt(d.gross)],
+      ['ลูกค้าหัก ณ ที่จ่าย' + (d.whtRate ? ' ' + d.whtRate + '%' : d.whtManual ? ' (ตาม 50 ทวิ)' : ''), fmt(d.wht)],
+      d.fee ? ['ค่าธรรมเนียมธนาคาร', fmt(d.fee)] : null]
+      .concat((d.adjustments || []).map((a) => [a.label + ' (' + a.acc + ')', fmt(a.amount)]))
+      .concat([d.gap ? [(RECEIPT_GAP[d.gapType] || {}).label + (d.gap > 0 ? ' (ขาด)' : ' (เกิน)'), fmt(Math.abs(d.gap))] : null,
       d.diff ? ['ปิดส่วนต่างเป็น' + ((RECEIPT_DIFF[d.diffType] || {}).label || ''), fmt(d.diff)] : null,
-      d.excess ? ['รับเกิน (เครดิตของลูกค้า)', fmt(d.excess)] : null, ['รับสุทธิ', fmt(d.net)],
-      ['สถานะ', isVoid(d) ? 'ยกเลิก' : 'ลงบัญชีแล้ว']],
+      d.excess ? ['รับเกิน (เครดิตของลูกค้า)', fmt(d.excess)] : null, ['รับสุทธิเข้าบัญชี', fmt(d.net)],
+      d.note ? ['หมายเหตุ', d.note] : null,
+      ['สถานะ', isVoid(d) ? 'ยกเลิก' : 'ลงบัญชีแล้ว']]),
     foot: isVoid(d) ? 'ยอดคงค้างของใบกำกับ ' + d.invoiceNo + ' กลับไปเหมือนก่อนรับชำระแล้ว'
       : 'ยกเลิกใบเสร็จแล้ว ระบบกลับรายการ ณ วันที่เดิม และยอดคงค้างของใบกำกับกลับไปเหมือนเดิม',
   });
@@ -657,8 +784,8 @@ function scReceipts() {
       cols:[{t:'เลขที่'},{t:'วันที่'},{t:'ลูกค้า'},{t:'อ้างใบกำกับ'},{t:'วิธีรับ'},{t:'รับก่อนหัก',a:'r'},{t:'ลูกค้าหักไว้',a:'r'},{t:'รับสุทธิ',a:'r'},{t:'สถานะ'}],
       rows: rows.map((d) => [{mono:d.no}, thDateNum(d.date), d.partnerName,
         {mono:d.invoiceNo + (d.billingNoteNo ? ' · ' + d.billingNoteNo : '')},
-        d.method === 'cash' ? 'เงินสด' : d.method === 'cheque' ? 'เช็ค' : 'โอนเงิน',
-        {n:d.gross}, {n:d.wht}, {n:d.net}, statusPill(d.status || 'posted')]),
+        RECEIPT_METHODS[d.method] || 'โอนเงิน',
+        {n:d.gross}, {n:d.wht}, {n:d.net}, docStatusCell('receipt', d)]),
       rowAttr: (r, i) => rowCls(rows[i]) + ' data-act="sel:' + r[0].mono + '" title="คลิกเพื่อดูรายละเอียด พิมพ์ หรือยกเลิก"',
       foot: ['รวม','','','','', {n:t.g}, {n:t.w}, {n:t.n}, ''],
       empty:'ยังไม่มีการรับชำระในงวดนี้',
@@ -694,7 +821,7 @@ function scCreditNotes() {
     body: tbl({
       cols:[{t:'เลขที่'},{t:'วันที่'},{t:'ลูกค้า'},{t:'อ้างใบกำกับเดิม'},{t:'เหตุตามกฎหมาย'},{t:'มูลค่า',a:'r'},{t:'ภาษี',a:'r'},{t:'รวม',a:'r'},{t:'สถานะ'}],
       rows: rows.map((d) => [{mono:d.no}, thDateNum(d.date), d.partnerName, {mono:d.invoiceNo},
-        d.reasonText, {n:d.base}, {n:d.vat}, {n:d.total}, statusPill(d.status || 'posted')]),
+        d.reasonText, {n:d.base}, {n:d.vat}, {n:d.total}, docStatusCell('creditNote', d)]),
       rowAttr: (r, i) => rowCls(rows[i]) + ' data-act="sel:' + r[0].mono + '" title="คลิกเพื่อดูรายละเอียด พิมพ์ หรือยกเลิก"',
       foot: rows.length ? ['รวม','','','','', {n:t.base}, {n:t.vat}, {n:t.total}, ''] : null,
       empty:'ไม่มีใบลดหนี้ในงวดนี้',
@@ -1475,7 +1602,7 @@ function scDebitNotes() {
     body: tbl({
       cols:[{t:'เลขที่'},{t:'วันที่'},{t:'ลูกค้า'},{t:'อ้างใบกำกับเดิม'},{t:'เหตุตามกฎหมาย'},{t:'มูลค่า',a:'r'},{t:'ภาษี',a:'r'},{t:'รวม',a:'r'},{t:'สถานะ'}],
       rows: rows.map((d) => [{mono:d.no}, thDateNum(d.date), d.partnerName, {mono:d.invoiceNo},
-        d.reasonText, {n:d.base}, {n:d.vat}, {n:d.total}, statusPill(d.status || 'posted')]),
+        d.reasonText, {n:d.base}, {n:d.vat}, {n:d.total}, docStatusCell('debitNote', d)]),
       rowAttr: (r, i) => rowCls(rows[i]) + ' data-act="sel:' + r[0].mono + '" title="คลิกเพื่อดูรายละเอียด พิมพ์ หรือยกเลิก"',
       foot: rows.length ? ['รวม','','','','', {n:t.base}, {n:t.vat}, {n:t.total}, ''] : null,
       empty:'ไม่มีใบเพิ่มหนี้ในงวดนี้',
@@ -1529,7 +1656,11 @@ function tradeDocDetail(kind, no) {
     actions: ((live || partial) && isPo ? btn('grn:po:' + d.no, partial ? 'รับสินค้าส่วนที่เหลือ' : 'รับสินค้าเข้าคลัง', 'primary') : '')
       + ((live || partial) && isSo ? btn('trade:salesOrder:invoice:' + d.no, partial ? 'ออกใบกำกับส่วนที่เหลือ' : 'ออกใบกำกับภาษี', 'primary') : '')
       + (live && !isSo ? btn('trade:' + kind + ':convert:' + d.no, nextLabel, isPo ? '' : 'primary') : '')
-      + (live && kind === 'quotation' ? btn('trade:quotation:toinvoice:' + d.no, 'ออกใบกำกับภาษีเลย') : '')
+      + (live && kind === 'quotation' ? btn('trade:quotation:toinvoice:' + d.no, 'ออกใบกำกับภาษีเลย')
+        + btn('qt:billing:' + d.no, 'สร้างใบวางบิล') + btn('qt:cash:' + d.no, 'ขายเงินสด') : '')
+      + (cfg.side === 'customer' && (st === 'approved' || st === 'rejected') ? btn('trade:' + kind + ':reset:' + d.no, 'รีเซ็ตเป็นรออนุมัติ') : '')
+      + (d.fromDoc && openDocAct(d.fromDoc) ? btn(openDocAct(d.fromDoc), 'ดู ' + d.fromDoc) : '')
+      + (d.convertedTo && openDocAct(d.convertedTo) ? btn(openDocAct(d.convertedTo), 'ดู ' + d.convertedTo) : '')
       + (editable ? btn('trade:' + kind + ':edit:' + d.no, 'แก้ไข') : '')
       + (st === 'issued' ? btn('trade:' + kind + ':approved:' + d.no,
           isPo ? 'ผู้ขายยืนยันแล้ว' : 'ลูกค้าตอบรับ') : '')
@@ -1541,24 +1672,17 @@ function tradeDocDetail(kind, no) {
       + '<div><div class="dim">' + (cfg.side === 'customer' ? 'ลูกค้า' : 'ผู้ขาย') + '</div>'
       + '<b>' + esc(d.partnerName) + '</b>'
       + '<div>' + esc(d.snap ? d.snap.address : '') + '</div></div>'
-      + '<div><div class="dim">สถานะ</div><b>' + esc(tradePill(st).st[1]) + '</b>'
+      + '<div><div class="dim">สถานะ</div><b>' + esc(docStatusLabel(kind, d)) + '</b>'
       + (d.convertedTo ? '<div>เอกสารปลายทาง ' + esc(d.convertedTo) + '</div>' : '')
       + (isPo && (d.grnNos || []).length && !d.convertedTo ? '<div>ใบรับสินค้า ' + esc(d.grnNos.join(', ')) + '</div>' : '')
       + (isSo && (d.invoiceNos || []).length && !d.convertedTo ? '<div>ใบกำกับภาษี ' + esc(d.invoiceNos.join(', ')) + '</div>' : '')
       + (d.statusReason ? '<div>' + esc(d.statusReason) + '</div>' : '') + '</div>'
       + '</div>'
-      + tbl({
-          cols:[{t:'รายการ'},{t:'จำนวน',a:'r'}].concat(got ? [{t:gotLabel[0],a:'r'},{t:gotLabel[1],a:'r'}] : [])
-            .concat([{t:'ราคาต่อหน่วย',a:'r'},{t:'ภาษี'},{t:'บันทึกเข้าบัญชี'},{t:'จำนวนเงิน',a:'r'}]),
-          rows: d.lines.map((l, i) => [l.desc, {n:M(String(l.qty))}]
-            .concat(got ? [{n:M(String(got[i]))}, {n:M(String(roundQty(l.qty - got[i])))}] : [])
-            .concat([{n:l.price}, l.taxCode === 'VAT7' ? 'VAT 7%' : l.taxCode === 'VAT0' ? 'อัตรา 0%' : 'ยกเว้น',
-              l.acc ? accLabel(l.acc) : {dim:'ตามชนิดสินค้า'}, {n:l.amount}])),
-        })
-      + '<div class="totals">'
-      + '<div><span>มูลค่าก่อนภาษี</span><b>' + fmt(d.base) + '</b></div>'
-      + '<div><span>ภาษีมูลค่าเพิ่ม</span><b>' + fmt(d.vat) + '</b></div>'
-      + '<div class="gt"><span>จำนวนเงินรวมทั้งสิ้น</span><b>' + fmt(d.total) + '</b></div>'
+      + docInfoHtml(d, cfg.side)
+      + docLinesTable(d, (got ? [{t:gotLabel[0],a:'r'},{t:gotLabel[1],a:'r'}] : []).concat([{t:'บันทึกเข้าบัญชี'}]),
+          (l, i) => (got ? [{n:M(String(got[i]))}, {n:M(String(roundQty(l.qty - got[i])))}] : [])
+            .concat([l.acc ? accLabel(l.acc) : {dim:'ตามชนิดสินค้า'}]))
+      + '<div class="totals">' + docTotalsHtml(d)
       + whtTotalsHtml(d, cfg.side)
       + '</div>',
     foot:'เอกสารใบนี้ยังไม่มีผลทางบัญชี ตัวเลขจะเข้าบัญชีเมื่อกด' + nextLabel + 'เท่านั้น'
@@ -1587,7 +1711,7 @@ function tradeDocScreen(kind) {
           .concat([{t:'ก่อนภาษี',a:'r'},{t:'รวม',a:'r'},{t:'สถานะ'},{t:'เอกสารปลายทาง'}]),
         rows: rows.map((d) => [{mono:d.no}, thDateNum(d.date), d.partnerName]
           .concat(cfg.validDays ? [thDateNum(d.validUntil)] : [])
-          .concat([{n:d.base}, {n:d.total}, tradePill(tradeDocStatus(kind, d)),
+          .concat([{n:d.base}, {n:d.total}, docStatusCell(kind, d),
             d.convertedTo ? {mono:d.convertedTo} : '—'])),
         rowAttr: (r) => 'class="row-link" data-act="sel:' + r[0].mono + '"',
         empty:'ยังไม่มี' + cfg.label,
@@ -1600,19 +1724,60 @@ function tradeDocScreen(kind) {
 }
 
 /* ===================================================================
-   ใบวางบิล
+   ใบวางบิล — สองแบบในทะเบียนเดียว
+   ใบวางบิล/ใบแจ้งหนี้ (มีรายการ ออกก่อนใบกำกับ): รอวางบิล → วางบิลแล้ว → เปิดบิลแล้ว / ยกเลิก
+   ใบวางบิลรวมใบกำกับที่ออกแล้ว: รอวางบิล → วางบิลแล้ว → รับชำระบางส่วน → เก็บเงินแล้ว (คิดจากยอดคงค้างจริง)
    =================================================================== */
-const BN_LABEL = { issued:['open','รอรับชำระ'], partially_paid:['wait','รับชำระบางส่วน'],
-  paid:['paid','รับชำระครบ'], cancelled:['late','ยกเลิก'] };
 function bnPill(bn) {
-  const st = billingNoteStatus(bn);
-  if ((st === 'issued' || st === 'partially_paid') && bn.dueDate < TODAY) return { st:['late','เลยวันนัดชำระ'] };
-  return { st: BN_LABEL[st] };
+  return { st: DOC_STATUS.billingNote(bn) };
+}
+/* ชื่อสถานะของใบวางบิลทั้งสองแบบ — ใบรวมใบกำกับเก็บเฉพาะยกเลิก สถานะที่เหลือคิดจากยอดคงค้างของใบกำกับ */
+DOC_STATUS.billingNote = function (b) {
+  const st = billingNoteStatus(b);
+  if (st === 'cancelled') return ['void', 'ยกเลิก'];
+  if (isItemBilling(b)) return ({ issued:['wait', 'รอวางบิล'], delivered:['open', 'วางบิลแล้ว'], closed:['paid', 'เปิดบิลแล้ว'] })[st] || statusPill(st).st;
+  if (st === 'paid') return ['paid', 'เก็บเงินแล้ว'];
+  if (b.dueDate < TODAY) return ['late', 'เลยวันนัดชำระ'];
+  if (st === 'partially_paid') return ['wait', 'รับชำระบางส่วน'];
+  return b.delivered ? ['open', 'วางบิลแล้ว'] : ['wait', 'รอวางบิล'];
+};
+
+/** ใบวางบิล/ใบแจ้งหนี้ที่มีรายการของตัวเอง — แก้ไขได้ตอนรอวางบิล เปิดบิลเป็นใบกำกับหรือขายเงินสด */
+function itemBillingDetail(bn) {
+  const st = bn.status;
+  const live = st === 'issued' || st === 'delivered';
+  const src = docSourceOf(bn);
+  const to = bn.convertedTo && openDocAct(bn.convertedTo);
+  return card({
+    title:'ใบวางบิล/ใบแจ้งหนี้ เลขที่ ' + bn.no,
+    sub:'วันที่ ' + thDate(bn.date) + ' · ' + (showDue(bn) ? 'ครบกำหนด ' + thDate(bn.due) : creditTermText(bn)) + ' · ' + docStatusLabel('billingNote', bn)
+      + (src ? ' · จาก' + src.label + ' ' + src.no : '') + (bn.revision ? ' · แก้ไขแล้ว ' + bn.revision + ' ครั้ง' : ''),
+    actions: (st === 'issued' ? btn('bn:edit:' + bn.no, 'แก้ไข') + btn('bn:delivered:' + bn.no, 'วางบิลแล้ว') : '')
+      + (live ? btn('bn:toinvoice:' + bn.no, 'ออกใบกำกับภาษี', 'primary') + btn('bn:tocash:' + bn.no, 'ขายเงินสด') : '')
+      + (st === 'delivered' ? btn('bn:reset:' + bn.no, 'รีเซ็ตเป็นรอวางบิล') : '')
+      + (src ? btn('open:' + src.screen + ':' + src.no, 'ดู' + src.label + ' ' + src.no) : '')
+      + (to ? btn(to, 'ดู ' + bn.convertedTo) : '')
+      + printBtn('billingNote', bn.no) + (live ? btn('bn:cancel:' + bn.no, 'ยกเลิก', 'danger') : '') + btn('sel:', 'ปิด'),
+    body: (st === 'cancelled' ? '<div class="void-banner"><b>ยกเลิกแล้ว</b><span>เหตุผล: ' + esc(bn.statusReason || '—') + '</span></div>' : '')
+      + '<div class="docgrid">'
+      + '<div><div class="dim">ผู้วางบิล</div><b>' + esc(DB.company.name) + '</b><div>' + esc(DB.company.address) + '</div></div>'
+      + '<div><div class="dim">ลูกค้า' + (bn.snap && bn.snap.edited ? ' (แก้บนใบนี้)' : '') + '</div><b>' + esc(bn.snap ? bn.snap.name : bn.partnerName) + '</b>'
+      + '<div>' + esc(bn.snap ? bn.snap.address : '') + '</div><div>' + esc(buyerIdLine(bn.snap)) + '</div></div>'
+      + '<div><div class="dim">สถานะ</div><b>' + esc(docStatusLabel('billingNote', bn)) + '</b>'
+      + (bn.convertedTo ? '<div>เปิดบิลเป็น ' + esc(bn.convertedTo) + '</div>' : '') + '</div>'
+      + '</div>'
+      + docInfoHtml(bn, 'customer')
+      + docLinesTable(bn)
+      + '<div class="totals">' + docTotalsHtml(bn) + whtTotalsHtml(bn, 'customer') + '</div>',
+    foot:'ใบวางบิล/ใบแจ้งหนี้ยังไม่มีผลทางบัญชี — ตัวเลขเข้าบัญชีและรายงานภาษีขายเมื่อออกใบกำกับภาษี (เปิดบิล) จากใบนี้'
+      + ' · แก้ไขได้เฉพาะตอนรอวางบิล · ออกใบกำกับพร้อมรับเงินได้ในขั้นเดียว',
+  });
 }
 
 function billingNoteDetail(no) {
   const bn = DB.docs.billingNote.find((x) => x.no === no);
   if (!bn) return '';
+  if (isItemBilling(bn)) return itemBillingDetail(bn);
   const st = billingNoteStatus(bn);
   const open = st === 'issued' || st === 'partially_paid';
   const out = billingNoteOutstanding(bn);
@@ -1620,8 +1785,10 @@ function billingNoteDetail(no) {
   return card({
     title:'ใบวางบิล เลขที่ ' + bn.no,
     sub:'วางบิลวันที่ ' + thDate(bn.date) + ' · นัดชำระ ' + thDate(bn.dueDate) + ' · ' + bnPill(bn).st[1],
-    actions: (open ? btn('bn:receive:' + bn.no, 'รับชำระตามใบวางบิล', 'primary')
-        + btn('bn:cancel:' + bn.no, 'ยกเลิก') : '')
+    actions: (open && !bn.delivered ? btn('bn:delivered:' + bn.no, 'วางบิลแล้ว') : '')
+      + (open ? btn('bn:receive:' + bn.no, 'รับชำระตามใบวางบิล', 'primary') : '')
+      + (open && bn.delivered && !rcs.some((r) => !isVoid(r)) ? btn('bn:reset:' + bn.no, 'รีเซ็ตเป็นรอวางบิล') : '')
+      + (open ? btn('bn:cancel:' + bn.no, 'ยกเลิก') : '')
       + printBtn('billingNote', bn.no) + btn('sel:', 'ปิด'),
     body:
       '<div class="docgrid">'
@@ -1638,6 +1805,7 @@ function billingNoteDetail(no) {
           return [{mono:r.no}, thDateNum(r.date), thDateNum(r.due), {n:r.total}, {n:r.amount},
             {n: inv ? Math.max(0, invOutstanding(inv)) : 0}];
         }),
+        rowAttr: (r) => 'class="row-link" data-act="open:invoices:' + r[0].mono + '"',
         foot: ['รวม ' + bn.invoices.length + ' ใบ', '', '', '', {n:bn.total}, {n:out}],
       })
       + '<div class="totals">'
@@ -1656,24 +1824,28 @@ function billingNoteDetail(no) {
 function scBillingNotes() {
   const all = DB.docs.billingNote;
   const rows = all.filter((b) => hit(b.no) || hit(b.partnerName));
-  const waiting = all.filter((b) => ['issued', 'partially_paid'].indexOf(billingNoteStatus(b)) >= 0);
+  const waiting = all.filter((b) => !isItemBilling(b) && ['issued', 'partially_paid'].indexOf(billingNoteStatus(b)) >= 0);
+  const toBill = all.filter((b) => isItemBilling(b) && (b.status === 'issued' || b.status === 'delivered'));
   return (STATE.sel ? billingNoteDetail(STATE.sel) : '')
     + card({
       title:'ใบวางบิล',
-      sub: all.length + ' ฉบับ · รอเก็บเงิน ' + waiting.length + ' ฉบับ รวม '
+      sub: all.length + ' ฉบับ · ใบแจ้งหนี้รอเปิดบิล ' + toBill.length + ' ฉบับ · ใบวางบิลรวมรอเก็บเงิน ' + waiting.length + ' ฉบับ รวม '
         + fmt(waiting.reduce((s, b) => s + billingNoteOutstanding(b), 0)) + ' บาท',
-      actions: btn('new:billingnote', '+ ออกใบวางบิล', 'primary'),
+      actions: btn('new:billingdoc', '+ ใบวางบิล/ใบแจ้งหนี้', 'primary') + btn('new:billingnote', '+ ใบวางบิลรวมใบกำกับ'),
       filters: searchBox('ค้นหาเลขที่หรือชื่อลูกค้า'),
       body: tbl({
-        cols:[{t:'เลขที่'},{t:'วันที่วางบิล'},{t:'ลูกค้า'},{t:'นัดชำระ'},{t:'ใบกำกับ',a:'c'},{t:'ยอดวางบิล',a:'r'},{t:'คงค้าง',a:'r'},{t:'สถานะ'}],
-        rows: rows.map((b) => [{mono:b.no}, thDateNum(b.date), b.partnerName, thDateNum(b.dueDate),
-          {c:String(b.invoices.length)}, {n:b.total},
-          {n: billingNoteStatus(b) === 'cancelled' ? 0 : billingNoteOutstanding(b)}, bnPill(b)]),
-        rowAttr: (r) => 'class="row-link" data-act="sel:' + r[0].mono + '"',
+        cols:[{t:'เลขที่'},{t:'วันที่'},{t:'ลูกค้า'},{t:'แบบ'},{t:'ครบกำหนด/นัดชำระ'},{t:'ยอด',a:'r'},{t:'คงค้าง',a:'r'},{t:'สถานะ'}],
+        rows: rows.map((b) => isItemBilling(b)
+          ? [{mono:b.no}, thDateNum(b.date), b.partnerName, 'ใบแจ้งหนี้ ' + b.lines.length + ' รายการ',
+            showDue(b) ? thDateNum(b.due) : {dim: creditTermText(b)}, {n:b.total}, {dim:'ยังไม่ตั้งลูกหนี้'}, docStatusCell('billingNote', b)]
+          : [{mono:b.no}, thDateNum(b.date), b.partnerName, 'รวม ' + b.invoices.length + ' ใบกำกับ', thDateNum(b.dueDate), {n:b.total},
+            {n: billingNoteStatus(b) === 'cancelled' ? 0 : billingNoteOutstanding(b)}, docStatusCell('billingNote', b)]),
+        rowAttr: (r, i) => 'class="row-link' + (billingNoteStatus(rows[i]) === 'cancelled' ? ' is-void' : '') + '" data-act="sel:' + r[0].mono + '"',
         empty:'ยังไม่มีใบวางบิล',
-        emptyAction: btn('new:billingnote', 'ออกใบวางบิลใบแรก', 'primary'),
+        emptyAction: btn('new:billingdoc', 'ออกใบวางบิล/ใบแจ้งหนี้ใบแรก', 'primary') + ' ' + btn('new:billingnote', 'วางบิลรวมใบกำกับที่ออกแล้ว'),
       }),
-      foot:'รวบใบกำกับที่ค้างชำระของลูกค้ารายเดียวไปวางเก็บเงินครั้งเดียว · ใบกำกับหนึ่งใบอยู่ได้ในใบวางบิลที่ยังเปิดอยู่ใบเดียว',
+      foot:'ใบวางบิล/ใบแจ้งหนี้: ออกก่อนใบกำกับภาษี ยังไม่ลงบัญชี เปิดบิลเป็นใบกำกับหรือขายเงินสดเมื่อพร้อม'
+        + ' · ใบวางบิลรวม: รวบใบกำกับที่ค้างชำระของลูกค้ารายเดียวไปวางเก็บเงินครั้งเดียว ใบกำกับหนึ่งใบอยู่ได้ในใบวางบิลที่ยังเปิดอยู่ใบเดียว',
     });
 }
 
