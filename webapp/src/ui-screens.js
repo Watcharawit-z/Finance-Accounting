@@ -725,7 +725,9 @@ function agingScreen(kind) {
 function partnerScreen(kind) {
   const scr = kind === 'customer' ? 'customers' : 'vendors';
   const role = (p) => (kind === 'customer' ? isCustomer(p) : isVendor(p));
-  const base = DB.partners.filter((p) => role(p) && (hit(p.name) || hit(p.code) || hit(p.taxId)));
+  /* ค้นได้ทั้งชื่อ รหัส เลขผู้เสียภาษี ผู้ติดต่อ อีเมล และเบอร์โทร — แบบที่ค้นในสมุดรายชื่อ */
+  const base = DB.partners.filter((p) => role(p) && [p.name, p.code, p.taxId, p.contactPerson, p.email, p.phone, p.mobile, p.branchName]
+    .some((x) => x && hit(x)));
   const list = base.filter((p) => chipPass(scr, p));
   const off = DB.partners.filter((p) => role(p) && p.active === false).length;
   const to = pEnd();
@@ -733,19 +735,29 @@ function partnerScreen(kind) {
   const bal = {};
   ag.rows.forEach((r) => { bal[r.code] = r.total; });
   const typeLabel = (p) => (p.entityType === 'individual' ? 'บุคคลธรรมดา' : 'นิติบุคคล')
-    + (kind === 'customer' && p.entityType === 'individual' && partnerVatRegistered(p) ? ' (จด VAT)' : '')
-    + (kind === 'customer' && p.entityType !== 'individual' && !partnerVatRegistered(p) ? ' (ไม่ได้จด VAT)' : '');
+    + (p.entityType === 'individual' && partnerVatRegistered(p) ? ' (จด VAT)' : '')
+    + (p.entityType !== 'individual' && !partnerVatRegistered(p) ? ' (ไม่ได้จด VAT)' : '');
+  /* ผู้จำหน่ายและลูกค้าขึ้นทั้งสองทะเบียน มีป้ายบอกให้รู้ว่าเป็นรายเดียวกัน */
+  const nameCell = (p) => ({ html: '<span class="p-name">' + esc(p.name) + '</span>'
+    + (p.kind === 'both' ? ' <span class="ptag" title="รายเดียวกันอยู่ทั้งทะเบียนลูกค้าและผู้ขาย">' + esc(PARTNER_KINDS.both) + '</span>' : '')
+    + (p.branchName ? '<div class="dim">' + esc(p.branchName) + '</div>' : '') });
+  const contactCell = function (p) {
+    const tel = p.mobile || p.phone || '';
+    if (!p.contactPerson && !tel && !p.email) return { dim: '—' };
+    return { html: (p.contactPerson ? '<div>' + esc(p.contactPerson) + '</div>' : '')
+      + (tel || p.email ? '<div class="dim">' + esc([tel, p.email].filter(Boolean).join(' · ')) + '</div>' : '') };
+  };
   return card({
     title: kind === 'customer' ? 'ทะเบียนลูกค้า' : 'ทะเบียนผู้ขาย',
     sub: list.length + ' ราย' + (off ? ' · เลิกใช้งาน ' + off + ' ราย' : '') + ' · ข้อมูลนี้จะถูกคัดลอกลงเอกสารทุกใบ ณ วันที่ออก',
-    actions: btn('partner:new:' + kind,
-      kind === 'customer' ? '+ เพิ่มลูกค้า' : '+ เพิ่มผู้ขาย', 'primary'),
-    filters: listFilters(scr, 'ค้นหาชื่อ รหัส หรือเลขประจำตัวผู้เสียภาษี', base),
+    actions: btn('masterimp:go:contact:' + kind, 'นำเข้าจากไฟล์ Excel')
+      + btn('partner:new:' + kind, kind === 'customer' ? '+ เพิ่มลูกค้า' : '+ เพิ่มผู้ขาย', 'primary'),
+    filters: listFilters(scr, 'ค้นหาชื่อ รหัส เลขผู้เสียภาษี ผู้ติดต่อ หรือเบอร์โทร', base),
     body: tbl({
-      cols:[{t:'รหัส'},{t:'ชื่อ'},{t:'เลขประจำตัวผู้เสียภาษี'},{t:'สาขา'},{t:'ประเภท'},{t:'เครดิต (วัน)',a:'r'}]
+      cols:[{t:'รหัส'},{t:'ชื่อ'},{t:'ผู้ติดต่อ'},{t:'เลขประจำตัวผู้เสียภาษี'},{t:'สาขา'},{t:'กลุ่ม'},{t:'เครดิต (วัน)',a:'r'}]
         .concat(kind === 'vendor' ? [{t:'หัก ณ ที่จ่าย'}] : [])
         .concat([{t:'คงค้าง',a:'r'}, {t:'สถานะ'}]),
-      rows: list.map((p) => [{mono:p.code}, p.name, p.taxId ? {mono:p.taxId} : {dim:'—'},
+      rows: list.map((p) => [{mono:p.code}, nameCell(p), contactCell(p), p.taxId ? {mono:p.taxId} : {dim:'—'},
         p.branch === '00000' ? 'สำนักงานใหญ่' : (p.branch ? 'สาขา ' + p.branch : '—'),
         typeLabel(p),
         {c:String(p.termDays)}]
@@ -756,10 +768,12 @@ function partnerScreen(kind) {
       empty: DB.partners.some((x) => role(x))
         ? 'ไม่พบรายชื่อที่ค้นหา' : 'ยังไม่มีรายชื่อในทะเบียนนี้',
       emptyAction: btn('partner:new:' + kind,
-        kind === 'customer' ? 'เพิ่มลูกค้ารายแรก' : 'เพิ่มผู้ขายรายแรก', 'primary'),
+        kind === 'customer' ? 'เพิ่มลูกค้ารายแรก' : 'เพิ่มผู้ขายรายแรก', 'primary')
+        + btn('masterimp:go:contact:' + kind, 'นำเข้าจากไฟล์ Excel'),
     }),
     foot: 'กดที่แถวเพื่อแก้ไข ตั้งเลิกใช้งาน หรือลบรายที่ยังไม่เคยใช้ · เลขประจำตัวผู้เสียภาษีทุกเลขผ่านการตรวจหลักที่ 13 แล้ว '
-      + 'และกันการสร้างคู่ค้าซ้ำด้วยเลขเดียวกัน · รายที่เลิกใช้งานไม่ขึ้นให้เลือกในเอกสารใหม่ แต่ยอดค้างและรายงานเดิมยังอยู่ครบ',
+      + 'และกันการสร้างคู่ค้าซ้ำด้วยเลขเดียวกัน · ผู้จำหน่ายและลูกค้าขึ้นทั้งทะเบียนลูกค้าและผู้ขาย (รายเดียวกัน) '
+      + '· รายที่เลิกใช้งานไม่ขึ้นให้เลือกในเอกสารใหม่ แต่ยอดค้างและรายงานเดิมยังอยู่ครบ',
   });
 }
 
@@ -1281,38 +1295,48 @@ function scTaxCal() {
 /* ===================================================================
    สินค้าคงคลัง
    =================================================================== */
+/* ชื่อชนิดภาษีแบบสั้นในตาราง */
+const ITEM_VAT_SHORT = { exclusive: 'ไม่รวมภาษี', inclusive: 'รวมภาษี', zero: '0%', exempt: 'ยกเว้น' };
 function scItems() {
-  const list = DB.items.filter((i) => hit(i.code) || hit(i.name) || hit(i.category));
+  const base = DB.items.filter((i) => hit(i.code) || hit(i.name) || hit(i.category) || (i.barcode && hit(i.barcode)));
+  const list = base.filter((i) => chipPass('items', i));
   const value = DB.items.reduce((s, i) => s + (i.type === 'stock' ? i.value : 0), 0);
   const glInv = balBySub(['inventory'], pEnd());
   const low = DB.items.filter((i) => i.type === 'stock' && i.qty <= i.reorder);
+  const stock = (i) => i.type === 'stock';
   return card({
     title:'ทะเบียนสินค้า', sub: DB.items.length + ' รายการ · ตีราคาด้วยวิธีถัวเฉลี่ยถ่วงน้ำหนัก',
     actions: btn('item:new', '+ เพิ่มสินค้าหรือบริการ', 'primary')
+      + btn('masterimp:go:product', 'นำเข้าจากไฟล์ Excel')
       + btn('stock:new:opening', 'ตั้งยอดยกมา', periodIsOpen() ? '' : 'disabled')
       + btn('stock:new:count', 'ตรวจนับ', periodIsOpen() ? '' : 'disabled'),
-    filters: searchBox('ค้นหารหัส ชื่อ หรือหมวดสินค้า'),
+    filters: listFilters('items', 'ค้นหารหัส ชื่อ หมวด หรือบาร์โค้ด', base),
     body: stockGapNote() + (low.length ? '<div class="note warn">ต่ำกว่าจุดสั่งซื้อ ' + low.length + ' รายการ: '
         + esc(low.map((i) => i.code).join(', ')) + '</div>' : '')
       + tbl({
-        cols:[{t:'รหัส'},{t:'ชื่อสินค้า'},{t:'หมวด'},{t:'หน่วย'},{t:'ประเภท'},{t:'คงเหลือ',a:'r'},{t:'จุดสั่งซื้อ',a:'r'},{t:'ต้นทุนเฉลี่ย',a:'r'},{t:'ราคาขาย',a:'r'},{t:'มูลค่าคงเหลือ',a:'r'},{t:''}],
-        rows: list.map((i) => [{mono:i.code}, i.name, i.category, i.uom,
-          i.type === 'stock' ? 'สินค้า' : {dim:'บริการ'},
-          i.type === 'stock' ? {n:M(String(i.qty)), cls: i.qty <= i.reorder ? 'bad' : ''} : {dim:'—'},
-          i.type === 'stock' ? {n:M(String(i.reorder))} : {dim:'—'},
-          {n:i.avgCost}, {n:i.price}, {n:i.value},
-          i.type === 'stock' ? {html: btn('stock:card:' + i.code, 'สต๊อกการ์ด')} : '']),
+        cols:[{t:'รหัส'},{t:'ชื่อสินค้า'},{t:'ประเภท'},{t:'หน่วย'},{t:'ราคาขาย',a:'r'},{t:'ภาษีขาย'},{t:'ราคาซื้อ',a:'r'},{t:'ภาษีซื้อ'},
+          {t:'บาร์โค้ด'},{t:'คงเหลือ',a:'r'},{t:'ต้นทุนเฉลี่ย',a:'r'},{t:'มูลค่าคงเหลือ',a:'r'},{t:''}],
+        rows: list.map((i) => [{mono:i.code},
+          { html: esc(i.name) + (i.category && i.category !== 'ทั่วไป' ? '<div class="dim">' + esc(i.category) + '</div>' : '') },
+          stock(i) ? ITEM_TYPES[i.type] : {dim: ITEM_TYPES[i.type] || i.type}, i.uom,
+          {n:i.price}, {dim: ITEM_VAT_SHORT[i.sellVat || 'exclusive']},
+          {n:i.buyPrice || 0}, {dim: ITEM_VAT_SHORT[i.buyVat || 'exclusive']},
+          i.barcode ? {mono:i.barcode} : {dim:'—'},
+          /* บริการและสินค้าไม่นับสต๊อกไม่มีคงเหลือ — ขีดชิดขวาตรงกับคอลัมน์ตัวเลข */
+          stock(i) ? {n:M(String(i.qty)), cls: i.qty <= i.reorder ? 'bad' : ''} : {n:0},
+          stock(i) ? {n:i.avgCost} : {n:0}, stock(i) ? {n:i.value} : {n:0},
+          stock(i) ? {html: btn('stock:card:' + i.code, 'สต๊อกการ์ด')} : '']),
         rowAttr: (r) => 'class="row-link" data-act="item:edit:' + r[0].mono + '"',
-        foot: ['','','','','','','','','รวมมูลค่าสินค้าคงเหลือ', {n:value}, ''],
-        empty:'ยังไม่มีสินค้าในทะเบียน',
-        emptyAction: btn('item:new', 'เพิ่มสินค้ารายการแรก', 'primary'),
+        foot: ['','','','','','','','','','','รวมมูลค่าสินค้าคงเหลือ', {n:value}, ''],
+        empty: DB.items.length ? 'ไม่พบสินค้าที่ค้นหา' : 'ยังไม่มีสินค้าในทะเบียน',
+        emptyAction: btn('item:new', 'เพิ่มสินค้ารายการแรก', 'primary') + btn('masterimp:go:product', 'นำเข้าจากไฟล์ Excel'),
       })
       + '<div class="reco"><div><span>มูลค่าตามทะเบียนสินค้า</span><b>' + fmt(value) + '</b></div>'
       + '<div><span>ยอดบัญชีสินค้าคงเหลือในงบทดลอง</span><b>' + fmt(glInv) + '</b></div>'
       + '<div class="gt"><span>ผลต่าง</span><b>' + fmt(value - glInv) + '</b></div></div>',
     foot: (value === glInv ? 'ทะเบียนสินค้าตรงกับบัญชีคุมพอดี'
       : 'ยังไม่ตรงกัน — ตั้งยอดยกมาส่วนที่ยังไม่แยกรายตัว ระบบไม่ให้ปิดงวดจนกว่าจะตรง')
-      + ' · กดที่แถวเพื่อแก้ไข · จำนวนคงเหลือเปลี่ยนด้วยเอกสารซื้อขาย หรือใบปรับปรุงสินค้า (ยอดยกมา ตรวจนับ ตัดจำหน่าย เบิกใช้)',
+      + ' · กดที่แถวเพื่อแก้ไข · ราคาขาย/ซื้อเป็นราคาตามชนิดภาษีที่ตั้งไว้ · จำนวนคงเหลือเปลี่ยนด้วยเอกสารซื้อขาย หรือใบปรับปรุงสินค้า (ยอดยกมา ตรวจนับ ตัดจำหน่าย เบิกใช้)',
   });
 }
 
@@ -1993,19 +2017,9 @@ function scSettings() {
           : '<span class="dim">ยังไม่มี — กดไอคอนที่คั่นหน้าในแถบตัวกรองของรายการเอกสารเพื่อบันทึก</span>') + '</div></div>'
         + '</div>',
     })
-    + card({
-      title:'เลขที่เอกสาร', sub:'ระบบจองเลขที่ตอนลงบัญชีสำเร็จเท่านั้น เลขจึงเรียงต่อเนื่องไม่มีช่องว่าง',
-      body: tbl({
-        cols:[{t:'เอกสาร'},{t:'รูปแบบเลขที่'},{t:'ใช้ไปแล้วงวดนี้',a:'c'}],
-        rows: [['ใบกำกับภาษี','invoice'],['ใบเสร็จรับเงิน','receipt'],['ใบวางบิล','billingNote'],['ใบลดหนี้','creditNote'],
-          ['ใบเพิ่มหนี้','debitNote'],['ใบเสนอราคา','quotation'],['ใบสั่งขาย','salesOrder'],['ใบสั่งซื้อ','purchaseOrder'],
-          ['ใบรับสินค้า','goodsReceipt'],['ตั้งหนี้ผู้ขาย','bill'],['ใบสำคัญจ่าย','payment'],['ค่าใช้จ่าย','expense'],
-          ['หนังสือรับรอง 50 ทวิ','whtCert'],['ใบเตรียมจ่าย','paymentBatch'],['ขายเงินสด / ใบกำกับภาษีอย่างย่อ','cashSale'],
-          ['ใบปรับปรุงสินค้า','stockAdj']].filter((x) => SEQ_PREFIX[x[1]])
-          .map((x) => [x[0], {mono: SEQ_PREFIX[x[1]] + STATE.period.replace('-', '').slice(2) + '-00001'},
-            {c: String(DB.seq[x[1] + '|' + STATE.period] || 0)}]),
-      }),
-    });
+    /* เลขที่เอกสาร และค่าเริ่มต้นของเอกสารใหม่ — ui-master.js */
+    + numberingCard()
+    + docDefaultsCard();
 }
 
 const SCREENS = {
@@ -2070,6 +2084,7 @@ function scImport() {
       + 'งบทดลอง — FlowAccount: เมนู รายงาน → หมวด บัญชี → งบทดลอง → เลือกช่วงเวลา → ดาวน์โหลด Excel<br>'
       + 'ผังบัญชี — เมนู บริหารบัญชี → ผังบัญชี → ปุ่ม เพิ่มเติม → ดาวน์โหลด Excel<br>'
       + 'สินค้าคงเหลือ (ตั้งยอดสินค้ายกมา) — ไฟล์ที่มี รหัส ชื่อสินค้า จำนวนคงเหลือ และต้นทุนต่อหน่วยหรือมูลค่า<br>'
+      + 'สมุดรายชื่อ / สินค้าและบริการ — ไฟล์รายชื่อลูกค้า ผู้ขาย หรือรายการสินค้าจากโปรแกรมเดิม หรือแบบฟอร์มด้านล่าง<br>'
       + 'ไม่ต้องแก้ไฟล์ก่อน ลากไฟล์ที่ดาวน์โหลดมาได้เลย ระบบจะถามเองถ้าอ่านไม่ออก</div>'
       + '</div></div>'
       + (IMP.error ? '<div class="note warn">' + esc(IMP.error) + '</div>' : ''),
@@ -2110,7 +2125,10 @@ function scImport() {
   }) : '';
 
   const health = past.some((im) => im.status !== 'reversed') ? importHealthCard() : '';
-  if (!IMP.rows) return step1 + health + history + blank;
+  /* สมุดรายชื่อและสินค้า (ui-master.js) */
+  const mInfo = masterInfoCard(), mDone = masterDoneCard(), mHist = masterHistoryCard();
+  if (!IMP.rows) return step1 + mDone + mInfo + health + history + mHist + blank;
+  if (IMP.kind === 'master') return step1 + masterImportCard(IMP) + mHist + blank;
 
   /* ---- ไฟล์ไม่ใช่งบทดลอง บอกให้ชัดว่าไฟล์ไหนที่ต้องใช้ ---- */
   if (IMP.kind === 'stock') return step1 + importStockCard(IMP) + history + blank;

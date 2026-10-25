@@ -192,6 +192,7 @@ function blankState() {
     bankStmts: [],       // ยอดยกมา/ยอดคงเหลือปลายงวดตามสเตทเมนต์ {acc,period,opening,closing}
     bankBf: [],          // รายการค้าง ณ วันเริ่มกระทบยอด (เช็คค้างจ่าย เงินฝากระหว่างทาง)
     bankImports: [],     // ประวัติการนำเข้าไฟล์สเตทเมนต์ ใช้กันนำเข้าซ้ำและยกเลิกการนำเข้า
+    masterImports: [],   // ประวัติการนำเข้าสมุดรายชื่อ/สินค้าจากไฟล์ พร้อมแถวที่นำเข้าไม่ได้ (import.js)
     audit: [],
     settings: { hardLockDate: null, numbering: { style: 'fa', reset: 'month', prefixes: {} } },
     isDemo: false,       // true = ข้อมูลตัวอย่างที่ระบบสร้างให้ ไม่ใช่ข้อมูลจริงของผู้ใช้
@@ -457,6 +458,32 @@ function saveNumbering(input) {
   DB.settings.numbering = { style, reset, prefixes };
   audit('settings', 'numbering', 'update', before, DB.settings.numbering);
   return DB.settings.numbering;
+}
+/** เลขที่ถัดไปที่จะได้จริงถ้าออกเอกสารวันนี้ — ไม่จองเลข · numbering = ค่าที่กำลังแก้ในหน้าตั้งค่า (ยังไม่บันทึก)
+    คิดแบบเดียวกับ nextNo: ชนิดที่ใช้คำนำหน้าเดียวกันนับร่วมกัน นับใหม่รายปีใช้ตัวนับรายปี และข้ามเลขที่มีอยู่แล้ว */
+function peekDocNo(docType, date, numbering) {
+  const cfg = numbering || numberingOf();
+  const pfx = (t) => (cfg.prefixes && cfg.prefixes[t]) || (cfg.style === 'fa' && DOC_PREFIX_STD[t]) || SEQ_PREFIX[t] || t.toUpperCase().slice(0, 3);
+  const period = periodOf(date);
+  const span = cfg.style === 'fa' && cfg.reset === 'year' ? period.slice(0, 4) : period;
+  const mine = pfx(docType);
+  const types = Object.keys(SEQ_PREFIX).concat(Object.keys(DOC_PREFIX_STD));
+  const canon = types.find((t) => pfx(t) === mine) || docType;
+  /* ตัวนับที่ยังแยกตามชนิดเดิม จะถูกรวมเข้าตัวนับร่วมตอนออกเลขจริง (nextNo) */
+  let n = Math.max(DB.seq[canon + '|' + span] || 0, DB.seq[docType + '|' + span] || 0) + 1;
+  while (docNoTaken(docType, formatDocNo(docType, date, n, cfg))) n++;
+  return formatDocNo(docType, date, n, cfg);
+}
+/** ค่าเริ่มต้นของเอกสารใหม่ (ตั้งค่า > ฟังก์ชันเอกสาร) — ราคารวม/ไม่รวมภาษี · เอกสารที่ออกไปแล้วไม่เปลี่ยน */
+function saveDocDefaults(input) {
+  const mode = input && input.priceMode;
+  if (!PRICE_MODES[mode]) {
+    throw new DomainError('PRICE_MODE_INVALID', 'ค่าเริ่มต้นราคาต้องเป็น "ราคาไม่รวมภาษี" หรือ "ราคารวมภาษี"');
+  }
+  const before = JSON.parse(JSON.stringify(DB.settings.docDefaults || {}));
+  DB.settings.docDefaults = Object.assign({}, DB.settings.docDefaults || {}, { priceMode: mode });
+  audit('settings', 'docDefaults', 'update', before, DB.settings.docDefaults);
+  return DB.settings.docDefaults;
 }
 
 /** ข้อมูลที่บันทึกไว้ก่อนแก้ตัวนับ อาจมีเลขที่ใบสำคัญซ้ำ — ใบแรกคงเลขเดิม ใบหลังได้เลขใหม่

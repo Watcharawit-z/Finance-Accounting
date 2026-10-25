@@ -529,47 +529,110 @@ function modalRefund(no) {
 /* ===================================================================
    ทะเบียนต่าง ๆ — เพิ่มและแก้ไข
    =================================================================== */
+/* ---------- สมุดรายชื่อ: ลูกค้า / ผู้ขาย / ผู้จำหน่ายและลูกค้า ----------
+   ช่องเรียงแบบที่นักบัญชีคุ้น: ข้อมูลทั่วไป → ติดต่อ → ที่อยู่ → ธนาคาร → เงื่อนไขการค้า
+   หนึ่งสาขาคือหนึ่งรายชื่อ — เลขผู้เสียภาษีเดียวกันคนละสาขาเพิ่มเป็นอีกรายได้ (ใบกำกับต้องระบุสาขาที่ถูก) */
+const BANKS_TH = ['กรุงเทพ', 'กสิกรไทย', 'กรุงไทย', 'ไทยพาณิชย์', 'กรุงศรีอยุธยา', 'ทหารไทยธนชาต', 'ออมสิน', 'ยูโอบี',
+  'ซีไอเอ็มบี ไทย', 'เกียรตินาคินภัทร', 'แลนด์ แอนด์ เฮ้าส์', 'ทิสโก้', 'ไอซีบีซี (ไทย)', 'ธ.ก.ส.', 'อาคารสงเคราะห์'];
+/** กลุ่มช่องในฟอร์ม — หัวข้อกลุ่มอ่านออกเสียงได้ (fieldset/legend) */
+const fgrp = (title, body, attrs) => '<fieldset class="fgrp"' + (attrs || '') + '><legend>' + esc(title) + '</legend><div class="flds">' + body + '</div></fieldset>';
+/** field() ที่เติม attribute ให้ช่องกรอก (inputmode autocomplete list maxlength) */
+const fieldX = (o, attrs) => field(o).replace(/<(input|select) /, '<$1 ' + attrs + ' ');
+/* ภาษีหัก ณ ที่จ่ายของผู้ติดต่อ — ช่องเดียวใช้ได้ทั้งสองฝั่ง ชื่อช่องเปลี่ยนตามประเภท */
+const PARTNER_WHT_TEXT = {
+  vendor: ['ประเภทเงินได้ที่ต้องหักภาษี ณ ที่จ่าย', 'ตั้งไว้ให้ระบบเลือกให้อัตโนมัติตอนจ่ายเงิน', '— ไม่หักภาษี ณ ที่จ่าย —'],
+  customer: ['ลูกค้าหักภาษี ณ ที่จ่ายเมื่อจ่ายเงินให้เรา', 'นิติบุคคลที่ซื้อบริการมักหัก 3% — ตั้งไว้แล้วใบเสนอราคาและใบกำกับแสดงยอดชำระสุทธิให้เอง', '— ไม่หัก —'],
+  both: ['ภาษีหัก ณ ที่จ่าย (ค่าเริ่มต้นในเอกสาร)', 'ใช้ทั้งตอนขาย (ลูกค้าหักเรา) และตอนซื้อ (เราหักผู้ขาย) · แก้ได้รายใบ', '— ไม่หัก —'],
+};
+/** ข้อความใต้ช่องเลขผู้เสียภาษี — ตรวจหลักที่ 13 และเลขซ้ำในทะเบียนระหว่างพิมพ์ */
+function taxIdNote(raw, code, kind, branch) {
+  const d = String(raw || '').replace(/\D/g, '');
+  if (!d) return ['', 'บุคคลธรรมดาใช้เลขประจำตัวประชาชน · ระบบตรวจหลักที่ 13 ให้ แต่ไม่ได้ดึงชื่อ–ที่อยู่มาให้เอง'];
+  if (d.length !== 13) return ['', 'กรอกแล้ว ' + d.length + ' จาก 13 หลัก'];
+  if (!validTaxId(d)) return ['bad', 'เลขนี้ไม่ผ่านการตรวจหลักที่ 13 — ตรวจกับหน้าใบกำกับภาษีของคู่ค้าอีกครั้ง'];
+  const br = String(branch || '').trim() || '00000';
+  const dup = DB.partners.find((x) => x.taxId === d && x.code !== code && (x.branch || '00000') === br
+    && ((isCustomer(x) && kind !== 'vendor') || (isVendor(x) && kind !== 'customer')));
+  if (dup) return ['bad', 'มีในทะเบียนแล้ว: ' + dup.code + ' ' + dup.name + ' (สาขา ' + br + ') — แก้ไขรายเดิมแทนการเพิ่มใหม่'];
+  return ['ok', 'เลขถูกต้องตามหลักตรวจสอบ'];
+}
 function modalPartner(kind, code) {
   const p = code ? DB.partners.find((x) => x.code === code) : null;
   if (code && !p) return;
-  const k = p ? p.kind : kind;
-  const isVendor = k === 'vendor';
-  const label = isVendor ? 'ผู้ขาย' : 'ลูกค้า';
+  const k = p ? p.kind : (PARTNER_KINDS[kind] ? kind : 'customer');
+  const label = PARTNER_KINDS[k];
+  const v = (f) => (p ? p[f] || '' : '');
   const ent = p ? p.entityType : 'juristic';
   const reg = p ? partnerVatRegistered(p) : true;
   /* บุคคลธรรมดาที่ไม่ได้จด VAT ไม่มีสาขา — ปิดช่องไว้ จะได้ไม่เผลอพิมพ์ "สำนักงานใหญ่" ลงใบกำกับของคนทั่วไป */
   const noBranch = ent === 'individual' && !reg;
   const used = p ? partnerUsage(p.code) : [];
+  /* รายที่มีเอกสารแล้วเปลี่ยนเป็น "ผู้จำหน่ายและลูกค้า" ได้ แต่ห้ามตัดบทบาทเดิม — เอกสารเดิมต้องอยู่ในทะเบียนฝั่งเดิมเสมอ */
+  const kinds = Object.keys(PARTNER_KINDS).filter((x) => !used.length || x === k || x === 'both').map((x) => [x, PARTNER_KINDS[x]]);
+  const wt = PARTNER_WHT_TEXT[k];
+  const tax = taxIdNote(v('taxId'), p ? p.code : null, k, v('branch'));
   modal({
     title: p ? 'แก้ไข' + label + ' ' + p.code : 'เพิ่ม' + label + 'รายใหม่',
     sub: p ? 'ข้อมูลที่แก้จะใช้กับเอกสารที่ออกหลังจากนี้ ใบเดิมยังเก็บข้อมูล ณ วันที่ออกไว้เหมือนเดิม'
-      : 'ระบบตั้งรหัสให้อัตโนมัติ กรอกเท่าที่รู้ก่อนได้ แล้วมาเติมทีหลัง',
-    body:'<div class="flds" data-partner-form="' + k + '">'
-      + field({ name:'name', label:'ชื่อ' + label + ' (ตามหนังสือรับรอง)', wide:true,
-          value: p ? p.name : '', placeholder: isVendor ? 'เช่น บริษัท ตัวอย่างการค้า จำกัด' : 'เช่น บริษัท ตัวอย่างการค้า จำกัด หรือ นายสมชาย ใจดี' })
-      + field({ name:'entityType', label:'ประเภท', type:'select', value: ent,
-          options:[['juristic','นิติบุคคล'],['individual','บุคคลธรรมดา']] })
-      + (isVendor ? '' : field({ name:'vatReg', label:'การจดทะเบียนภาษีมูลค่าเพิ่ม', type:'select', value: reg ? 'yes' : 'no',
-          options:[['yes','จด VAT แล้ว'], ['no','ไม่ได้จด VAT']],
-          hint:'จด VAT: ใบกำกับต้องมีเลขผู้เสียภาษีและสาขา · ไม่ได้จด (บุคคลทั่วไป): ใช้แค่ชื่อและที่อยู่' }))
-      + field({ name:'taxId', label:'เลขประจำตัวผู้เสียภาษี 13 หลัก',
-          value: p && p.taxId ? p.taxId : '',
-          hint:'บุคคลธรรมดาใช้เลขประจำตัวประชาชน · ระบบตรวจหลักที่ 13 ให้ แต่ไม่ได้ดึงชื่อ–ที่อยู่มาให้เอง' })
-      + '<div class="fld-w"><label for="f_branch">สาขา</label><input id="f_branch" name="branch" value="'
-        + esc(noBranch ? '' : p ? (p.branch || '00000') : '00000') + '"' + (noBranch ? ' disabled placeholder="ไม่มีสาขา"' : '') + '>'
-        + '<div class="fld-hint">สำนักงานใหญ่ใช้ 00000 · สาขาที่ 1 ใช้ 00001</div></div>'
-      + field({ name:'address', label:'ที่อยู่ตามใบกำกับภาษี', wide:true, value: p ? (p.address || '') : '' })
-      + field({ name:'phone', label:'เบอร์โทร', value: p ? (p.phone || '') : '' })
-      + field({ name:'termDays', label:'เครดิต (วัน)', value: p ? String(p.termDays || 0) : '30' })
-      + (isVendor ? field({ name:'wht', label:'ประเภทเงินได้ที่ต้องหักภาษี ณ ที่จ่าย', type:'select',
-          value: p && p.whtCode ? p.whtCode : '', options: optWht(),
-          hint:'ตั้งไว้ให้ระบบเลือกให้อัตโนมัติตอนจ่ายเงิน' })
-        : field({ name:'wht', label:'ลูกค้าหักภาษี ณ ที่จ่ายเมื่อจ่ายเงินให้เรา', type:'select',
-          value: p && p.whtCode ? p.whtCode : '', options: optWht('— ไม่หัก —'),
-          hint:'นิติบุคคลที่ซื้อบริการมักหัก 3% — ตั้งไว้แล้วใบเสนอราคาและใบกำกับแสดงยอดชำระสุทธิให้เอง' }))
-      + field({ name:'active', label:'สถานะ', type:'select', value: p && p.active === false ? 'no' : 'yes',
-          options:[['yes','ใช้งานอยู่'], ['no','เลิกใช้งาน — ไม่ขึ้นให้เลือกในเอกสารใหม่']],
-          hint:'เลิกใช้งานแล้วเอกสารเดิม ยอดค้าง และรายงานยังอยู่ครบ รับ/จ่ายชำระหนี้เดิมได้ตามปกติ' })
+      : 'กรอกเท่าที่รู้ก่อนได้ แล้วมาเติมทีหลัง · หนึ่งสาขาคือหนึ่งรายชื่อ',
+    body:'<div class="pform" data-partner-form="' + k + '">'
+      + fgrp('ข้อมูลทั่วไป',
+        field({ name:'kind', label:'ประเภทผู้ติดต่อ', type:'select', value: k, options: kinds,
+          hint: used.length && k !== 'both' ? 'ใช้ในเอกสารแล้ว เปลี่ยนเป็นผู้จำหน่ายและลูกค้าได้ แต่ตัดบทบาทเดิมไม่ได้'
+            : 'ผู้จำหน่ายและลูกค้า = ขายให้และซื้อจากรายเดียวกัน ขึ้นทั้งทะเบียนลูกค้าและผู้ขาย' })
+        + field({ name:'entityType', label:'กลุ่ม', type:'select', value: ent,
+            options:[['juristic','นิติบุคคล'],['individual','บุคคลธรรมดา']] })
+        + (p ? field({ name:'pcode', label:'รหัส', value: p.code, readonly:true, cls:'mono', hint:'รหัสตั้งแล้วเปลี่ยนไม่ได้ เอกสารเดิมอ้างรหัสนี้' })
+          : fieldX({ name:'newCode', label:'รหัส', value:'', cls:'mono', placeholder: nextRegCode(k === 'vendor' ? 'VEN' : 'CUS', DB.partners),
+              hint:'เว้นว่างให้ระบบตั้งให้ · ย้ายจากโปรแกรมเดิมใส่รหัสเดิมได้' }, 'maxlength="20" autocomplete="off"'))
+        + field({ name:'name', label:'ชื่อ (ตามหนังสือรับรอง)', wide:true, value: v('name'),
+            placeholder:'เช่น บริษัท ตัวอย่างการค้า จำกัด หรือ นายสมชาย ใจดี' })
+        + '<div class="fld-w"><label for="f_taxId">เลขประจำตัวผู้เสียภาษี (13 หลัก)</label>'
+          + '<input id="f_taxId" name="taxId" class="mono" inputmode="numeric" autocomplete="off" maxlength="17" value="' + esc(v('taxId')) + '"'
+          + ' aria-describedby="taxHint">'
+          + '<div class="fld-hint' + (tax[0] ? ' ' + tax[0] : '') + '" id="taxHint" aria-live="polite">' + esc(tax[1]) + '</div></div>'
+        + field({ name:'vatReg', label:'การจดทะเบียนภาษีมูลค่าเพิ่ม', type:'select', value: reg ? 'yes' : 'no',
+            options:[['yes','จด VAT แล้ว'], ['no','ไม่ได้จด VAT']],
+            hint:'จด VAT: ใบกำกับต้องมีเลขผู้เสียภาษีและสาขา · ไม่ได้จด (บุคคลทั่วไป): ใช้แค่ชื่อและที่อยู่' })
+        + '<div class="fld-w"><label for="f_branch">รหัสสาขา</label><input id="f_branch" name="branch" class="mono" inputmode="numeric" maxlength="5" value="'
+          + esc(noBranch ? '' : p ? (p.branch || '00000') : '00000') + '"' + (noBranch ? ' disabled placeholder="ไม่มีสาขา"' : '') + '>'
+          + '<div class="fld-hint">สำนักงานใหญ่ใช้ 00000 · สาขาที่ 1 ใช้ 00001</div></div>'
+        + field({ name:'branchName', label:'ชื่อสาขา', value: v('branchName'), placeholder:'เช่น สำนักงานใหญ่ หรือ สาขาบางนา' }))
+      + fgrp('ติดต่อ',
+        field({ name:'contactPerson', label:'ผู้ติดต่อ', value: v('contactPerson'), placeholder:'ชื่อคนที่ติดต่องาน' })
+        + fieldX({ name:'email', label:'อีเมล', type:'email', value: v('email'), placeholder:'name@example.co.th' }, 'autocomplete="off"')
+        + fieldX({ name:'mobile', label:'มือถือ', type:'tel', value: v('mobile') }, 'inputmode="tel"')
+        + fieldX({ name:'phone', label:'โทรศัพท์สำนักงาน', type:'tel', value: v('phone') }, 'inputmode="tel"')
+        + fieldX({ name:'fax', label:'แฟกซ์', type:'tel', value: v('fax') }, 'inputmode="tel"')
+        + fieldX({ name:'website', label:'เว็บไซต์', value: v('website'), placeholder:'www.example.co.th' }, 'inputmode="url" autocomplete="off"'))
+      + fgrp('ที่อยู่',
+        areaField({ name:'address', label:'ที่อยู่ตามใบกำกับภาษี', wide:true, value: v('address'),
+          placeholder:'เลขที่ ถนน แขวง/ตำบล เขต/อำเภอ จังหวัด' })
+        + fieldX({ name:'zip', label:'รหัสไปรษณีย์', value: v('zip'), cls:'mono' }, 'inputmode="numeric" maxlength="5"')
+        + areaField({ name:'shipAddress', label:'ที่อยู่จัดส่ง', wide:true, value: v('shipAddress'),
+          placeholder:'เว้นว่าง = ส่งที่อยู่ตามใบกำกับ' }))
+      + fgrp('ธนาคาร',
+        fieldX({ name:'bankName', label:'ธนาคาร', value: v('bankName'), placeholder:'เช่น กสิกรไทย' }, 'list="bankList" autocomplete="off"')
+        + '<datalist id="bankList">' + BANKS_TH.map((b) => '<option value="' + esc(b) + '">').join('') + '</datalist>'
+        + fieldX({ name:'bankAccount', label:'เลขที่บัญชี', value: v('bankAccount'), cls:'mono' }, 'inputmode="numeric" autocomplete="off"')
+        + field({ name:'bankAccountName', label:'ชื่อบัญชี', value: v('bankAccountName') })
+        + field({ name:'bankBranch', label:'สาขาธนาคาร', value: v('bankBranch') })
+        + field({ name:'bankAccountType', label:'ประเภทบัญชี', type:'select', value: p && p.bankAccountType ? p.bankAccountType : 'saving',
+            options: Object.keys(BANK_ACCOUNT_TYPES).map((x) => [x, BANK_ACCOUNT_TYPES[x]]),
+            hint:'ใช้ตอนโอนเงินจ่ายผู้ขาย หรือคืนเงินลูกค้า' }))
+      + fgrp('เงื่อนไขการค้า',
+        fieldX({ name:'termDays', label:'เครดิต (วัน)', type:'number', value: p ? String(p.termDays || 0) : '30',
+          hint:'วันครบกำหนดในเอกสารใหม่นับจากตัวเลขนี้ แก้รายใบได้' }, 'min="0" step="1" inputmode="numeric"')
+        + '<div id="pLimit"' + (k === 'vendor' ? ' hidden' : '') + '>'
+          + fieldX({ name:'creditLimit', label:'วงเงินเครดิต (บาท)', value: p && p.creditLimit ? plainNum(p.creditLimit) : '',
+            placeholder:'ไม่จำกัด', hint:'ไว้ดูประกอบการให้เครดิต ระบบไม่บล็อกการออกเอกสาร' }, 'inputmode="decimal"') + '</div>'
+        + '<div class="fld-w" id="pWht"><label for="f_wht">' + esc(wt[0]) + '</label><select id="f_wht" name="wht">'
+          + optWht(wt[2]).map((o) => '<option value="' + esc(o[0]) + '"' + (o[0] === v('whtCode') ? ' selected' : '') + '>' + esc(o[1]) + '</option>').join('')
+          + '</select><div class="fld-hint">' + esc(wt[1]) + '</div></div>'
+        + field({ name:'active', label:'สถานะ', type:'select', value: p && p.active === false ? 'no' : 'yes',
+            options:[['yes','ใช้งานอยู่'], ['no','เลิกใช้งาน — ไม่ขึ้นให้เลือกในเอกสารใหม่']],
+            hint:'เลิกใช้งานแล้วเอกสารเดิม ยอดค้าง และรายงานยังอยู่ครบ รับ/จ่ายชำระหนี้เดิมได้ตามปกติ' })
+        + areaField({ name:'note', label:'หมายเหตุ (ไม่พิมพ์บนเอกสาร)', wide:true, value: v('note') }))
       + '</div>'
       + (p ? '<div class="note">' + (used.length
           ? 'ใช้ในเอกสารแล้ว ' + used.length + ' รายการ (' + esc(used.slice(0, 3).join(', ')) + (used.length > 3 ? ' …' : '')
@@ -583,25 +646,54 @@ function modalPartner(kind, code) {
       + (p ? '' : ' · ถ้าเลขซ้ำกับรายที่มีอยู่แล้ว ระบบจะเตือนและไม่ให้สร้างซ้ำ'),
     onSubmit: function () {
       submitAction(function () {
-        const r = savePartner({
-          code: p ? p.code : null, kind: k,
+        const input = {
+          code: p ? p.code : null, newCode: p ? undefined : val('newCode'), kind: val('kind') || k,
           name: val('name'), entityType: val('entityType'), taxId: val('taxId'),
-          vatRegistered: isVendor ? undefined : val('vatReg') === 'yes',
-          branch: val('branch'), address: val('address'), phone: val('phone'),
-          termDays: val('termDays'), whtCode: val('wht') || null,
+          vatRegistered: val('vatReg') === 'yes', branch: val('branch'),
+          address: val('address'), phone: val('phone'),
+          termDays: val('termDays'), creditLimit: val('creditLimit').replace(/,/g, '') || '0', whtCode: val('wht') || null,
+          bankAccountType: val('bankAccountType'),
           active: val('active') !== 'no',
-        });
-        toast((r.created ? 'เพิ่ม' : 'แก้ไข') + label + ' ' + r.partner.code + ' แล้ว', 'ok', r.partner.name
+        };
+        PARTNER_TEXT.forEach(function (f) { input[f[0]] = val(f[0]); });
+        const r = savePartner(input);
+        toast((r.created ? 'เพิ่ม' : 'แก้ไข') + PARTNER_KINDS[r.partner.kind] + ' ' + r.partner.code + ' แล้ว', 'ok', r.partner.name
           + (r.partner.active === false ? ' · เลิกใช้งาน' : ''));
         return r;
       });
     },
   });
 }
-/* ฟอร์มผู้ติดต่อ: เปลี่ยนประเภทหรือการจด VAT แล้วช่องสาขาเปิด/ปิดตาม */
+/* ฟอร์มผู้ติดต่อ: เปลี่ยนกลุ่มหรือการจด VAT แล้วช่องสาขาเปิด/ปิดตาม · เปลี่ยนประเภทแล้วช่องหัก ณ ที่จ่ายและวงเงินเปลี่ยนตาม */
+function partnerTaxHint(form) {
+  const h = document.getElementById('taxHint');
+  if (!h) return;
+  const n = taxIdNote(val('taxId'), val('pcode') || null, val('kind'), val('branch'));
+  h.className = 'fld-hint' + (n[0] ? ' ' + n[0] : '');
+  h.textContent = n[1];
+  void form;
+}
 EXTRA_CHANGE.push(function (t) {
   const form = t.closest && t.closest('[data-partner-form]');
-  if (!form || (t.name !== 'entityType' && t.name !== 'vatReg')) return false;
+  if (!form) return false;
+  if (t.name === 'kind') {
+    const wt = PARTNER_WHT_TEXT[t.value] || PARTNER_WHT_TEXT.customer;
+    const box = document.getElementById('pWht');
+    if (box) {
+      box.querySelector('label').textContent = wt[0];
+      box.querySelector('.fld-hint').textContent = wt[1];
+      const first = box.querySelector('option[value=""]');
+      if (first) first.textContent = wt[2];
+    }
+    const lim = document.getElementById('pLimit');
+    if (lim) lim.hidden = t.value === 'vendor';
+    const nc = form.querySelector('[name="newCode"]');
+    if (nc) nc.placeholder = nextRegCode(t.value === 'vendor' ? 'VEN' : 'CUS', DB.partners);
+    form.setAttribute('data-partner-form', t.value);
+    partnerTaxHint(form);
+    return true;
+  }
+  if (t.name !== 'entityType' && t.name !== 'vatReg') return false;
   const reg = form.querySelector('[name="vatReg"]');
   /* เปลี่ยนเป็นบุคคลธรรมดา ส่วนใหญ่ไม่ได้จด VAT · เปลี่ยนเป็นนิติบุคคล ส่วนใหญ่จด — ตั้งค่าที่น่าจะถูกให้ก่อน แก้ได้ */
   if (t.name === 'entityType' && reg) reg.value = t.value === 'individual' ? 'no' : 'yes';
@@ -612,6 +704,13 @@ EXTRA_CHANGE.push(function (t) {
     br.placeholder = off ? 'ไม่มีสาขา' : '';
     if (off) br.value = ''; else if (!br.value) br.value = '00000';
   }
+  partnerTaxHint(form);
+  return true;
+});
+EXTRA_INPUT.push(function (t) {
+  const form = t.closest && t.closest('[data-partner-form]');
+  if (!form || (t.name !== 'taxId' && t.name !== 'branch')) return false;
+  partnerTaxHint(form);
   return true;
 });
 EXTRA_DISPATCH.push(function (head, rest) {
@@ -627,40 +726,96 @@ EXTRA_DISPATCH.push(function (head, rest) {
   return true;
 });
 
+/* ---------- สินค้าและบริการ ----------
+   บริการ · สินค้าไม่นับสต๊อก (ขายของแต่ไม่คุมจำนวน) · สินค้านับสต๊อก
+   ฝั่งขายและฝั่งซื้อแยกกัน แต่ละฝั่งมีรายละเอียด ราคา ชนิดภาษี และบัญชีของตัวเอง — เลือกสินค้าในเอกสารแล้วเติมให้ตามฝั่ง */
+const ITEM_TYPE_HINT = {
+  service: 'ไม่แตะสต๊อก · ลูกค้านิติบุคคลอาจหักภาษี ณ ที่จ่ายค่าบริการ',
+  nonstock: 'ขายได้โดยไม่ต้องรับเข้าคลัง ไม่คิดต้นทุนขาย · ซื้อมาลงบัญชีค่าใช้จ่ายที่ตั้งไว้',
+  stock: 'รับเข้าคลังด้วยเอกสารซื้อ ขายแล้วตัดสต๊อกและต้นทุนขาย (ถัวเฉลี่ย) ให้อัตโนมัติ',
+};
+const itemRevDefault = (type) => { try { const c = defaultRevenueAccount(null, type === 'service' ? 'service_revenue' : 'sales_revenue'); return c + ' ' + acc(c).name; } catch (e) { return 'ตามประเภท'; } };
+const itemExpDefault = () => { try { const c = defaultAccountFor('admin_expense'); return c + ' ' + acc(c).name; } catch (e) { return 'ค่าใช้จ่ายทั่วไป'; } };
 function modalItem(code) {
   const it = code ? DB.items.find((x) => x.code === code) : null;
   if (code && !it) return;
+  const type = it ? it.type : 'stock';
+  const v = (f) => (it ? it[f] || '' : '');
+  /* ยังมีของในคลัง เปลี่ยนเป็นบริการ/ไม่นับสต๊อกไม่ได้ — มูลค่าสินค้าคงเหลือจะหายจากงบ */
+  const locked = it && it.type === 'stock' && it.qty !== 0;
+  const typeSel = '<div class="fld-w"><label for="f_type">ประเภท</label><select id="f_type" name="type">'
+    + Object.keys(ITEM_TYPES).map((x) => '<option value="' + x + '"' + (x === type ? ' selected' : '')
+      + (locked && x !== 'stock' ? ' disabled' : '') + '>' + esc(ITEM_TYPES[x]) + '</option>').join('')
+    + '</select><div class="fld-hint" id="itemTypeHint">' + esc(locked ? 'ยังมีของในคลัง ' + it.qty + ' ' + it.uom
+      + ' — ตัดสต๊อกให้เป็นศูนย์ก่อนเปลี่ยนประเภท' : ITEM_TYPE_HINT[type]) + '</div></div>';
+  const vatOpts = Object.keys(ITEM_VAT_TYPES).map((x) => [x, ITEM_VAT_TYPES[x]]);
+  const revOpts = [['', 'อัตโนมัติ — ' + itemRevDefault(type)]].concat(revenueAccounts().map((a) => [a.code, a.code + ' ' + a.name]));
+  /* สินค้าไม่นับสต๊อกห้ามลงบัญชีสินค้าคงเหลือ — ไม่มีจำนวนในคลังรองรับ ยอดคุมสินค้าจะไม่ตรง */
+  const expOpts = [['', 'อัตโนมัติ — ' + itemExpDefault()]].concat(billAccounts().filter((a) => a.subType !== 'inventory')
+    .map((a) => [a.code, a.code + ' ' + a.name]));
   modal({
-    title: it ? 'แก้ไข ' + it.code : 'เพิ่มสินค้าหรือบริการ',
+    title: it ? 'แก้ไข ' + it.code + ' ' + it.name : 'เพิ่มสินค้าหรือบริการ',
     sub: it && it.type === 'stock'
       ? 'คงเหลือ ' + it.qty + ' ' + it.uom + ' · ต้นทุนเฉลี่ย ' + fmt(it.avgCost)
         + ' — จำนวนเปลี่ยนด้วยเอกสารซื้อขาย หรือ ตรวจนับ/ยอดยกมา ที่หน้าสต๊อก'
-      : 'สินค้าจะตัดสต๊อกและต้นทุนขายอัตโนมัติ ส่วนบริการไม่แตะสต๊อก',
-    body:'<div class="flds">'
-      + field({ name:'name', label:'ชื่อสินค้าหรือบริการ', wide:true, value: it ? it.name : '' })
-      + field({ name:'type', label:'ประเภท', type:'select', value: it ? it.type : 'stock',
-          options:[['stock','สินค้า (มีสต๊อก)'],['service','บริการ (ไม่มีสต๊อก)']] })
-      + (it ? '' : field({ name:'newCode', label:'รหัสสินค้า (เว้นว่างให้ระบบตั้งให้)', value:'' }))
-      + field({ name:'category', label:'หมวด', value: it ? it.category : '' })
-      + field({ name:'uom', label:'หน่วยนับ', value: it ? it.uom : '', placeholder:'ชิ้น กล่อง งาน' })
-      + field({ name:'price', label:'ราคาขายต่อหน่วย (ก่อนภาษี)', value: it ? unM(it.price) : '' })
-      + field({ name:'reorder', label:'จุดสั่งซื้อ (เตือนเมื่อคงเหลือต่ำกว่านี้)',
-          value: it ? String(it.reorder) : '0' })
+      : 'ราคาและชนิดภาษีที่ตั้งไว้ เติมให้เองตอนเลือกสินค้าในเอกสาร แก้รายใบได้',
+    body:'<div class="iform" data-item-form>'
+      + fgrp('ข้อมูลสินค้า',
+        typeSel
+        + (it ? field({ name:'icode', label:'รหัสสินค้า / SKU', value: it.code, readonly:true, cls:'mono' })
+          : fieldX({ name:'newCode', label:'รหัสสินค้า / SKU', value:'', cls:'mono', placeholder:'เว้นว่างให้ระบบตั้งให้' }, 'autocomplete="off"'))
+        + field({ name:'name', label:'ชื่อสินค้าหรือบริการ', wide:true, value: v('name') })
+        + field({ name:'category', label:'หมวด', value: it ? it.category : '', placeholder:'ทั่วไป' })
+        + field({ name:'uom', label:'หน่วยนับ', value: v('uom'), placeholder:'ชิ้น กล่อง งาน' })
+        + fieldX({ name:'barcode', label:'บาร์โค้ด', value: v('barcode'), cls:'mono' }, 'inputmode="numeric" autocomplete="off" maxlength="30"'))
+      + fgrp('ฝั่งขาย',
+        areaField({ name:'sellDesc', label:'รายละเอียดบนเอกสารขาย', wide:true, value: v('sellDesc'), placeholder:'เว้นว่าง = ใช้ชื่อสินค้า' })
+        + fieldX({ name:'price', label:'ราคาขายต่อหน่วย', value: it ? plainNum(it.price) : '' }, 'inputmode="decimal"')
+        + field({ name:'sellVat', label:'ภาษีขาย', type:'select', value: it && it.sellVat ? it.sellVat : 'exclusive', options: vatOpts,
+            hint:'ราคาขายข้างบนเป็นราคาแบบที่เลือกนี้' })
+        + field({ name:'revenueAcc', label:'บัญชีรายได้', type:'select', value: v('revenueAcc'), options: revOpts }))
+      + fgrp('ฝั่งซื้อ',
+        areaField({ name:'buyDesc', label:'รายละเอียดบนเอกสารซื้อ', wide:true, value: v('buyDesc'), placeholder:'เว้นว่าง = ใช้ชื่อสินค้า' })
+        + fieldX({ name:'buyPrice', label:'ราคาซื้อต่อหน่วย', value: it && it.buyPrice ? plainNum(it.buyPrice) : '' }, 'inputmode="decimal"')
+        + field({ name:'buyVat', label:'ภาษีซื้อ', type:'select', value: it && it.buyVat ? it.buyVat : 'exclusive', options: vatOpts })
+        + '<div id="itemExp"' + (type === 'stock' ? ' hidden' : '') + '>'
+          + field({ name:'expenseAcc', label:'บัญชีค่าใช้จ่าย', type:'select', value: v('expenseAcc'), options: expOpts,
+            hint:'ใช้ตอนตั้งหนี้หรือบันทึกค่าใช้จ่ายของสินค้านี้' }) + '</div>'
+        + '<div class="fld-w" id="itemInv"' + (type === 'stock' ? '' : ' hidden') + '><span class="fld-l">บัญชีตอนซื้อ</span>'
+          + '<div class="fld-static">สินค้าคงเหลือ — สินค้านับสต๊อกรับเข้าคลังเสมอ</div></div>')
+      + fgrp('สต๊อก', fieldX({ name:'reorder', label:'จุดสั่งซื้อ (เตือนเมื่อคงเหลือต่ำกว่านี้)', type:'number',
+          value: it ? String(it.reorder || 0) : '0' }, 'min="0" step="any" inputmode="decimal"'), ' id="itemStock"' + (type === 'stock' ? '' : ' hidden'))
       + '</div>',
     submitLabel: it ? 'บันทึกการแก้ไข' : 'เพิ่มสินค้า',
     onSubmit: function () {
       submitAction(function () {
+        const t = val('type');
         const r = saveItem({
-          code: it ? it.code : null, newCode: val('newCode'),
-          name: val('name'), type: val('type'), category: val('category'),
-          uom: val('uom'), price: val('price'), reorder: val('reorder'),
+          code: it ? it.code : null, newCode: it ? undefined : val('newCode'),
+          name: val('name'), type: t, category: val('category'), uom: val('uom'), barcode: val('barcode'),
+          price: val('price').replace(/,/g, ''), sellVat: val('sellVat'), sellDesc: val('sellDesc'), revenueAcc: val('revenueAcc'),
+          buyPrice: val('buyPrice').replace(/,/g, ''), buyVat: val('buyVat'), buyDesc: val('buyDesc'),
+          expenseAcc: t === 'stock' ? '' : val('expenseAcc'),
+          reorder: t === 'stock' ? val('reorder') : (it ? String(it.reorder || 0) : '0'),
         });
-        toast((r.created ? 'เพิ่ม' : 'แก้ไข') + 'สินค้า ' + r.item.code + ' แล้ว', 'ok', r.item.name);
+        toast((r.created ? 'เพิ่ม' : 'แก้ไข') + ITEM_TYPES[r.item.type] + ' ' + r.item.code + ' แล้ว', 'ok', r.item.name);
         return r;
       });
     },
   });
 }
+/* ฟอร์มสินค้า: เปลี่ยนประเภทแล้วช่องบัญชีค่าใช้จ่ายและจุดสั่งซื้อเปิด/ปิดตาม */
+EXTRA_CHANGE.push(function (t) {
+  if (t.name !== 'type' || !(t.closest && t.closest('[data-item-form]'))) return false;
+  const stock = t.value === 'stock';
+  const show = (id, on) => { const e = document.getElementById(id); if (e) e.hidden = !on; };
+  show('itemExp', !stock); show('itemInv', stock); show('itemStock', stock);
+  const h = document.getElementById('itemTypeHint');
+  if (h) h.textContent = ITEM_TYPE_HINT[t.value] || '';
+  const rev = document.querySelector('#modal [name="revenueAcc"] option[value=""]');
+  if (rev) rev.textContent = 'อัตโนมัติ — ' + itemRevDefault(t.value);
+  return true;
+});
 
 /* modalEmployee อยู่ใน ui-payroll.js */
 
@@ -2307,6 +2462,10 @@ async function handleFile(file) {
       render();
       return;
     }
+    /* สมุดรายชื่อหรือรายการสินค้า (ไม่มีตัวเลขบัญชี) — นำเข้าทะเบียน เห็นผลทุกแถวก่อนบันทึก (ui-master.js)
+       มาจากปุ่มนำเข้าในหน้าทะเบียน ยอมรับไฟล์ที่มีคอลัมน์น้อยกว่าปกติ เพราะรู้แล้วว่าตั้งใจนำเข้าอะไร */
+    const mst = detectMasterFile(rows) || (STATE.impWant ? detectMasterFile(rows, STATE.impWant.kind) : null);
+    if (mst) { masterOpen(file.name, rows, mst); render(); return; }
     const det = detectColumns(rows);
     const kind = detectFileKind(rows, det.map, det.headerRow);
     /* วันที่ในหัวไฟล์ตั้งวันตัดยอดให้ตรงกับงบทดลอง — ค่าเดิม (วันแรกของงวดที่เปิดอยู่) ผิดเกือบทุกครั้ง */

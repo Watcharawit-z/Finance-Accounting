@@ -1440,7 +1440,7 @@ function pkgAmount(v, where) {
 }
 
 function upsertPartner(p) {
-  const kind = p.kind === 'vendor' ? 'vendor' : 'customer';
+  const kind = PARTNER_KINDS[p.kind] ? p.kind : 'customer';
   const rec = {
     code: p.code, name: p.name, taxId: p.taxId || null, address: p.address || '',
     branch: p.branch || (p.entityType === 'individual' ? null : '00000'),
@@ -1448,6 +1448,11 @@ function upsertPartner(p) {
     kind: kind, termDays: Number(p.termDays || 0), whtCode: p.whtCode || null,
     creditLimit: pkgAmount(p.creditLimit, 'วงเงินเครดิต ' + p.code), active: true,
   };
+  /* ช่องสมุดรายชื่อที่แฟ้มรุ่นใหม่ส่งมา (ผู้ติดต่อ อีเมล ธนาคาร ฯลฯ) — แฟ้มรุ่นเดิมไม่มี ก็ไม่แตะค่าเดิม */
+  if (p.phone !== undefined) rec.phone = String(p.phone || '');
+  PARTNER_TEXT.forEach(function (f) { if (p[f[0]] !== undefined && p[f[0]] !== null) rec[f[0]] = String(p[f[0]]).trim().slice(0, f[1]); });
+  if (BANK_ACCOUNT_TYPES[p.bankAccountType]) rec.bankAccountType = p.bankAccountType;
+  if (typeof p.vatRegistered === 'boolean') rec.vatRegistered = p.vatRegistered;
   const at = DB.partners.findIndex((x) => x.code === rec.code);
   if (at >= 0) { DB.partners[at] = { ...DB.partners[at], ...rec }; return 0; }
   DB.partners.push(rec);
@@ -1457,13 +1462,18 @@ function upsertPartner(p) {
 /** สินค้าจากแฟ้มข้อมูล — ข้อมูลหลักอัปเดตได้ แต่จำนวนคงเหลือต้องเข้าคลังเป็นรายการ "ยอดยกมา" (stockOpening)
     ห้ามเขียนทับจำนวน/มูลค่าตรง ๆ ไม่งั้นสต๊อกการ์ดไม่มีที่มา และยอดที่ขายไปแล้วจะถูกทับหาย */
 function upsertItem(i) {
-  const type = i.type === 'service' ? 'service' : 'stock';
+  const type = ITEM_TYPES[i.type] ? i.type : 'stock';
   const avgCost = M(i.avgCost || '0');
   const qty = type === 'stock' ? roundQty(Number(i.qty || 0)) : 0;
   /* มูลค่าต้องเป็นจำนวนเต็มสตางค์ — จำนวนมีทศนิยม (12.5 หน่วย) คูณตรง ๆ ได้เศษเกินสตางค์ */
   const want = { qty, value: round2(mulQty(avgCost, qty)) };
   const master = { code: i.code, name: i.name, category: i.category || 'ทั่วไป', uom: i.uom || 'หน่วย',
     type, price: M(i.price || '0'), reorder: Number(i.reorder || 0) };
+  /* ราคาซื้อ ชนิดภาษี บาร์โค้ด — แฟ้มรุ่นเดิมไม่มี ก็ไม่แตะค่าเดิม */
+  if (i.buyPrice !== undefined && i.buyPrice !== null && i.buyPrice !== '') master.buyPrice = pkgAmount(i.buyPrice, 'ราคาซื้อ ' + i.code);
+  if (ITEM_VAT_TYPES[i.sellVat]) master.sellVat = i.sellVat;
+  if (ITEM_VAT_TYPES[i.buyVat]) master.buyVat = i.buyVat;
+  ['sellDesc', 'buyDesc', 'barcode'].forEach(function (k) { if (i[k] !== undefined && i[k] !== null) master[k] = String(i[k]).trim(); });
   const at = DB.items.findIndex((x) => x.code === master.code);
   if (at >= 0) {
     const it = DB.items[at];
@@ -1613,9 +1623,408 @@ function importPackage(pkg, overrides, opts) {
   };
 }
 
+/* ===================================================================
+   นำเข้าสมุดรายชื่อและสินค้าจากไฟล์ Excel / CSV
+   ขั้นตอนแบบที่นักบัญชีคุ้น: ดาวน์โหลดแบบฟอร์ม (หรือใช้ไฟล์ที่ส่งออกจากโปรแกรมเดิม) → ลากเข้ามา
+   → ดูผลทุกแถวก่อนบันทึก → นำเข้า · แถวที่ซ้ำกับทะเบียนข้ามให้เอง
+   (ผู้ติดต่อ: รหัส หรือเลขผู้เสียภาษี + สาขา · สินค้า: รหัส บาร์โค้ด หรือชื่อ)
+   แถวที่บันทึกไม่ได้บอกเหตุผลทีละแถว ดาวน์โหลดเป็นไฟล์ไปแก้แล้วลากเข้ามาใหม่ได้ — ประวัติอยู่ใน DB.masterImports
+   ทุกแถวผ่าน savePartner/saveItem ตัวเดียวกับฟอร์ม (ตอนดูตัวอย่างลองบันทึกแล้วคืนค่า) ผลตัวอย่างจึงตรงกับผลจริงทุกแถว
+   =================================================================== */
+const MASTER_KINDS = { contact: 'สมุดรายชื่อ (ลูกค้า / ผู้ขาย)', product: 'สินค้าและบริการ' };
+/* [ช่อง, หัวคอลัมน์ในแบบฟอร์ม, คำใบ้หัวคอลัมน์] — หัวคอลัมน์หนึ่งเข้าได้หลายคำใบ้ คำที่ยาวกว่าชนะ
+   (เช่น "ชื่อบัญชี" เป็นชื่อบัญชีธนาคาร ไม่ใช่ชื่อผู้ติดต่อ · "ที่อยู่จัดส่ง" ไม่ใช่ที่อยู่ตามใบกำกับ) */
+const MASTER_FIELDS = {
+  contact: [
+    ['kind', 'ประเภทผู้ติดต่อ', ['ประเภทผู้ติดต่อ', 'ประเภท', 'contact type', 'type']],
+    ['code', 'รหัสผู้ติดต่อ', ['รหัสผู้ติดต่อ', 'รหัสลูกค้า', 'รหัสผู้ขาย', 'รหัสผู้จำหน่าย', 'รหัส', 'contact code', 'code']],
+    ['entityType', 'กลุ่ม (บุคคลธรรมดา / นิติบุคคล)', ['กลุ่มผู้ติดต่อ', 'กลุ่ม', 'ประเภทบุคคล', 'บุคคลธรรมดา/นิติบุคคล', 'นิติบุคคล/บุคคลธรรมดา', 'entity type', 'contact group']],
+    ['name', 'ชื่อ', ['ชื่อผู้ติดต่อ', 'ชื่อลูกค้า', 'ชื่อผู้ขาย', 'ชื่อผู้จำหน่าย', 'ชื่อบริษัท', 'ชื่อกิจการ', 'ชื่อ', 'company name', 'contact name', 'name']],
+    ['taxId', 'เลขประจำตัวผู้เสียภาษี', ['เลขประจำตัวผู้เสียภาษี', 'เลขผู้เสียภาษี', 'เลขประจำตัวประชาชน', 'tax id', 'taxid']],
+    ['branch', 'รหัสสาขา', ['รหัสสาขา', 'เลขที่สาขา', 'สาขาที่', 'สำนักงาน/สาขา', 'branch code', 'branch no', 'สาขา', 'branch']],
+    ['branchName', 'ชื่อสาขา', ['ชื่อสาขา', 'branch name']],
+    ['vatRegistered', 'จดทะเบียนภาษีมูลค่าเพิ่ม', ['จดทะเบียนภาษีมูลค่าเพิ่ม', 'จดภาษีมูลค่าเพิ่ม', 'จด vat', 'vat registered']],
+    ['contactPerson', 'ผู้ติดต่อ', ['ผู้ติดต่อ', 'ผู้ประสานงาน', 'บุคคลที่ติดต่อ', 'contact person', 'attention']],
+    ['email', 'อีเมล', ['อีเมล', 'อีเมล์', 'e-mail', 'email']],
+    ['mobile', 'มือถือ', ['โทรศัพท์มือถือ', 'เบอร์มือถือ', 'มือถือ', 'mobile']],
+    ['phone', 'โทรศัพท์สำนักงาน', ['โทรศัพท์สำนักงาน', 'โทรศัพท์', 'เบอร์โทร', 'phone', 'tel']],
+    ['fax', 'แฟกซ์', ['แฟกซ์', 'โทรสาร', 'fax']],
+    ['website', 'เว็บไซต์', ['เว็บไซต์', 'website']],
+    ['address', 'ที่อยู่', ['ที่อยู่ออกเอกสาร', 'ที่อยู่ตามใบกำกับ', 'ที่อยู่', 'billing address', 'address']],
+    ['zip', 'รหัสไปรษณีย์', ['รหัสไปรษณีย์', 'zip', 'postcode', 'postal code']],
+    ['shipAddress', 'ที่อยู่จัดส่ง', ['ที่อยู่จัดส่ง', 'ที่อยู่ส่งของ', 'shipping address', 'delivery address']],
+    ['termDays', 'เครดิต (วัน)', ['จำนวนวันเครดิต', 'เครดิต', 'credit days', 'credit term']],
+    ['creditLimit', 'วงเงินเครดิต', ['วงเงินเครดิต', 'วงเงิน', 'credit limit']],
+    ['whtCode', 'หัก ณ ที่จ่าย', ['ประเภทเงินได้', 'หัก ณ ที่จ่าย', 'withholding']],
+    ['bankName', 'ธนาคาร', ['ชื่อธนาคาร', 'ธนาคาร', 'bank name', 'bank']],
+    ['bankAccount', 'เลขที่บัญชี', ['เลขที่บัญชีธนาคาร', 'เลขที่บัญชี', 'เลขบัญชี', 'account number', 'account no', 'bank account']],
+    ['bankAccountName', 'ชื่อบัญชี', ['ชื่อบัญชีธนาคาร', 'ชื่อบัญชี', 'account name']],
+    ['bankBranch', 'สาขาธนาคาร', ['สาขาธนาคาร', 'bank branch']],
+    ['bankAccountType', 'ประเภทบัญชี', ['ประเภทบัญชีธนาคาร', 'ประเภทบัญชี', 'account type']],
+    ['note', 'หมายเหตุ', ['หมายเหตุ', 'note', 'remark']],
+  ],
+  product: [
+    ['type', 'ประเภทสินค้า', ['ประเภทสินค้า', 'ชนิดสินค้า', 'ประเภท', 'product type', 'type']],
+    ['code', 'รหัสสินค้า', ['รหัสสินค้า', 'รหัสบริการ', 'รหัส', 'sku', 'product code', 'item code', 'code']],
+    ['name', 'ชื่อสินค้า', ['ชื่อสินค้า', 'ชื่อบริการ', 'ชื่อ', 'product name', 'item name', 'name']],
+    ['category', 'หมวดหมู่', ['หมวดหมู่', 'หมวดสินค้า', 'หมวด', 'กลุ่มสินค้า', 'category']],
+    ['uom', 'หน่วยนับ', ['หน่วยนับ', 'หน่วย', 'uom', 'unit']],
+    ['barcode', 'บาร์โค้ด', ['บาร์โค้ด', 'barcode']],
+    ['sellDesc', 'รายละเอียดขาย', ['รายละเอียดขาย', 'รายละเอียดการขาย', 'คำอธิบายขาย', 'รายละเอียด', 'sales description', 'description']],
+    ['price', 'ราคาขาย', ['ราคาขายต่อหน่วย', 'ราคาขาย', 'sell price', 'selling price', 'sales price', 'price', 'ราคา']],
+    ['sellVat', 'ภาษีขาย', ['ประเภทภาษีขาย', 'ภาษีขาย', 'sales vat', 'sell vat']],
+    ['revenueAcc', 'บัญชีรายได้', ['รหัสบัญชีรายได้', 'บัญชีรายได้', 'บัญชีขาย', 'revenue account', 'sales account']],
+    ['buyDesc', 'รายละเอียดซื้อ', ['รายละเอียดซื้อ', 'รายละเอียดการซื้อ', 'คำอธิบายซื้อ', 'purchase description']],
+    ['buyPrice', 'ราคาซื้อ', ['ราคาซื้อต่อหน่วย', 'ราคาซื้อ', 'ราคาทุน', 'buy price', 'purchase price', 'cost']],
+    ['buyVat', 'ภาษีซื้อ', ['ประเภทภาษีซื้อ', 'ภาษีซื้อ', 'purchase vat', 'buy vat']],
+    ['expenseAcc', 'บัญชีค่าใช้จ่าย', ['รหัสบัญชีค่าใช้จ่าย', 'บัญชีค่าใช้จ่าย', 'บัญชีซื้อ', 'expense account', 'purchase account']],
+    ['reorder', 'จุดสั่งซื้อ', ['จุดสั่งซื้อ', 'reorder point', 'reorder']],
+  ],
+};
+/* คอลัมน์ที่บอกชัดว่าเป็นไฟล์ชนิดนั้น — ต้องเจออย่างน้อยสองคอลัมน์ ไม่งั้นไม่เดา */
+const MASTER_CORE = {
+  contact: ['taxId', 'branch', 'contactPerson', 'email', 'mobile', 'phone', 'address', 'zip', 'shipAddress', 'bankAccount', 'kind', 'entityType', 'termDays'],
+  product: ['price', 'buyPrice', 'uom', 'barcode', 'sellVat', 'buyVat', 'sellDesc', 'buyDesc'],
+};
+/* แถวตัวอย่างในแบบฟอร์ม — บอกค่าที่ใช้ได้ในแต่ละช่อง (เรียงตาม MASTER_FIELDS) */
+const MASTER_SAMPLE = {
+  contact: [
+    ['ลูกค้า', '', 'นิติบุคคล', 'บริษัท ตัวอย่างการค้า จำกัด', '0105548021442', '00000', 'สำนักงานใหญ่', 'จด', 'คุณสมศรี', 'account@example.co.th',
+      '0812345678', '021234567', '', '', '99 ถนนสุขุมวิท แขวงคลองเตย เขตคลองเตย กรุงเทพมหานคร', '10110', '', '30', '', 'ค่าบริการ', '', '', '', '', '', ''],
+    ['ผู้จำหน่ายและลูกค้า', '', 'บุคคลธรรมดา', 'นายสมชาย ใจดี', '', '', '', 'ไม่จด', '', '', '0899999999', '', '', '', '9 ซอยงามวงศ์วาน นนทบุรี', '11000', '',
+      '0', '', '', 'กสิกรไทย', '123-4-56789-0', 'นายสมชาย ใจดี', 'งามวงศ์วาน', 'ออมทรัพย์', ''],
+  ],
+  product: [
+    ['บริการ', 'SV-001', 'ค่าที่ปรึกษา', 'บริการ', 'ชั่วโมง', '', 'ค่าที่ปรึกษาด้านบัญชี', '1500', 'ไม่รวมภาษี', '', '', '', '', '', ''],
+    ['สินค้าไม่นับสต๊อก', 'NS-001', 'ถุงผ้า', 'ของที่ระลึก', 'ใบ', '8850000000011', '', '120', 'รวมภาษี', '', 'ถุงผ้าดิบ', '80', 'ไม่รวมภาษี', '', ''],
+    ['สินค้านับสต๊อก', 'ST-001', 'สายไฟ 2.5 มม.', 'วัสดุไฟฟ้า', 'ม้วน', '', '', '1200', 'ไม่รวมภาษี', '', '', '850', 'ไม่รวมภาษี', '', '5'],
+  ],
+};
+
+function masterMapFrom(kind, cells) {
+  const map = {};
+  cells.forEach(function (c, j) {
+    const n = norm(c);
+    if (!n) return;
+    let key = null, len = 0;
+    MASTER_FIELDS[kind].forEach(function (f) {
+      f[2].forEach(function (h) { const hn = norm(h); if (n.indexOf(hn) >= 0 && hn.length > len) { len = hn.length; key = f[0]; } });
+    });
+    if (key && map[key] === undefined) map[key] = j;
+  });
+  return map;
+}
+/** ไฟล์นี้คือสมุดรายชื่อหรือรายการสินค้าไหม — คืน { kind, headerRow, map } หรือ null
+    งบทดลอง (มีเดบิต) ไฟล์ยอดค้างรายใบ และผังบัญชี (รหัสบัญชี ชื่อบัญชี) ไม่ใช่ · want = 'contact' | 'product' ดูเฉพาะชนิดนั้น */
+function detectMasterFile(rows, want) {
+  let best = null;
+  for (let i = 0; i < Math.min(rows.length, 15); i++) {
+    const cells = (rows[i] || []).map((c) => cellText(c));
+    if (/เดบิต|เดบิท|debit|เลขที่เอกสาร|ยอดค้าง/i.test(cells.join('|'))) continue;
+    (MASTER_KINDS[want] ? [want] : ['contact', 'product']).forEach(function (kind) {
+      const map = masterMapFrom(kind, cells);
+      if (map.name === undefined) return;
+      if (/บัญชี|account/i.test(cells[map.name]) || (map.code !== undefined && /บัญชี|account/i.test(cells[map.code]))) return;
+      /* want = ผู้ใช้บอกแล้วว่าจะนำเข้าอะไร (มาจากหน้าทะเบียน) — มีคอลัมน์ชื่อก็พอ */
+      const score = MASTER_CORE[kind].filter((k) => map[k] !== undefined).length;
+      if (score < (want ? 0 : 2)) return;
+      if (!best || score > best.score) best = { kind, headerRow: i, map, score };
+    });
+  }
+  return best ? masterFixMap(rows, best) : null;
+}
+/** คอลัมน์ "ประเภท" ของผู้ติดต่อบางไฟล์ใส่ บุคคลธรรมดา/นิติบุคคล — ดูจากค่าในคอลัมน์ ไม่ใช่หัวอย่างเดียว */
+function masterFixMap(rows, det) {
+  const m = det.map;
+  if (det.kind !== 'contact' || m.kind === undefined || m.entityType !== undefined) return det;
+  const vals = rows.slice(det.headerRow + 1, det.headerRow + 31).map((r) => cellText(r[m.kind])).filter(Boolean);
+  const ent = vals.filter((v) => masterEntityOf(v) && !masterKindOf(v)).length;
+  if (vals.length && ent * 2 >= vals.length) { m.entityType = m.kind; delete m.kind; }
+  return det;
+}
+
+/* ---------- แปลงค่าในช่อง: '' = ไม่ได้กรอก · null = อ่านไม่ออก ---------- */
+function masterKindOf(v) {
+  const t = norm(v);
+  if (!t) return '';
+  const cus = /ลูกค้า|customer|ลูกหนี้/.test(t), ven = /ผู้ขาย|ผู้จำหน่าย|vendor|supplier|เจ้าหนี้/.test(t);
+  if ((cus && ven) || /ทั้งสอง|both/.test(t)) return 'both';
+  return ven ? 'vendor' : cus ? 'customer' : null;
+}
+function masterEntityOf(v) {
+  const t = norm(v);
+  if (!t) return '';
+  if (/นิติบุคคล|นิติ|บริษัท|ห้างหุ้นส่วน|juristic|company|corporat/.test(t)) return 'juristic';
+  if (/บุคคลธรรมดา|บุคคล|individual|person/.test(t)) return 'individual';
+  return null;
+}
+function masterYesNo(v) {
+  const t = norm(v);
+  if (!t) return '';
+  if (/ไม่|^no$|^n$|false|^0$|^-$/.test(t)) return 'no';
+  if (/^(ใช่|จด|จดแล้ว|จดทะเบียน|จดvat|มี|yes|y|true|1|✓|x)$/.test(t)) return 'yes';
+  return null;
+}
+function masterBankType(v) {
+  const t = norm(v);
+  if (!t) return '';
+  if (/ออมทรัพย์|saving/.test(t)) return 'saving';
+  if (/กระแส|current/.test(t)) return 'current';
+  if (/ประจำ|fixed/.test(t)) return 'fixed';
+  return null;
+}
+function masterWht(v) {
+  const t = norm(v);
+  if (!t || /^(ไม่หัก|ไม่มี|none|no|-)$/.test(t)) return '';
+  const up = String(v).trim().toUpperCase();
+  if (/^WHT_[A-Z]+$/.test(up) && TAX_RATES.some((r) => r.code === up)) return up;
+  const words = [[/บริการ|จ้างทำของ|service/, 'WHT_SERVICE'], [/เช่า|rent/, 'WHT_RENT'], [/ขนส่ง|transport/, 'WHT_TRANSPORT'],
+    [/โฆษณา|advert/, 'WHT_ADVERT'], [/วิชาชีพ|profession/, 'WHT_PROF'], [/รับเหมา|contract/, 'WHT_CONTRACT']];
+  const w = words.find((x) => x[0].test(t));
+  return w ? w[1] : null;
+}
+function masterItemType(v) {
+  const t = norm(v);
+  if (!t) return '';
+  if (/ไม่นับ|ไม่ติดตาม|ไม่คุม|non-?stock|non-?inventory/.test(t)) return 'nonstock';
+  if (/บริการ|service/.test(t)) return 'service';
+  if (/นับสต|stock|inventory/.test(t)) return 'stock';
+  if (/^(สินค้า|product|goods)$/.test(t)) return '';
+  return null;
+}
+function masterVatType(v) {
+  const t = norm(v);
+  if (!t) return '';
+  if (/ยกเว้น|exempt|ไม่มีภาษี|non-?vat/.test(t)) return 'exempt';
+  if (/ไม่รวม|แยก|exclusive|excl|ก่อนภาษี/.test(t)) return 'exclusive';
+  if (/รวม|inclusive|incl/.test(t)) return 'inclusive';
+  if (/(^|[^0-9.])0(\.0+)?%|^0$|ศูนย์|zero/.test(t)) return 'zero';
+  if (/7%|^7$|vat7|^vat$/.test(t)) return 'exclusive';
+  return null;
+}
+/** เลขผู้เสียภาษี — Excel ที่เก็บเป็นตัวเลขทำเลข 0 หน้าหาย (0105… เหลือ 12 หลัก) หรือกลายเป็นรูปยกกำลัง */
+function masterTaxId(v) {
+  let t = String(v || '').trim();
+  if (/^\d(\.\d+)?e\+\d+$/i.test(t)) t = Number(t).toFixed(0);
+  t = t.replace(/\D/g, '');
+  if (t.length === 12 && validTaxId('0' + t)) t = '0' + t;
+  return t;
+}
+/** เบอร์โทร — Excel ตัดเลข 0 หน้าเบอร์ทิ้ง (812345678 → 0812345678) */
+function masterPhone(v) {
+  const t = String(v || '').trim();
+  return /^[1-9]\d{7,8}$/.test(t) ? '0' + t : t;
+}
+function masterBranch(v) {
+  const t = String(v || '').trim();
+  if (!t) return '';
+  if (/สำนักงานใหญ่|สนญ|head\s*office|^hq$|^ho$/i.test(t)) return '00000';
+  const m = t.match(/\d+/);
+  return m && m[0].length <= 5 ? m[0].padStart(5, '0') : null;
+}
+function masterAccount(v) {
+  const t = String(v || '').trim();
+  if (!t) return '';
+  const code = t.split(/\s+/)[0];
+  const a = DB.accounts.find((x) => x.code === code) || DB.accounts.find((x) => x.name === t);
+  return a ? a.code : null;
+}
+
+/** แถวหนึ่งของไฟล์ → ค่าที่ส่งให้ savePartner / saveItem · ค่าที่อ่านไม่ออกเก็บเป็นปัญหาของแถว (ไม่เดา) */
+function masterInputOf(kind, get, problems) {
+  const bad = (col, raw, hint) => problems.push(col + ' "' + raw + '" อ่านไม่ออก' + (hint ? ' — ใช้ ' + hint : ''));
+  const pick = function (k, fn, col, hint) {
+    const raw = get(k);
+    const v = fn(raw);
+    if (v === null) { bad(col, raw, hint); return ''; }
+    return v;
+  };
+  const num = function (k, col, whole) {
+    const raw = get(k).replace(/วัน|days?|บาท/gi, '').trim();
+    if (!raw) return '';
+    const v = parseAmount(raw);
+    if (v === null || Number(v) < 0 || (whole && !/^\d+(\.0+)?$/.test(v))) { bad(col, get(k), whole ? 'จำนวนเต็มไม่ติดลบ' : 'ตัวเลขไม่ติดลบ'); return ''; }
+    return whole ? String(Math.round(Number(v))) : v;
+  };
+  if (kind === 'product') {
+    const vatHint = 'รวมภาษี / ไม่รวมภาษี / 0% / ยกเว้น';
+    const acc = (k, col) => pick(k, masterAccount, col, 'รหัสบัญชีในผังบัญชี');
+    return {
+      type: pick('type', masterItemType, 'ประเภทสินค้า', 'บริการ / สินค้าไม่นับสต๊อก / สินค้านับสต๊อก'),
+      newCode: get('code'), name: get('name'), category: get('category'), uom: get('uom'), barcode: get('barcode'),
+      sellDesc: get('sellDesc'), price: num('price', 'ราคาขาย'), sellVat: pick('sellVat', masterVatType, 'ภาษีขาย', vatHint),
+      revenueAcc: acc('revenueAcc', 'บัญชีรายได้'),
+      buyDesc: get('buyDesc'), buyPrice: num('buyPrice', 'ราคาซื้อ'), buyVat: pick('buyVat', masterVatType, 'ภาษีซื้อ', vatHint),
+      expenseAcc: acc('expenseAcc', 'บัญชีค่าใช้จ่าย'), reorder: num('reorder', 'จุดสั่งซื้อ'),
+    };
+  }
+  const name = get('name');
+  const taxId = masterTaxId(get('taxId'));
+  let ent = pick('entityType', masterEntityOf, 'กลุ่ม', 'บุคคลธรรมดา / นิติบุคคล');
+  /* ไม่ระบุกลุ่ม — เลขนิติบุคคลขึ้นต้นด้วย 0 เลขบัตรประชาชนขึ้นต้น 1–8 · ไม่มีเลขดูคำนำหน้าชื่อ */
+  if (!ent) {
+    ent = /^[1-8]\d{12}$/.test(taxId) || (!taxId && /^(นาย|นางสาว|นาง|น\.ส\.|mr\.?\s|mrs\.?\s|ms\.?\s|miss\s)/i.test(name)
+      && !/จำกัด|บริษัท|ห้างหุ้นส่วน|มหาชน|co\.|ltd/i.test(name)) ? 'individual' : 'juristic';
+  }
+  const vat = pick('vatRegistered', masterYesNo, 'จดทะเบียนภาษีมูลค่าเพิ่ม', 'จด / ไม่จด');
+  const out = {
+    kind: pick('kind', masterKindOf, 'ประเภทผู้ติดต่อ', 'ลูกค้า / ผู้ขาย / ผู้จำหน่ายและลูกค้า'),
+    newCode: get('code'), name, entityType: ent, taxId,
+    branch: pick('branch', masterBranch, 'รหัสสาขา', 'ตัวเลข 5 หลัก หรือ สำนักงานใหญ่') || undefined,
+    vatRegistered: vat ? vat === 'yes' : undefined,
+    address: get('address'), phone: masterPhone(get('phone')),
+    termDays: num('termDays', 'เครดิต (วัน)', true) || '0', creditLimit: num('creditLimit', 'วงเงินเครดิต') || '0',
+    whtCode: pick('whtCode', masterWht, 'หัก ณ ที่จ่าย', 'ค่าบริการ / ค่าเช่า / ค่าขนส่ง / ค่าโฆษณา / วิชาชีพอิสระ / รับเหมา') || null,
+    bankAccountType: pick('bankAccountType', masterBankType, 'ประเภทบัญชี', 'ออมทรัพย์ / กระแสรายวัน / ฝากประจำ') || undefined,
+  };
+  PARTNER_TEXT.forEach(function (f) { out[f[0]] = f[0] === 'mobile' || f[0] === 'fax' ? masterPhone(get(f[0])) : get(f[0]); });
+  out.zip = out.zip.replace(/\s/g, '');
+  return out;
+}
+/** อ่านไฟล์ทั้งไฟล์ตามคอลัมน์ที่จับคู่ไว้ — ยังไม่ตัดสินว่าแถวไหนซ้ำหรือบันทึกไม่ได้ (ดู planMasterImport) */
+function readMasterFile(kind, rows, headerRow, map) {
+  const header = (rows[headerRow] || []).map(cellText);
+  const out = [], skipped = [];
+  rows.slice(headerRow + 1).forEach(function (r, i) {
+    const line = r.line || headerRow + 2 + i;
+    if (!r.some((c) => cellText(c) !== '')) return;
+    const get = (k) => (map[k] === undefined ? '' : cellText(r[map[k]]));
+    const name = get('name'), code = get('code');
+    if (!name && !code) { skipped.push({ line, why: 'ไม่มีชื่อและรหัส ข้ามอัตโนมัติ' }); return; }
+    if (!code && /^(รวม|ยอดรวม|total)(ทั้งสิ้น|ทั้งหมด)?(\s|:|$|\d)/i.test(name)) { skipped.push({ line, why: 'บรรทัดผลรวม ข้ามอัตโนมัติ' }); return; }
+    const problems = [];
+    const input = masterInputOf(kind, get, problems);
+    const width = Math.max(header.length, r.length);
+    const cells = [];
+    for (let j = 0; j < width; j++) cells.push(cellText(r[j]));
+    out.push({ line, code, name, input, problems, cells });
+  });
+  return { kind, header, map, rows: out, skipped };
+}
+
+/* ---------- ตัดสินทีละแถว: เพิ่มใหม่ · เพิ่มบทบาท · ซ้ำ (ข้าม) · นำเข้าไม่ได้ ---------- */
+const MASTER_STATUS = { new: 'เพิ่มใหม่', widen: 'เพิ่มบทบาท', dup: 'ซ้ำ ข้ามไป', bad: 'นำเข้าไม่ได้' };
+function runMasterRows(kind, read, opts) {
+  const o = opts || {};
+  const madeAt = {};                     // รหัสที่สร้างจากไฟล์นี้ → แถวในไฟล์ (บอกว่าซ้ำกับแถวไหน)
+  const where = (code) => (madeAt[code] ? 'แถว ' + madeAt[code] + ' ในไฟล์นี้' : 'ทะเบียน');
+  const counts = { new: 0, widen: 0, dup: 0, bad: 0 };
+  const rows = read.rows.map(function (r) {
+    const res = { line: r.line, name: r.name, code: r.code, cells: r.cells, status: 'new', why: '' };
+    const done = (st, why, code) => { res.status = st; res.why = why || ''; if (code) res.code = code; counts[st]++; return res; };
+    const fail = function (e) {
+      if (!(e instanceof DomainError)) throw e;
+      const dup = ['PARTNER_DUPLICATE_TAX_ID', 'PARTNER_CODE_DUPLICATE', 'ITEM_CODE_DUPLICATE'].indexOf(e.code) >= 0;
+      return done(dup ? 'dup' : 'bad', e.message + (e.hint && !dup ? ' — ' + e.hint : ''));
+    };
+    if (r.problems.length) return done('bad', r.problems.join(' · '));
+    if (!r.name) return done('bad', 'ไม่มีชื่อ');
+    if (kind === 'product') {
+      const inp = Object.assign({}, r.input, { type: r.input.type || o.defaultType || 'nonstock' });
+      if (inp.type === 'stock') delete inp.expenseAcc;
+      const nm = norm(inp.name);
+      const byCode = inp.newCode && DB.items.find((x) => x.code === inp.newCode);
+      const byBar = !byCode && inp.barcode && DB.items.find((x) => x.barcode && x.barcode === inp.barcode);
+      const byName = !byCode && !byBar && !inp.newCode && DB.items.find((x) => norm(x.name) === nm);
+      const same = byCode || byBar || byName;
+      if (same) {
+        return done('dup', (byCode ? 'รหัส ' + same.code : byBar ? 'บาร์โค้ด ' + inp.barcode : 'ชื่อ') + ' ซ้ำกับ '
+          + same.code + ' ' + same.name + ' (' + where(same.code) + ')', same.code);
+      }
+      try {
+        const it = saveItem(inp).item;
+        madeAt[it.code] = r.line;
+        return done('new', ITEM_TYPES[it.type], it.code);
+      } catch (e) { return fail(e); }
+    }
+    const inp = Object.assign({}, r.input, { kind: r.input.kind || o.defaultKind || 'customer' });
+    const overlap = (x) => (isCustomer(x) && inp.kind !== 'vendor') || (isVendor(x) && inp.kind !== 'customer');
+    if (inp.newCode) {
+      const c = DB.partners.find((x) => x.code === inp.newCode);
+      if (c) return done('dup', 'รหัส ' + c.code + ' มีอยู่แล้ว: ' + c.name + ' (' + where(c.code) + ')', c.code);
+    }
+    const br = inp.entityType === 'individual' && inp.vatRegistered !== true ? '00000' : (inp.branch || '00000');
+    if (inp.taxId) {
+      const same = DB.partners.filter((x) => x.taxId === inp.taxId && (x.branch || '00000') === br);
+      const dup = same.find(overlap);
+      if (dup) {
+        return done('dup', 'เลขผู้เสียภาษี ' + inp.taxId + ' สาขา ' + br + ' ซ้ำกับ ' + dup.code + ' ' + dup.name + ' (' + where(dup.code) + ')', dup.code);
+      }
+      /* มีในทะเบียนแล้วแต่คนละบทบาท (เป็นลูกค้า ไฟล์บอกเป็นผู้ขาย) — รายเดียวกันเป็นผู้จำหน่ายและลูกค้า ไม่สร้างซ้ำสองราย */
+      const other = same.find((x) => x.kind !== 'both');
+      if (other) {
+        try {
+          savePartner({ code: other.code, kind: 'both', name: other.name, entityType: other.entityType, taxId: other.taxId || '',
+            branch: other.branch || '', address: other.address || '', phone: other.phone || '', termDays: other.termDays || 0,
+            whtCode: other.whtCode || null, creditLimit: unM(other.creditLimit || 0) });
+          return done('widen', 'มีในทะเบียนเป็น' + (inp.kind === 'vendor' ? 'ลูกค้า' : 'ผู้ขาย') + 'อยู่แล้ว (' + other.code
+            + ') — ตั้งเป็นผู้จำหน่ายและลูกค้า ข้อมูลอื่นในแถวนี้ไม่ทับของเดิม', other.code);
+        } catch (e) { return fail(e); }
+      }
+    } else {
+      const nm = norm(inp.name);
+      const dup = DB.partners.find((x) => !x.taxId && norm(x.name) === nm && overlap(x));
+      if (dup) return done('dup', 'ชื่อซ้ำกับ ' + dup.code + ' ' + dup.name + ' ที่ไม่มีเลขผู้เสียภาษี (' + where(dup.code) + ')', dup.code);
+    }
+    try {
+      const p = savePartner(inp).partner;
+      madeAt[p.code] = r.line;
+      return done('new', PARTNER_KINDS[p.kind], p.code);
+    } catch (e) { return fail(e); }
+  });
+  return { rows, counts };
+}
+/** ตัวอย่างก่อนนำเข้า — ลองบันทึกทุกแถวจริงแล้วคืนข้อมูลกลับเหมือนเดิม ไม่มีอะไรค้างในระบบ */
+function planMasterImport(kind, read, opts) {
+  const snap = txSnapshot();
+  TX_BULK++;
+  try { return runMasterRows(kind, read, opts); }
+  finally { TX_BULK--; txRestore(snap); }
+}
+/** นำเข้าจริง — แถวที่ซ้ำหรือบันทึกไม่ได้ข้ามไป เก็บไว้ในประวัติพร้อมเหตุผล (ดาวน์โหลดเป็นไฟล์ได้ภายหลัง) */
+function importMasterFile(kind, read, opts) {
+  const o = opts || {};
+  if (!MASTER_KINDS[kind]) throw new DomainError('MASTER_KIND_INVALID', 'ไม่รู้จักชนิดข้อมูลที่จะนำเข้า');
+  const r = runMasterRows(kind, read, o);
+  const id = (DB.masterImports || []).reduce((n, x) => Math.max(n, Number(x.id) || 0), 0) + 1;
+  const rec = {
+    id, kind, name: String(o.name || 'ไฟล์นำเข้า'), at: new Date().toISOString(), rows: read.rows.length,
+    created: r.counts.new, widened: r.counts.widen, dup: r.counts.dup, bad: r.counts.bad,
+    codes: r.rows.filter((x) => x.status === 'new').map((x) => x.code),
+    header: read.header,
+    rejects: r.rows.filter((x) => x.status === 'dup' || x.status === 'bad').slice(0, 2000)
+      .map((x) => ({ line: x.line, status: x.status, why: x.why, cells: x.cells })),
+  };
+  if (!Array.isArray(DB.masterImports)) DB.masterImports = [];
+  DB.masterImports.unshift(rec);
+  if (DB.masterImports.length > 50) DB.masterImports.length = 50;
+  audit('import', 'master|' + id, 'run', null, { kind, file: rec.name, created: rec.created, widened: rec.widened, dup: rec.dup, bad: rec.bad });
+  return Object.assign({}, rec, { results: r.rows });
+}
+
+/* ---------- ไฟล์ที่ให้ดาวน์โหลด (ใส่ BOM ให้ Excel อ่านภาษาไทยถูก) ---------- */
+const masterCsvQ = (v) => { const s = String(v === undefined || v === null ? '' : v); return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+const masterCsv = (lines) => '﻿' + lines.map((r) => r.map(masterCsvQ).join(',')).join('\r\n') + '\r\n';
+/** แบบฟอร์มเปล่าพร้อมแถวตัวอย่าง — หัวคอลัมน์ตรงกับที่ระบบอ่านได้ */
+function masterTemplateCsv(kind) {
+  return masterCsv([MASTER_FIELDS[kind].map((f) => f[1])].concat(MASTER_SAMPLE[kind]));
+}
+/** แถวที่นำเข้าไม่ได้ — คอลัมน์เดิมของไฟล์ + ผล + เหตุผล แก้ในไฟล์นี้แล้วลากเข้ามาใหม่ได้ทันที */
+function masterRejectsCsv(rec) {
+  const width = Math.max(rec.header.length, rec.rejects.reduce((w, x) => Math.max(w, x.cells.length), 0));
+  const head = rec.header.slice();
+  while (head.length < width) head.push('');
+  return masterCsv([head.concat(['ผลการนำเข้า', 'เหตุผล', 'แถวในไฟล์เดิม'])].concat(rec.rejects.map(function (x) {
+    const cells = x.cells.slice();
+    while (cells.length < width) cells.push('');
+    return cells.concat([MASTER_STATUS[x.status] || x.status, x.why, String(x.line)]);
+  })));
+}
+
 /* ทั้งคำสั่งนำเข้าและยกเลิกต้องจบแบบทั้งหมดหรือไม่มีเลย (ดู atomically ใน engine.js)
    ไม่งั้นนำเข้าไม่ผ่านแล้วบัญชีที่สร้าง คู่ค้า สินค้า หรือพนักงานที่อัปเดตไปแล้วจะค้างอยู่ */
 importOpeningBalances = transactional(importOpeningBalances);
 importPeriodMovement = transactional(importPeriodMovement);
 importPackage = transactional(importPackage);
 reverseImport = transactional(reverseImport);
+importMasterFile = bulkTransaction(importMasterFile);

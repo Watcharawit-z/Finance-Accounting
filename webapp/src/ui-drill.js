@@ -106,10 +106,16 @@ function peekPartner(s) {
   const total = rows.reduce((t, r) => t + r.out, 0);
   const p = DB.partners.find((x) => x.code === s.code) || { name: s.code };
   const screen = s.side === 'ar' ? 'invoices' : 'bills';
+  /* ข้อมูลติดต่อจากสมุดรายชื่อ — ตามหนี้ได้ทันทีโดยไม่ต้องเปิดทะเบียน */
+  const tel = [p.mobile, p.phone].filter(Boolean).join(' · ');
+  const contact = [['ผู้ติดต่อ', p.contactPerson], ['โทรศัพท์', tel], ['อีเมล', p.email], ['เครดิต', p.code && p.termDays !== undefined ? p.termDays + ' วัน' : ''],
+    ['บัญชีธนาคาร', p.bankAccount ? [p.bankName, p.bankAccount].filter(Boolean).join(' ') : '']].filter((x) => x[1]);
   return {
     title: p.name,
     sub: (s.side === 'ar' ? 'ลูกหนี้' : 'เจ้าหนี้') + 'คงค้าง ณ วันที่ ' + thDate(s.asOf) + ' · ' + rows.length + ' ใบ',
-    body: tbl({
+    actions: p.code && DB.partners.some((x) => x.code === p.code) ? btn('peekgo:partner:edit:' + p.code, 'ข้อมูลผู้ติดต่อ') : '',
+    body: (contact.length ? '<div class="kv pk-kv">' + contact.map((x) => '<div><span>' + esc(x[0]) + '</span><b>' + esc(x[1]) + '</b></div>').join('') + '</div>' : '')
+      + tbl({
       cols:[{t:'เลขที่'},{t:'วันที่'},{t:'ครบกำหนด'},{t:'เกินกำหนด',a:'r'},{t:'ยอดเอกสาร',a:'r'},{t:'คงค้าง',a:'r'}],
       rows: rows.map(function (r) {
         const late = Math.floor((new Date(s.asOf) - new Date(r.d.due)) / 86400000);
