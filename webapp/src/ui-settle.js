@@ -50,25 +50,25 @@ function refreshReceiptSum() {
     const form = document.querySelector('[data-rcform]');
     const inv = DB.docs.invoice.find((d) => d.no === ((form && form.getAttribute('data-rcform')) || val('invoiceNo')));
     if (!inv) { el.innerHTML = ''; return; }
-    const out = invOutstanding(inv);
-    const paid = val('amount') ? M(val('amount')) : out;
-    const dt = val('diffType');
-    const gross = Math.min(paid, out);
-    const closes = !!RECEIPT_DIFF[dt] && gross < out;
-    const diff = closes ? out - gross : 0;
-    const excess = Math.max(0, paid - out);
-    let wht = 0;
-    if (val('wht')) {
-      const base = val('whtBase') ? M(val('whtBase')) : receiptServiceShare(inv, gross + diff);
-      wht = round2(pct(base, resolveRate(val('wht'), val('date') || TODAY, { channel: 'manual' }).rate));
+    /* สูตรเดียวกับตอนลงบัญชี (receiptMath) — ผิดกติกาขึ้นข้อความเดียวกับที่จะเห็นตอนกดบันทึก */
+    let r;
+    try { r = receiptMath(inv, receiptFormInput()); }
+    catch (e) {
+      if (!(e instanceof DomainError)) throw e;
+      el.innerHTML = sumSpan('คงค้าง', invOutstanding(inv)) + '<span class="bad">' + esc(e.message) + '</span>';
+      return;
     }
-    const what = paid > out
-      ? (dt === 'credit' ? '<span class="good">รับเกิน ' + fmt(excess) + ' → เป็นเครดิตของลูกค้า</span>'
-        : '<span class="bad">รับเกิน ' + fmt(excess) + ' — เลือก "เก็บส่วนเกินเป็นเครดิตของลูกค้า"</span>')
-      : paid < out ? (closes ? '<span>ปิดส่วนต่าง <b>' + fmt(diff) + '</b> เป็น' + esc(RECEIPT_DIFF[dt].label) + '</span>'
-        : '<span>ยังค้างรับ <b>' + fmt(out - paid) + '</b></span>')
+    const out = r.outstanding;
+    const what = r.excess ? '<span class="good">รับเกิน ' + fmt(r.excess) + ' → เป็นเครดิตของลูกค้า</span>'
+      : r.gross < out ? (r.diff ? '<span>ปิดส่วนต่าง <b>' + fmt(r.diff) + '</b> เป็น' + esc(RECEIPT_DIFF[r.diffType].label) + '</span>'
+        : '<span>ยังค้างรับ <b>' + fmt(out - r.gross) + '</b> (แบ่งจ่าย)</span>')
       : '<span class="good">รับครบยอดคงค้าง</span>';
-    el.innerHTML = sumSpan('คงค้าง', out) + sumSpan('ลูกค้าหัก ณ ที่จ่าย', wht) + sumSpan('เงินเข้าบัญชี', gross + excess - wht) + what;
+    el.innerHTML = sumSpan('คงค้าง', out) + sumSpan('ลูกค้าหัก ณ ที่จ่าย', r.wht)
+      + (r.fee ? sumSpan('ค่าธรรมเนียม', r.fee) : '') + (r.adjTotal ? sumSpan('รายการปรับลด', r.adjTotal) : '')
+      + (r.gap ? sumSpan(r.gap > 0 ? 'เงินขาด' : 'เงินเกิน', Math.abs(r.gap)) : '')
+      + sumSpan('เงินเข้าบัญชี', r.net) + what;
+    const rec = document.querySelector('#modal [name="received"]');
+    if (rec) rec.placeholder = 'ตามที่คำนวณ ' + fmt(r.expected);
   } catch (e) { el.textContent = ''; }
 }
 function refreshPaySum() {
