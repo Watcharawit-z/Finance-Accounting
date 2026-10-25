@@ -564,6 +564,47 @@ details.adv .flds{margin-bottom:10px}
   outline:2px solid transparent; outline-offset:1px;
 }
 .fld-w input,.fld-w select{width:100%; height:var(--ctl-h); padding:0 11px}
+.fld-w textarea{width:100%; min-height:calc(var(--ctl-h) * 1.6); padding:8px 11px; resize:vertical; line-height:1.55;
+  font:inherit; font-size:14px; color:var(--color-ink); background:var(--color-paper);
+  border:1px solid var(--color-rule-2); border-radius:var(--radius-ctl); outline:2px solid transparent; outline-offset:1px}
+.fld-w textarea:focus{outline:2px solid var(--color-focus); border-color:var(--color-ink-2)}
+.fld-w textarea::placeholder{color:var(--color-faint)}
+/* ---------- เอกสารธุรกิจ: หัวเอกสาร รายการ ยอดท้ายเอกสาร ---------- */
+.doc-head{padding-bottom:var(--space-sm)}
+.credit-pair .pair{display:grid; grid-template-columns:minmax(0,5.5rem) minmax(0,1fr); gap:var(--space-xs)}
+.contact-box{border:1px solid var(--color-rule); border-radius:var(--radius-ctl); background:var(--color-paper-2)}
+.contact-box > summary{display:flex; flex-wrap:wrap; align-items:baseline; gap:4px 10px; padding:10px 12px; cursor:pointer; list-style:none;
+  font-size:var(--text-sm); color:var(--color-ink-2)}
+.contact-box > summary::-webkit-details-marker{display:none}
+.contact-box .cb-l{font-weight:600; color:var(--color-ink)}
+.contact-box .cb-v{min-width:0; overflow-wrap:anywhere}
+.contact-box .cb-edit{margin-left:auto; color:var(--color-accent); font-weight:500; white-space:nowrap}
+.contact-box[open] > summary{border-bottom:1px solid var(--color-rule)}
+.contact-box .flds{padding:var(--space-sm) 12px var(--space-md)}
+.ln-opts{display:flex; flex-wrap:wrap; gap:6px 14px; font-family:var(--font-body); font-weight:400; font-size:var(--text-sm); color:var(--color-muted)}
+.ln-opts label{display:inline-flex; align-items:center; gap:6px; white-space:nowrap}
+.ln-opts select{height:32px; padding:0 8px; font:inherit; font-size:var(--text-sm); color:var(--color-ink); background:var(--color-paper);
+  border:1px solid var(--color-rule-2); border-radius:var(--radius-ctl)}
+.lines input.uom{min-width:56px}
+.lines td.ln-amt{white-space:nowrap; color:var(--color-ink); font-weight:500; vertical-align:middle}
+.doc-foot-l{display:grid; gap:var(--space-sm); align-content:start; justify-items:start}
+.doc-foot-l .flds{padding:0; width:100%}
+.doc-foot{display:grid; grid-template-columns:minmax(0,1fr); gap:var(--space-sm); padding:var(--space-sm) var(--space-md) 0}
+.doc-tot{width:100%; border-collapse:collapse; font-size:var(--text-sm)}
+.doc-tot th{text-align:left; font-weight:400; color:var(--color-ink-2); padding:6px 0; white-space:nowrap}
+.doc-tot td{padding:6px 0 6px var(--space-sm); text-align:right; font-variant-numeric:tabular-nums; color:var(--color-ink)}
+.doc-tot tr + tr th,.doc-tot tr + tr td{border-top:1px solid var(--color-rule)}
+.doc-tot tr.grand th,.doc-tot tr.grand td{font-size:var(--text-base); font-weight:600}
+.doc-tot .bill-disc{display:inline-grid; grid-template-columns:6.5rem 4.5rem; gap:6px}
+.doc-tot .bill-disc input,.doc-tot .bill-disc select{height:32px; padding:0 8px; font:inherit; font-size:var(--text-sm); color:var(--color-ink);
+  background:var(--color-paper); border:1px solid var(--color-rule-2); border-radius:var(--radius-ctl)}
+.doc-tot .bill-disc input{text-align:right; font-variant-numeric:tabular-nums}
+.doc-tot caption.tot-err{caption-side:bottom; text-align:left; padding:6px 0; color:var(--color-neg); font-size:var(--text-sm)}
+.doc-notes{padding-top:var(--space-sm)}
+.doc-tot .bill-disc input:focus,.doc-tot .bill-disc select:focus,.ln-opts select:focus{outline:2px solid var(--color-focus); outline-offset:1px; border-color:var(--color-ink-2)}
+@media (min-width:48rem){
+  .doc-foot{grid-template-columns:minmax(0,1fr) minmax(0,24rem); align-items:start}
+}
 .lines input,.lines select{width:100%; min-width:70px; height:36px; padding:0 9px; font-size:var(--text-sm)}
 .lines input.r{text-align:right; font-variant-numeric:tabular-nums}
 .lines select.itemsel{min-width:150px}
@@ -661,8 +702,15 @@ input.qty-in:focus-visible,td select:focus-visible,.search:focus-visible,.fld-w 
 @keyframes fade{from{opacity:0}}
 @keyframes rise{from{opacity:0; transform:scale(.97)}}
 .modal-box{background:var(--color-paper); border:1px solid var(--color-rule); border-radius:var(--radius-panel); width:min(820px,100%); box-shadow:var(--shadow-float); overflow:hidden}
+/* ฟอร์มเอกสารธุรกิจ (มีตารางรายการ) กว้างกว่ากล่องทั่วไป — ตารางมีส่วนลด ภาษี บัญชี และจำนวนเงินต่อบรรทัด */
+.modal-box.xl{width:min(1240px,100%)}
 .modal-h{display:flex; align-items:flex-start; gap:12px; padding:var(--space-md) var(--space-lg) var(--space-sm); border-bottom:1px solid var(--color-rule)}
 .modal-h h3{font-size:var(--text-lg); line-height:1.25}
+/* จอแคบ: คำอธิบายใต้หัวข้อเต็มบรรทัด หัวข้อไม่ถูกบีบเป็นคำละบรรทัด */
+.modal-h{flex-wrap:wrap}
+.modal-h h3{flex:1 1 0; min-width:0}
+.modal-h .card-sub{order:3; flex-basis:100%; margin-top:0}
+@media (min-width:48rem){ .modal-h{flex-wrap:nowrap} .modal-h h3{flex:none} .modal-h .card-sub{order:0; flex-basis:auto} }
 .modal-h .icon-btn{border:none; background:none; font-size:14px; color:var(--color-muted)}
 .modal-b{padding:2px 0 12px; max-height:68dvh; overflow-y:auto}
 .modal-f{display:flex; align-items:center; gap:10px; padding:var(--space-sm) var(--space-lg); border-top:1px solid var(--color-rule); background:var(--color-paper-2); font-size:var(--text-sm); flex-wrap:wrap}
@@ -714,6 +762,13 @@ td.peekable,tr.peekable td.num{cursor:pointer}
 .rm-i svg.i{width:16px; height:16px; color:var(--color-muted)}
 .rm-i:focus-visible{background:var(--color-accent-soft); outline:none}
 .rm-i.danger{color:var(--color-neg)} .rm-i.danger svg.i{color:var(--color-neg)}
+.rm-sep{height:1px; background:var(--color-rule); margin:4px 6px}
+/* ป้ายสถานะที่กดได้ — เปิดเมนูสิ่งที่ทำต่อได้ */
+button.st-btn{font:inherit; font-size:inherit; cursor:pointer; border:1px solid var(--color-rule); border-radius:var(--radius-ctl);
+  background:var(--color-paper); padding:2px 8px; min-height:28px; white-space:nowrap}
+button.st-btn .caret{width:0; height:0; margin-left:6px; border-left:4px solid transparent; border-right:4px solid transparent;
+  border-top:5px solid var(--color-muted); display:inline-block; vertical-align:middle}
+button.st-btn:focus-visible{outline:2px solid var(--color-focus); outline-offset:1px}
 #pop{position:fixed; z-index:var(--z-dropdown); display:none}
 #pop.show{display:block}
 .pop-box{background:var(--color-paper); border:1px solid var(--color-rule); border-radius:var(--radius-panel); box-shadow:var(--shadow-float);
@@ -823,6 +878,7 @@ td.peekable,tr.peekable td.num{cursor:pointer}
 
 /* hover เฉพาะเครื่องที่ชี้ได้จริง — จอสัมผัสไม่ค้างสถานะ */
 @media (hover: hover){
+  button.st-btn:hover{background:var(--color-paper-3); border-color:var(--color-rule-2)}
   .nav-gh:hover,.nav-i:hover,.nav-s:hover{background:var(--color-paper-3); color:var(--color-ink)}
   .nav-i.on:hover{background:var(--color-paper)}
   .add-co:hover{border-color:var(--color-ink-2); color:var(--color-ink)}

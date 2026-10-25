@@ -70,7 +70,7 @@ const T = require('./uitestlib');
   await page.fill('[name="l5_price"]', '600');
   await page.click('#modal [data-act="ln:del:2"]');
   ok('★ ลบบรรทัดกลางตารางได้', (await rows()) === 5 && !(await page.$('[name="l2_desc"]')));
-  const sumTxt = await page.$eval('#lnSum', (e) => e.textContent);
+  const sumTxt = await page.$eval('#modal .doc-tot', (e) => e.textContent);
   ok('ยอดรวมใต้ตารางคำนวณสด', /1,800\.00/.test(sumTxt) && /1,926\.00/.test(sumTxt), sumTxt);
   await submit();
   const inv = await page.evaluate(() => {
@@ -110,7 +110,7 @@ const T = require('./uitestlib');
   await page.fill('[name="l1_desc"]', 'ค่าห่อของขวัญ');
   await page.fill('[name="l1_price"]', '53.50');
   await page.selectOption('[name="l1_acc"]', '4121');
-  const csSum = await page.$eval('#lnSum', (e) => e.textContent);
+  const csSum = await page.$eval('#modal .doc-tot', (e) => e.textContent);
   ok('ยอดรวมถอดภาษีจากราคาป้ายให้ดูก่อนบันทึก', /374\.50/.test(csSum) && /24\.50/.test(csSum), csSum);
   await submit();
   const cs = await page.evaluate(() => ({ d: DB.docs.cashSale[0], screen: STATE.screen,
@@ -284,8 +284,8 @@ const T = require('./uitestlib');
   await page.fill('[name="l0_desc"]', 'ค่าออกแบบระบบบัญชี');
   await page.fill('[name="l0_price"]', '20000');
   await page.waitForTimeout(100);
-  const live = await page.$eval('#lnSum', (e) => e.textContent);
-  ok('★ ยอดใต้ตารางแสดงหัก ณ ที่จ่าย 3% และยอดชำระสุทธิทันที', /หัก ณ ที่จ่าย 3%\s*600\.00/.test(live) && /ยอดชำระสุทธิ\s*20,800\.00/.test(live), live);
+  const live = await page.$eval('#modal .doc-tot', (e) => e.textContent);
+  ok('★ ยอดท้ายเอกสารแสดงหัก ณ ที่จ่าย 3% และยอดชำระสุทธิทันที', /หักภาษี ณ ที่จ่าย\s*600\.00 \(3%/.test(live) && /ยอดชำระ\s*20,800\.00/.test(live), live);
   await submit();
   const qw = await page.evaluate(() => DB.docs.quotation.find((d) => d.no === STATE.sel));
   ok('บันทึกใบเสนอราคาพร้อมภาษีหัก ณ ที่จ่าย', qw && qw.wht === 6000000 && qw.payNet === 208000000, qw && qw.no);

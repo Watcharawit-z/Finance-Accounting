@@ -159,7 +159,8 @@ function runAction(fn) {
 let modalSubmit = null;
 function modal(o) {
   const m = document.getElementById('modal');
-  m.innerHTML = '<div class="modal-box" role="dialog" aria-modal="true">'
+  const xl = o.wide || /id="lnTable"[^>]*data-mode="(sale|purchase|expense)"/.test(o.body || '');
+  m.innerHTML = '<div class="modal-box' + (xl ? ' xl' : '') + '" role="dialog" aria-modal="true">'
     + '<div class="modal-h"><h3>' + esc(o.title) + '</h3>'
     + (o.sub ? '<div class="card-sub">' + esc(o.sub) + '</div>' : '')
     + '<span class="grow"></span>'

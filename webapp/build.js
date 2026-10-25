@@ -5,7 +5,7 @@ const path = require('path');
 /* ไฟล์ระบบงาน (ไม่มีหน้าจอ) ก่อน seed.js · ไฟล์หน้าจอของแต่ละระบบ (ui-settle ui-bank ui-payroll ui-assets)
    อยู่หลัง ui-print/ui-command เพื่อเพิ่มแบบฟอร์มพิมพ์และเมนูสร้างเอกสารของตัวเองได้ตอนโหลด · ui-actions อยู่ท้ายสุดเสมอ */
 const ORDER = ['engine.js', 'operations.js', 'stock.js', 'settle.js', 'bank.js', 'payroll.js', 'assets.js', 'tax.js', 'setup.js',
-  'seed.js', 'sync.js', 'ui-core.js', 'ui-tables.js', 'ui-drill.js', 'import.js', 'verify.js', 'ui-charts.js', 'ui-screens.js', 'ui-stock.js', 'ui-setup.js',
+  'seed.js', 'sync.js', 'ui-core.js', 'ui-docform.js', 'ui-tables.js', 'ui-drill.js', 'import.js', 'verify.js', 'ui-charts.js', 'ui-screens.js', 'ui-stock.js', 'ui-setup.js',
   'ui-print.js', 'ui-command.js', 'ui-company.js', 'ui-settle.js', 'ui-bank.js', 'ui-payroll.js', 'ui-assets.js', 'ui-actions.js'];
 module.exports = { ORDER };
 if (require.main !== module) return;

@@ -205,9 +205,14 @@ function openRowMenu(tr, x, y) {
   if (!ref) return false;
   const items = rowMenuItems(ref);
   if (!items.length) return false;
+  return openActionMenu(ref.no, items, x, y);
+}
+/** เมนูลอยที่ตำแหน่งที่กำหนด — items = [[การกระทำ, ชื่อ, ไอคอน, คลาส?]] · ['-'] = เส้นคั่น */
+function openActionMenu(title, items, x, y) {
   const m = document.getElementById('rowMenu');
-  m.innerHTML = '<div class="rm-h">' + esc(ref.no) + '</div>' + items.map((i) => '<button class="rm-i' + (i[3] ? ' ' + i[3] : '')
-    + '" role="menuitem" data-act="rowgo:' + esc(i[0]) + '">' + icon(i[2]) + esc(i[1]) + '</button>').join('');
+  m.innerHTML = '<div class="rm-h">' + esc(title) + '</div>' + items.map((i) => i[0] === '-' ? '<div class="rm-sep" role="separator"></div>'
+    : '<button class="rm-i' + (i[3] ? ' ' + i[3] : '')
+    + '" role="menuitem" data-act="rowgo:' + esc(i[0]) + '">' + icon(i[2] || 'arrow') + esc(i[1]) + '</button>').join('');
   m.classList.add('show');
   const w = m.offsetWidth, h = m.offsetHeight;
   m.style.left = Math.round(Math.max(8, Math.min(window.innerWidth - w - 8, x))) + 'px';

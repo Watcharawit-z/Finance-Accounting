@@ -564,6 +564,47 @@ details.adv .flds{margin-bottom:10px}
   outline:2px solid transparent; outline-offset:1px;
 }
 .fld-w input,.fld-w select{width:100%; height:var(--ctl-h); padding:0 11px}
+.fld-w textarea{width:100%; min-height:calc(var(--ctl-h) * 1.6); padding:8px 11px; resize:vertical; line-height:1.55;
+  font:inherit; font-size:14px; color:var(--color-ink); background:var(--color-paper);
+  border:1px solid var(--color-rule-2); border-radius:var(--radius-ctl); outline:2px solid transparent; outline-offset:1px}
+.fld-w textarea:focus{outline:2px solid var(--color-focus); border-color:var(--color-ink-2)}
+.fld-w textarea::placeholder{color:var(--color-faint)}
+/* ---------- เอกสารธุรกิจ: หัวเอกสาร รายการ ยอดท้ายเอกสาร ---------- */
+.doc-head{padding-bottom:var(--space-sm)}
+.credit-pair .pair{display:grid; grid-template-columns:minmax(0,5.5rem) minmax(0,1fr); gap:var(--space-xs)}
+.contact-box{border:1px solid var(--color-rule); border-radius:var(--radius-ctl); background:var(--color-paper-2)}
+.contact-box > summary{display:flex; flex-wrap:wrap; align-items:baseline; gap:4px 10px; padding:10px 12px; cursor:pointer; list-style:none;
+  font-size:var(--text-sm); color:var(--color-ink-2)}
+.contact-box > summary::-webkit-details-marker{display:none}
+.contact-box .cb-l{font-weight:600; color:var(--color-ink)}
+.contact-box .cb-v{min-width:0; overflow-wrap:anywhere}
+.contact-box .cb-edit{margin-left:auto; color:var(--color-accent); font-weight:500; white-space:nowrap}
+.contact-box[open] > summary{border-bottom:1px solid var(--color-rule)}
+.contact-box .flds{padding:var(--space-sm) 12px var(--space-md)}
+.ln-opts{display:flex; flex-wrap:wrap; gap:6px 14px; font-family:var(--font-body); font-weight:400; font-size:var(--text-sm); color:var(--color-muted)}
+.ln-opts label{display:inline-flex; align-items:center; gap:6px; white-space:nowrap}
+.ln-opts select{height:32px; padding:0 8px; font:inherit; font-size:var(--text-sm); color:var(--color-ink); background:var(--color-paper);
+  border:1px solid var(--color-rule-2); border-radius:var(--radius-ctl)}
+.lines input.uom{min-width:56px}
+.lines td.ln-amt{white-space:nowrap; color:var(--color-ink); font-weight:500; vertical-align:middle}
+.doc-foot-l{display:grid; gap:var(--space-sm); align-content:start; justify-items:start}
+.doc-foot-l .flds{padding:0; width:100%}
+.doc-foot{display:grid; grid-template-columns:minmax(0,1fr); gap:var(--space-sm); padding:var(--space-sm) var(--space-md) 0}
+.doc-tot{width:100%; border-collapse:collapse; font-size:var(--text-sm)}
+.doc-tot th{text-align:left; font-weight:400; color:var(--color-ink-2); padding:6px 0; white-space:nowrap}
+.doc-tot td{padding:6px 0 6px var(--space-sm); text-align:right; font-variant-numeric:tabular-nums; color:var(--color-ink)}
+.doc-tot tr + tr th,.doc-tot tr + tr td{border-top:1px solid var(--color-rule)}
+.doc-tot tr.grand th,.doc-tot tr.grand td{font-size:var(--text-base); font-weight:600}
+.doc-tot .bill-disc{display:inline-grid; grid-template-columns:6.5rem 4.5rem; gap:6px}
+.doc-tot .bill-disc input,.doc-tot .bill-disc select{height:32px; padding:0 8px; font:inherit; font-size:var(--text-sm); color:var(--color-ink);
+  background:var(--color-paper); border:1px solid var(--color-rule-2); border-radius:var(--radius-ctl)}
+.doc-tot .bill-disc input{text-align:right; font-variant-numeric:tabular-nums}
+.doc-tot caption.tot-err{caption-side:bottom; text-align:left; padding:6px 0; color:var(--color-neg); font-size:var(--text-sm)}
+.doc-notes{padding-top:var(--space-sm)}
+.doc-tot .bill-disc input:focus,.doc-tot .bill-disc select:focus,.ln-opts select:focus{outline:2px solid var(--color-focus); outline-offset:1px; border-color:var(--color-ink-2)}
+@media (min-width:48rem){
+  .doc-foot{grid-template-columns:minmax(0,1fr) minmax(0,24rem); align-items:start}
+}
 .lines input,.lines select{width:100%; min-width:70px; height:36px; padding:0 9px; font-size:var(--text-sm)}
 .lines input.r{text-align:right; font-variant-numeric:tabular-nums}
 .lines select.itemsel{min-width:150px}
@@ -661,8 +702,15 @@ input.qty-in:focus-visible,td select:focus-visible,.search:focus-visible,.fld-w 
 @keyframes fade{from{opacity:0}}
 @keyframes rise{from{opacity:0; transform:scale(.97)}}
 .modal-box{background:var(--color-paper); border:1px solid var(--color-rule); border-radius:var(--radius-panel); width:min(820px,100%); box-shadow:var(--shadow-float); overflow:hidden}
+/* ฟอร์มเอกสารธุรกิจ (มีตารางรายการ) กว้างกว่ากล่องทั่วไป — ตารางมีส่วนลด ภาษี บัญชี และจำนวนเงินต่อบรรทัด */
+.modal-box.xl{width:min(1240px,100%)}
 .modal-h{display:flex; align-items:flex-start; gap:12px; padding:var(--space-md) var(--space-lg) var(--space-sm); border-bottom:1px solid var(--color-rule)}
 .modal-h h3{font-size:var(--text-lg); line-height:1.25}
+/* จอแคบ: คำอธิบายใต้หัวข้อเต็มบรรทัด หัวข้อไม่ถูกบีบเป็นคำละบรรทัด */
+.modal-h{flex-wrap:wrap}
+.modal-h h3{flex:1 1 0; min-width:0}
+.modal-h .card-sub{order:3; flex-basis:100%; margin-top:0}
+@media (min-width:48rem){ .modal-h{flex-wrap:nowrap} .modal-h h3{flex:none} .modal-h .card-sub{order:0; flex-basis:auto} }
 .modal-h .icon-btn{border:none; background:none; font-size:14px; color:var(--color-muted)}
 .modal-b{padding:2px 0 12px; max-height:68dvh; overflow-y:auto}
 .modal-f{display:flex; align-items:center; gap:10px; padding:var(--space-sm) var(--space-lg); border-top:1px solid var(--color-rule); background:var(--color-paper-2); font-size:var(--text-sm); flex-wrap:wrap}
@@ -714,6 +762,13 @@ td.peekable,tr.peekable td.num{cursor:pointer}
 .rm-i svg.i{width:16px; height:16px; color:var(--color-muted)}
 .rm-i:focus-visible{background:var(--color-accent-soft); outline:none}
 .rm-i.danger{color:var(--color-neg)} .rm-i.danger svg.i{color:var(--color-neg)}
+.rm-sep{height:1px; background:var(--color-rule); margin:4px 6px}
+/* ป้ายสถานะที่กดได้ — เปิดเมนูสิ่งที่ทำต่อได้ */
+button.st-btn{font:inherit; font-size:inherit; cursor:pointer; border:1px solid var(--color-rule); border-radius:var(--radius-ctl);
+  background:var(--color-paper); padding:2px 8px; min-height:28px; white-space:nowrap}
+button.st-btn .caret{width:0; height:0; margin-left:6px; border-left:4px solid transparent; border-right:4px solid transparent;
+  border-top:5px solid var(--color-muted); display:inline-block; vertical-align:middle}
+button.st-btn:focus-visible{outline:2px solid var(--color-focus); outline-offset:1px}
 #pop{position:fixed; z-index:var(--z-dropdown); display:none}
 #pop.show{display:block}
 .pop-box{background:var(--color-paper); border:1px solid var(--color-rule); border-radius:var(--radius-panel); box-shadow:var(--shadow-float);
@@ -823,6 +878,7 @@ td.peekable,tr.peekable td.num{cursor:pointer}
 
 /* hover เฉพาะเครื่องที่ชี้ได้จริง — จอสัมผัสไม่ค้างสถานะ */
 @media (hover: hover){
+  button.st-btn:hover{background:var(--color-paper-3); border-color:var(--color-rule-2)}
   .nav-gh:hover,.nav-i:hover,.nav-s:hover{background:var(--color-paper-3); color:var(--color-ink)}
   .nav-i.on:hover{background:var(--color-paper)}
   .add-co:hover{border-color:var(--color-ink-2); color:var(--color-ink)}
@@ -10474,7 +10530,8 @@ function runAction(fn) {
 let modalSubmit = null;
 function modal(o) {
   const m = document.getElementById('modal');
-  m.innerHTML = '<div class="modal-box" role="dialog" aria-modal="true">'
+  const xl = o.wide || /id="lnTable"[^>]*data-mode="(sale|purchase|expense)"/.test(o.body || '');
+  m.innerHTML = '<div class="modal-box' + (xl ? ' xl' : '') + '" role="dialog" aria-modal="true">'
     + '<div class="modal-h"><h3>' + esc(o.title) + '</h3>'
     + (o.sub ? '<div class="card-sub">' + esc(o.sub) + '</div>' : '')
     + '<span class="grow"></span>'
@@ -11012,6 +11069,251 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
 }
 
 
+/* ===== ui-docform.js ===== */
+/* ===================================================================
+   หัวเอกสารธุรกิจกลาง — ลำดับช่องแบบที่นักบัญชีคุ้นมือ ใช้กับเอกสารขายและซื้อทุกใบ
+   ลูกค้า/ผู้ขาย (เติมที่อยู่ เลขผู้เสียภาษี สาขาให้เอง แก้บนใบนี้ได้) → วันที่ → เงื่อนไขชำระ
+   (เงินสด / เครดิต N วัน / เครดิตไม่แสดงวันครบกำหนด) → วันครบกำหนด → โปรเจกต์ พนักงานขาย เลขที่อ้างอิง
+   ท้ายฟอร์ม: หมายเหตุ (พิมพ์บนเอกสาร) · โน้ตภายใน (ไม่พิมพ์ เห็นเฉพาะในระบบ)
+   ฟอร์มที่ใช้: docHead() + lineEditor() + docNotes() แล้วอ่านค่าด้วย collectDoc()
+   =================================================================== */
+const CREDIT_OPTS = [['credit', 'เครดิต (ระบุวัน)'], ['cash', 'เงินสด'], ['creditHidden', 'เครดิต (ไม่แสดงวันครบกำหนด)']];
+const LS_SALES_NAME = 'financii.salesName';
+
+/** ช่องข้อความหลายบรรทัดในรูปแบบเดียวกับ field() */
+const areaField = (o) =>
+  '<div class="fld-w' + (o.wide ? ' wide' : '') + '"><label for="f_' + o.name + '">' + esc(o.label) + '</label>'
+  + '<textarea id="f_' + o.name + '" name="' + o.name + '" rows="' + (o.rows || 2) + '"'
+  + (o.placeholder ? ' placeholder="' + esc(o.placeholder) + '"' : '') + '>' + esc(o.value || '') + '</textarea>'
+  + (o.hint ? '<div class="fld-hint">' + esc(o.hint) + '</div>' : '') + '</div>';
+
+/** หัวเอกสาร
+    o = { side:'customer'|'vendor', parties, d: เอกสารเดิมหรือเอกสารต้นทาง, partner, date,
+          credit: false = ไม่มีเงื่อนไขชำระ (ขายเงินสด ค่าใช้จ่ายที่จ่ายทันที), extra: ช่องเพิ่มต่อจากวันที่, partnerHint } */
+function docHead(o) {
+  const d = o.d || {};
+  const parties = o.parties || [];
+  const code = o.partner || d.partnerCode || (parties[0] || [])[0] || '';
+  const p = code ? DB.partners.find((x) => x.code === code) : null;
+  const date = o.date || d.date || defaultDate();
+  const type = d.creditType || 'credit';
+  const days = type === 'cash' ? 0 : d.creditDays !== undefined && d.creditDays !== null ? d.creditDays : p ? p.termDays || 0 : 0;
+  const due = d.due && d.date === date ? d.due : addDays(date, days);
+  const who = o.side === 'vendor' ? 'ผู้ขาย' : 'ลูกค้า';
+  return '<div class="flds doc-head">'
+    + field({ name:'partner', label: who, type:'select', value: code,
+        options: parties.length ? parties : [['', '— ยังไม่มี' + who + 'ในทะเบียน เพิ่มที่เมนูผู้ติดต่อ —']], hint: o.partnerHint })
+    + field({ name:'date', label:'วันที่เอกสาร', type:'date', value: date })
+    + (o.extra || '')
+    + (o.credit === false ? ''
+      : field({ name:'creditType', label:'เงื่อนไขชำระ', type:'select', value: type, options: CREDIT_OPTS })
+        + '<div class="fld-w credit-pair"' + (type === 'cash' ? ' hidden' : '') + '><label for="f_creditDays">เครดิต (วัน) / วันครบกำหนด</label>'
+        + '<span class="pair"><input id="f_creditDays" name="creditDays" type="number" min="0" step="1" inputmode="numeric" value="' + days + '">'
+        + '<input id="f_dueDate" name="dueDate" type="date" value="' + due + '" aria-label="วันครบกำหนด"></span>'
+        + '<div class="fld-hint">แก้จำนวนวันหรือวันครบกำหนดช่องใดก็ได้ อีกช่องคำนวณให้</div></div>')
+    + field({ name:'project', label:'โปรเจกต์', value: d.project || '', placeholder:'ไม่บังคับ' })
+    + field({ name:'salesName', label: o.side === 'vendor' ? 'ผู้จัดทำ' : 'พนักงานขาย', value: d.salesName || lsGet(LS_SALES_NAME) || '', placeholder:'ไม่บังคับ' })
+    + field({ name:'reference', label:'เลขที่อ้างอิง', value: d.reference || '', placeholder: o.side === 'vendor' ? 'เช่น เลขใบเสนอราคาของผู้ขาย' : 'เช่น เลขใบสั่งซื้อของลูกค้า' })
+    + contactBox(p, d.snap && d.snap.edited ? d.snap : null, who)
+    + '</div>';
+}
+
+/** ข้อมูลคู่ค้าบนเอกสารใบนี้ — ปิดไว้ก่อน เปิดแก้ได้เมื่อออกให้สาขาอื่นหรือที่อยู่ใหม่ (ทะเบียนไม่เปลี่ยน) */
+function contactBox(p, snap, who) {
+  const s = snap || (p ? snapshotPartner(p) : {});
+  const line = p ? [s.name, s.taxId ? 'เลขผู้เสียภาษี ' + s.taxId : '', s.branch ? (s.branch === '00000' ? 'สำนักงานใหญ่' : 'สาขา ' + s.branch) : '']
+    .filter(Boolean).join(' · ') : 'ยังไม่ได้เลือก' + who;
+  return '<details class="contact-box fld-w wide" id="contactBox"' + (snap ? ' open' : '') + '>'
+    + '<summary><span class="cb-l">ข้อมูล' + who + 'บนเอกสาร</span> <span class="cb-v" id="cbLine">' + esc(line) + '</span>'
+    + '<span class="cb-edit">แก้บนใบนี้</span></summary><div class="flds">'
+    + field({ name:'cName', label:'ชื่อที่พิมพ์บนเอกสาร', value: s.name || '' })
+    + field({ name:'cTaxId', label:'เลขประจำตัวผู้เสียภาษี', value: s.taxId || '', cls:'mono' })
+    + field({ name:'cBranch', label:'สาขา (00000 = สำนักงานใหญ่)', value: s.branch || '', cls:'mono' })
+    + field({ name:'cPerson', label:'ผู้ติดต่อ', value: s.contactPerson || '' })
+    + field({ name:'cPhone', label:'โทรศัพท์', value: s.phone || '' })
+    + field({ name:'cEmail', label:'อีเมล', value: s.email || '' })
+    + areaField({ name:'cAddress', label:'ที่อยู่', value: s.address || '', wide:true })
+    + '<div class="fld-hint wide">แก้เฉพาะเอกสารใบนี้ (เช่น ออกให้สาขาอื่น) ทะเบียนผู้ติดต่อไม่เปลี่ยน</div>'
+    + '</div></details>';
+}
+const CONTACT_FIELDS = [['cName', 'name'], ['cTaxId', 'taxId'], ['cBranch', 'branch'], ['cPerson', 'contactPerson'],
+  ['cPhone', 'phone'], ['cEmail', 'email'], ['cAddress', 'address']];
+/** เติมข้อมูลคู่ค้าจากทะเบียนลงช่องในกล่องข้อมูลบนเอกสาร */
+function fillContactBox(code) {
+  const p = DB.partners.find((x) => x.code === code);
+  const s = p ? snapshotPartner(p) : {};
+  CONTACT_FIELDS.forEach(function (f) {
+    const e = document.querySelector('#modal [name="' + f[0] + '"]');
+    if (e) e.value = s[f[1]] || '';
+  });
+  const box = document.getElementById('contactBox');
+  if (box) box.open = false;
+  const l = document.getElementById('cbLine');
+  if (l) l.textContent = p ? [s.name, s.taxId ? 'เลขผู้เสียภาษี ' + s.taxId : '', s.branch ? (s.branch === '00000' ? 'สำนักงานใหญ่' : 'สาขา ' + s.branch) : '']
+    .filter(Boolean).join(' · ') : '—';
+}
+/** ส่งเฉพาะช่องที่ต่างจากทะเบียน — ไม่ได้แก้อะไร = undefined (ใบนี้ใช้ข้อมูลตามทะเบียน) */
+function collectContact() {
+  if (!document.querySelector('#modal [name="cName"]')) return undefined;
+  const p = DB.partners.find((x) => x.code === val('partner'));
+  const s = p ? snapshotPartner(p) : {};
+  const out = {};
+  let changed = false;
+  CONTACT_FIELDS.forEach(function (f) {
+    const v = val(f[0]).trim();
+    if (v !== String(s[f[1]] || '').trim()) { out[f[1]] = v; changed = true; }
+  });
+  return changed ? out : undefined;
+}
+
+/** หมายเหตุ (พิมพ์บนเอกสาร) และโน้ตภายใน */
+function docNotes(d, ph) {
+  const x = d || {};
+  return '<div class="flds doc-notes">'
+    + areaField({ name:'note', label:'หมายเหตุ (พิมพ์บนเอกสาร)', value: x.note || '', placeholder: ph || 'เงื่อนไขการชำระเงิน กำหนดส่งมอบ ฯลฯ' })
+    + areaField({ name:'internalNote', label:'โน้ตภายใน (ไม่พิมพ์)', value: x.internalNote || '', placeholder:'เห็นเฉพาะคนในบริษัท' })
+    + '</div>';
+}
+
+/** อ่านหัวเอกสาร รายการ และตั้งค่าราคาจากฟอร์มตอนนี้ — ส่งเข้า issueInvoice / issueTradeDoc / recordBill ได้ตรง ๆ */
+function collectDoc() {
+  const has = (n) => !!document.querySelector('#modal [name="' + n + '"]');
+  const out = {
+    partnerCode: val('partner') || null, date: val('date'),
+    project: val('project'), salesName: val('salesName'), reference: val('reference'),
+    note: val('note'), internalNote: val('internalNote'),
+    contact: collectContact(), pricing: collectPricing(), lines: collectLines(),
+  };
+  if (has('creditType')) {
+    out.creditType = val('creditType');
+    if (out.creditType !== 'cash') { out.creditDays = val('creditDays'); out.dueDate = val('dueDate'); }
+  }
+  if (out.salesName) lsSet(LS_SALES_NAME, out.salesName);
+  return out;
+}
+
+/* เปลี่ยนคู่ค้า → เติมข้อมูลบนเอกสารและวันเครดิตตามทะเบียน · เครดิต/ครบกำหนด/วันที่ คำนวณกันและกัน */
+function syncDue(from) {
+  const daysEl = document.querySelector('#modal [name="creditDays"]');
+  const dueEl = document.querySelector('#modal [name="dueDate"]');
+  const date = val('date');
+  if (!daysEl || !dueEl || !date) return;
+  if (from === 'due' && dueEl.value) {
+    const n = Math.round((Date.parse(dueEl.value) - Date.parse(date)) / 86400000);
+    daysEl.value = n >= 0 ? String(n) : '0';
+    if (n < 0) dueEl.value = date;
+  } else {
+    const n = Math.max(0, Math.floor(Number(daysEl.value) || 0));
+    dueEl.value = addDays(date, n);
+  }
+}
+EXTRA_CHANGE.push(function (t) {
+  if (!document.querySelector('#modal .doc-head')) return false;
+  if (t.name === 'partner') {
+    fillContactBox(t.value);
+    const p = DB.partners.find((x) => x.code === t.value);
+    const daysEl = document.querySelector('#modal [name="creditDays"]');
+    if (p && daysEl && val('creditType') !== 'cash') { daysEl.value = String(p.termDays || 0); syncDue('days'); }
+    return false;                       // ให้ตัวรับอื่น (หัก ณ ที่จ่าย เงินมัดจำ) ทำงานต่อ
+  }
+  if (t.name === 'creditType') {
+    const pair = document.querySelector('#modal .credit-pair');
+    if (pair) pair.hidden = t.value === 'cash';
+    return true;
+  }
+  if (t.name === 'dueDate') { syncDue('due'); return true; }
+  if (t.name === 'creditDays') { syncDue('days'); return true; }
+  if (t.name === 'date') { syncDue('days'); return false; }
+  return false;
+});
+EXTRA_INPUT.push(function (t) {
+  if (t.name === 'creditDays' && document.querySelector('#modal .doc-head')) { syncDue('days'); return true; }
+  if (t.name === 'cName' || t.name === 'cTaxId' || t.name === 'cBranch') {
+    const l = document.getElementById('cbLine');
+    if (l) l.textContent = [val('cName'), val('cTaxId') ? 'เลขผู้เสียภาษี ' + val('cTaxId') : '', val('cBranch')
+      ? (val('cBranch') === '00000' ? 'สำนักงานใหญ่' : 'สาขา ' + val('cBranch')) : ''].filter(Boolean).join(' · ') + ' (แก้บนใบนี้)';
+    return true;
+  }
+  return false;
+});
+
+/* ===================================================================
+   สถานะเอกสารแบบเอกสารธุรกิจ — ชื่อสถานะตามชนิดเอกสาร และ "ป้ายสถานะคือเมนู"
+   กดป้ายสถานะในรายการ เห็นสิ่งที่ทำต่อได้ตามลำดับการไหลของเอกสาร (อนุมัติ สร้างเอกสารถัดไป รับชำระ ยกเลิก)
+   DOC_STATUS[kind](d) → [คลาสสี, ชื่อสถานะ] · STATUS_ACTIONS[kind](d) → [[การกระทำ, ชื่อ, ไอคอน, คลาส?], …]
+   แต่ละระบบลงทะเบียนการกระทำของเอกสารตัวเองเพิ่มได้ (STATUS_ACTIONS.invoice = …)
+   =================================================================== */
+const TRADE_ST = {
+  quotation: { issued:['wait','รออนุมัติ'], approved:['open','อนุมัติ'], rejected:['late','ไม่อนุมัติ'],
+    cancelled:['void','ยกเลิก'], closed:['paid','ดำเนินการแล้ว'], expired:['late','หมดอายุ'] },
+  salesOrder: { issued:['wait','รออนุมัติ'], approved:['open','อนุมัติ'], rejected:['late','ไม่อนุมัติ'],
+    cancelled:['void','ยกเลิก'], closed:['paid','ดำเนินการแล้ว'], partially_invoiced:['wait','ออกใบกำกับบางส่วน'] },
+  purchaseOrder: { issued:['wait','รออนุมัติ'], approved:['open','อนุมัติ'], rejected:['late','ไม่อนุมัติ'],
+    cancelled:['void','ยกเลิก'], closed:['paid','ดำเนินการแล้ว'], partially_received:['wait','รับสินค้าบางส่วน'] },
+};
+const DOC_STATUS = {
+  quotation: (d) => TRADE_ST.quotation[tradeDocStatus('quotation', d)] || statusPill(d.status).st,
+  salesOrder: (d) => TRADE_ST.salesOrder[d.status] || statusPill(d.status).st,
+  purchaseOrder: (d) => TRADE_ST.purchaseOrder[d.status] || statusPill(d.status).st,
+  /* ใบกำกับ: รอดำเนินการ (ยังไม่ส่งลูกค้า แก้ได้) → รอเก็บเงิน → แบ่งจ่าย → เก็บเงินแล้ว
+     ใบรุ่นก่อนไม่มีธงส่งเอกสาร ถือว่าส่งแล้ว */
+  invoice: function (d) {
+    if (d.status === 'void') return ['void', 'ยกเลิก'];
+    if (d.status === 'paid') return ['paid', 'เก็บเงินแล้ว'];
+    if (d.status === 'partially_paid') return ['wait', 'แบ่งจ่าย'];
+    if (d.status === 'credit_balance') return ['wait', 'ลูกค้ามีเครดิต รอคืนเงิน'];
+    if (d.status === 'written_off') return ['late', 'ตัดหนี้สูญ'];
+    if (d.delivered === false) return ['draft', 'รอดำเนินการ'];
+    return d.due && d.due < TODAY && d.creditType !== 'creditHidden' ? ['late', 'เลยกำหนด'] : ['open', 'รอเก็บเงิน'];
+  },
+  cashSale: (d) => d.status === 'void' ? ['void', 'ยกเลิก'] : ['paid', 'เก็บเงินแล้ว'],
+  receipt: (d) => d.status === 'void' ? ['void', 'ยกเลิก'] : ['paid', 'เก็บเงินแล้ว'],
+  billingNote: (d) => ({ issued:['wait','รอวางบิล'], delivered:['open','วางบิลแล้ว'], partially_paid:['wait','รับชำระบางส่วน'],
+    paid:['paid','เก็บเงินแล้ว'], closed:['paid','เปิดบิลแล้ว'], cancelled:['void','ยกเลิก'], void:['void','ยกเลิก'] })[d.status] || statusPill(d.status).st,
+  bill: function (d) {
+    if (d.status === 'void') return ['void', 'ยกเลิก'];
+    if (d.status === 'paid') return ['paid', 'ชำระเงินแล้ว'];
+    if (d.status === 'partially_paid') return ['wait', 'ชำระบางส่วน'];
+    if (d.status === 'vendor_credit') return ['wait', 'ผู้ขายมีเครดิตให้เรา'];
+    return d.due && d.due < TODAY && d.creditType !== 'creditHidden' ? ['late', 'เลยกำหนดจ่าย'] : ['open', 'รอชำระ'];
+  },
+  expense: (d) => d.status === 'void' ? ['void', 'ยกเลิก'] : d.status === 'paid' ? ['paid', 'ชำระเงินแล้ว'] : statusPill(d.status).st,
+  payment: (d) => d.status === 'void' ? ['void', 'ยกเลิก'] : ['paid', 'ชำระเงินแล้ว'],
+  goodsReceipt: (d) => ({ received:['open','รับสินค้าแล้ว · รอตั้งหนี้'], closed:['paid','ดำเนินการแล้ว'], void:['void','ยกเลิก'] })[d.status] || statusPill(d.status).st,
+  whtCert: (d) => d.status === 'void' || d.void ? ['void', 'ยกเลิก'] : ['paid', 'ดำเนินการแล้ว'],
+  creditNote: (d) => d.status === 'void' ? ['void', 'ยกเลิก'] : ['paid', 'อนุมัติ'],
+  debitNote: (d) => d.status === 'void' ? ['void', 'ยกเลิก'] : ['paid', 'อนุมัติ'],
+};
+const STATUS_ACTIONS = {};
+/** เซลล์สถานะในตาราง — มีสิ่งที่ทำต่อได้ = ปุ่มเปิดเมนู ไม่มี = ป้ายธรรมดา */
+function docStatusCell(kind, d) {
+  const f = DOC_STATUS[kind];
+  const m = f ? f(d) : statusPill(d.status).st;
+  const acts = STATUS_ACTIONS[kind] ? STATUS_ACTIONS[kind](d) : [];
+  if (!acts.length) return { st: m };
+  return { html: '<button type="button" class="st st-btn ' + m[0] + '" data-act="stmenu:' + kind + ':' + esc(d.no) + '" aria-haspopup="menu"'
+    + ' title="กดเพื่อดูสิ่งที่ทำต่อได้">' + esc(m[1]) + '<span class="caret" aria-hidden="true"></span></button>' };
+}
+/** ชื่อสถานะของเอกสาร (ข้อความล้วน) — ใช้ในหน้ารายละเอียดและการค้นหา */
+function docStatusLabel(kind, d) {
+  const f = DOC_STATUS[kind];
+  return (f ? f(d) : statusPill(d.status).st)[1];
+}
+EXTRA_DISPATCH.push(function (head, rest) {
+  if (head !== 'stmenu') return false;
+  const kind = rest[0], no = rest.slice(1).join(':');
+  const d = (DB.docs[kind] || []).find((x) => x.no === no);
+  if (!d) return true;
+  const acts = (STATUS_ACTIONS[kind] ? STATUS_ACTIONS[kind](d) : []);
+  const tail = rowMenuItems({ kind, no }).filter((i) => !acts.some((a) => a[0] === i[0]));
+  const btnEl = Array.prototype.find.call(document.querySelectorAll('[data-act^="stmenu:"]'),
+    (e) => e.getAttribute('data-act') === 'stmenu:' + kind + ':' + no);
+  const r = btnEl ? btnEl.getBoundingClientRect() : { left: 80, bottom: 120 };
+  openActionMenu(no + ' · ' + docStatusLabel(kind, d), acts.concat(tail.length && acts.length ? [['-']] : []).concat(tail), r.left, r.bottom + 4);
+  return true;
+});
+
+
 /* ===== ui-tables.js ===== */
 /* ===================================================================
    ตารางข้อมูล — ความหนาแน่น ตัวกรองสถานะ มุมมองที่บันทึกไว้ และเมนูคลิกขวา
@@ -11220,9 +11522,14 @@ function openRowMenu(tr, x, y) {
   if (!ref) return false;
   const items = rowMenuItems(ref);
   if (!items.length) return false;
+  return openActionMenu(ref.no, items, x, y);
+}
+/** เมนูลอยที่ตำแหน่งที่กำหนด — items = [[การกระทำ, ชื่อ, ไอคอน, คลาส?]] · ['-'] = เส้นคั่น */
+function openActionMenu(title, items, x, y) {
   const m = document.getElementById('rowMenu');
-  m.innerHTML = '<div class="rm-h">' + esc(ref.no) + '</div>' + items.map((i) => '<button class="rm-i' + (i[3] ? ' ' + i[3] : '')
-    + '" role="menuitem" data-act="rowgo:' + esc(i[0]) + '">' + icon(i[2]) + esc(i[1]) + '</button>').join('');
+  m.innerHTML = '<div class="rm-h">' + esc(title) + '</div>' + items.map((i) => i[0] === '-' ? '<div class="rm-sep" role="separator"></div>'
+    : '<button class="rm-i' + (i[3] ? ' ' + i[3] : '')
+    + '" role="menuitem" data-act="rowgo:' + esc(i[0]) + '">' + icon(i[2] || 'arrow') + esc(i[1]) + '</button>').join('');
   m.classList.add('show');
   const w = m.offsetWidth, h = m.offsetHeight;
   m.style.left = Math.round(Math.max(8, Math.min(window.innerWidth - w - 8, x))) + 'px';
@@ -21102,32 +21409,74 @@ function lineRow(i, mode, l) {
     + opts.map((o) => '<option value="' + esc(o[0]) + '"' + (o[0] === cur ? ' selected' : '') + '>' + esc(o[1]) + '</option>').join('')
     + '</select>';
   const accs = lineAccOptions(mode);
+  const disc = v.disc === undefined || v.disc === null ? '' : String(v.disc);
   return '<tr data-ln="' + i + '">'
     + '<td>' + sel('l' + i + '_item', items, v.itemCode || '', ' class="itemsel" data-i="' + i + '"' + (cost ? ' data-cost="1"' : '')) + '</td>'
     + '<td><input name="l' + i + '_desc" placeholder="พิมพ์เองได้" value="' + esc(v.desc || '') + '"></td>'
-    + '<td><input name="l' + i + '_qty" class="r" value="' + esc(v.qty !== undefined ? String(v.qty) : (i === 0 ? '1' : '')) + '"></td>'
-    + '<td><input name="l' + i + '_price" class="r" value="' + esc(v.price !== undefined ? plainNum(v.price) : '') + '"></td>'
+    + '<td><input name="l' + i + '_qty" class="r" inputmode="decimal" value="' + esc(v.qty !== undefined ? String(v.qty) : (i === 0 ? '1' : '')) + '"></td>'
+    + (cost ? '' : '<td><input name="l' + i + '_uom" class="uom" value="' + esc(v.uom || '') + '" placeholder="หน่วย"></td>')
+    + '<td><input name="l' + i + '_price" class="r" inputmode="decimal" value="' + esc(v.price !== undefined ? plainNum(v.price) : '') + '"></td>'
+    + (cost ? '' : '<td><input name="l' + i + '_disc" class="r" inputmode="decimal" value="' + esc(disc) + '" placeholder="0"></td>')
     + '<td>' + sel('l' + i + '_tax', LINE_VAT, v.taxCode || 'VAT7') + '</td>'
     + (accs ? '<td>' + sel('l' + i + '_acc', accs, v.acc || lineDefaultAcc(mode, v.itemCode)) + '</td>' : '')
+    + (cost ? '' : '<td class="num ln-amt" data-amt="' + i + '"></td>')
     + '<td><button class="icon-btn" data-act="ln:del:' + i + '" aria-label="ลบบรรทัดที่ ' + (i + 1) + '" title="ลบบรรทัดนี้">✕</button></td>'
     + '</tr>';
 }
-function lineEditor(n, mode, init) {
+/* ตารางรายการ + แถบตั้งค่าราคา (รวม/ไม่รวมภาษี · ส่วนลดรายการเป็น % หรือบาท) + ยอดท้ายเอกสารแบบเอกสารธุรกิจ
+   pricing = ตั้งค่าราคาเดิมของเอกสาร (ตอนแก้ไข) · ไม่ส่ง = ค่าเริ่มต้นของกิจการ */
+function lineEditor(n, mode, init, pricing, footLeft) {
   const m = mode || 'sale';
   const cost = m === 'cost';
   const rows = init || [];
   const count = Math.max(n || 1, rows.length);
+  const P = normPricing(pricing);
+  const opt = (o, cur) => o.map((x) => '<option value="' + x[0] + '"' + (x[0] === cur ? ' selected' : '') + '>' + esc(x[1]) + '</option>').join('');
   let h = '<div class="sub-h">' + (cost ? 'สินค้าที่รับเข้าคลัง' : 'รายการสินค้าหรือบริการ')
+    + (cost ? '' : '<span class="grow"></span><span class="ln-opts">'
+      + '<label>ราคา <select name="priceMode" aria-label="ราคาสินค้า">' + opt([['exclusive', 'ไม่รวมภาษี'], ['inclusive', 'รวมภาษีแล้ว']], P.mode) + '</select></label>'
+      + '<label>ส่วนลดรายการเป็น <select name="discKind" aria-label="หน่วยส่วนลดรายการ">' + opt([['percent', '%'], ['amount', 'บาท']], P.lineDisc) + '</select></label>'
+      + '</span>')
     + '</div><div class="scroll"><table class="lines" id="lnTable" data-mode="' + m + '" data-next="' + count + '"><thead><tr>'
     + '<th>' + (cost ? 'สินค้า' : 'สินค้า/บริการ') + '</th><th>' + (m === 'sale' ? 'คำอธิบายบนใบกำกับ' : 'คำอธิบาย')
-    + '</th><th class="r" style="width:74px">จำนวน</th><th class="r" style="width:112px">' + (cost ? 'ต้นทุนต่อหน่วย (ก่อนภาษี)' : 'ราคาต่อหน่วย')
-    + '</th><th style="width:104px">ภาษี</th>'
+    + '</th><th class="r" style="width:74px">จำนวน</th>'
+    + (cost ? '' : '<th style="width:76px">หน่วย</th>')
+    + '<th class="r" style="width:112px">' + (cost ? 'ต้นทุนต่อหน่วย (ก่อนภาษี)' : 'ราคาต่อหน่วย') + '</th>'
+    + (cost ? '' : '<th class="r" style="width:84px">ส่วนลด</th>')
+    + '<th style="width:104px">ภาษี</th>'
     + (m === 'sale' ? '<th style="width:200px">บันทึกรายได้เข้าบัญชี</th>' : m === 'purchase' ? '<th style="width:200px">บันทึกเข้าบัญชี (ตอนตั้งหนี้)</th>' : '')
+    + (cost ? '' : '<th class="r" style="width:118px">จำนวนเงิน</th>')
     + '<th style="width:44px"></th></tr></thead><tbody>';
   for (let i = 0; i < count; i++) h += lineRow(i, m, rows[i]);
-  return h + '</tbody></table></div>'
-    + '<div class="jv-tot" style="justify-content:space-between; align-items:center">'
-    + btn('ln:add', '+ เพิ่มบรรทัด') + '<span id="lnSum"></span></div>';
+  h += '</tbody></table></div>';
+  if (cost) {
+    return h + '<div class="jv-tot" style="justify-content:space-between; align-items:center">'
+      + btn('ln:add', '+ เพิ่มบรรทัด') + '<span id="lnSum"></span></div>';
+  }
+  const bill = P.bill || { kind: 'percent', value: '' };
+  const row = (label, id, extra) => '<tr' + (extra || '') + '><th>' + label + '</th><td class="num" id="' + id + '">—</td></tr>';
+  return h + '<div class="doc-foot"><div class="doc-foot-l">' + btn('ln:add', '+ เพิ่มบรรทัด')
+    + (footLeft ? '<div class="flds">' + footLeft + '</div>' : '') + '</div>'
+    + '<table class="doc-tot" aria-label="ยอดท้ายเอกสาร"><tbody>'
+    + row('รวมเป็นเงิน', 'tSub')
+    + '<tr><th><label for="f_billDisc">ส่วนลดท้ายบิล</label></th><td class="num"><span class="bill-disc">'
+    + '<input id="f_billDisc" name="billDisc" class="r" inputmode="decimal" value="' + esc(bill.value || '') + '" placeholder="0">'
+    + '<select name="billDiscKind" aria-label="หน่วยส่วนลดท้ายบิล">' + opt([['percent', '%'], ['amount', 'บาท']], bill.kind) + '</select>'
+    + '</span><div class="dim" id="tDisc"></div></td></tr>'
+    + row('ราคาหลังหักส่วนลด', 'tAfter')
+    + row('ยอดที่ไม่มีภาษี (0% / ยกเว้น)', 'tExempt', ' data-opt="exempt"')
+    + row('มูลค่าที่คำนวณภาษี', 'tVatable')
+    + row('ภาษีมูลค่าเพิ่ม', 'tVat')
+    + row('<b>จำนวนเงินรวมทั้งสิ้น</b>', 'tTotal', ' class="grand"')
+    + row('หักภาษี ณ ที่จ่าย', 'tWht', ' data-opt="wht"')
+    + row('<b>ยอดชำระ</b>', 'tNet', ' data-opt="wht" class="grand"')
+    + '</tbody></table></div><span id="lnSum" hidden></span>';
+}
+/** ตั้งค่าราคาที่กรอกในฟอร์มตอนนี้ — ขายเงินสดรุ่นเดิมใช้ช่อง vatIncl */
+function collectPricing() {
+  const modeEl = document.querySelector('#modal [name="priceMode"]');
+  const mode = modeEl ? modeEl.value : (val('vatIncl') === 'no' ? 'exclusive' : 'inclusive');
+  return { mode, lineDisc: val('discKind') || 'percent', bill: { kind: val('billDiscKind') || 'percent', value: val('billDisc') } };
 }
 /** อ่านทุกบรรทัดที่อยู่ในตารางตอนนี้ — ข้ามบรรทัดว่างและบรรทัดที่ยังไม่มีราคา */
 function collectLines() {
@@ -21146,6 +21495,8 @@ function collectLines() {
       desc: desc.trim() || (it ? it.name : ''),
       qty: Number(qty || 1) || 1,
       price: price,
+      uom: val('l' + i + '_uom') || (it ? it.uom : ''),
+      disc: val('l' + i + '_disc'),
       taxCode: val('l' + i + '_tax') || 'VAT7',
       acc: val('l' + i + '_acc') || null,
       revenueSub: it && it.type === 'service' ? 'service_revenue' : 'sales_revenue',
@@ -21153,28 +21504,67 @@ function collectLines() {
   });
   return out;
 }
-/** ยอดรวมใต้ตาราง คำนวณสดตอนพิมพ์ — ขายเงินสดแบบราคารวมภาษี ถอดภาษีแบบเดียวกับตอนลงบัญชี */
+/** ยอดท้ายเอกสาร คำนวณสดตอนพิมพ์ ด้วยสูตรเดียวกับตอนลงบัญชี (priceLines) — ผิดกติกา (ส่วนลดเกิน) ขึ้นเตือนแทนยอด */
 function refreshLineSum() {
-  const el = document.getElementById('lnSum');
-  if (!el) return;
-  const lines = collectLines();
-  if (!lines.length) { el.innerHTML = ''; return; }
+  const lnSum = document.getElementById('lnSum');
+  if (!lnSum) return;
   const date = val('date') || TODAY;
-  const cash = val('saleKind') === 'cash';
-  const incl = cash && val('vatIncl') !== 'no';
+  const tot = document.querySelector('#modal .doc-tot');
+  const set = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
+  const show = (k, on) => document.querySelectorAll('#modal .doc-tot [data-opt="' + k + '"]').forEach((e) => { e.hidden = !on; });
+  if (!tot) {
+    /* ตารางรับสินค้า (ต้นทุน) — แสดงยอดรวมบรรทัดเดียวแบบเดิม */
+    const lines = collectLines();
+    if (!lines.length) { lnSum.innerHTML = ''; return; }
+    try {
+      const v = computeVat(lines, date);
+      lnSum.innerHTML = 'มูลค่าก่อนภาษี <b>' + fmt(v.std + v.zero + v.exempt) + '</b>';
+    } catch (e) { lnSum.innerHTML = ''; }
+    return;
+  }
+  /* บรรทัดที่กรอกแล้วแต่ยังไม่ครบ (ยังไม่มีราคา) ไม่นับ — ยอดต่อบรรทัดขึ้นเฉพาะบรรทัดที่นับ */
+  document.querySelectorAll('#lnTable [data-amt]').forEach((e) => { e.textContent = ''; });
+  const lines = collectLines();
+  const rowsIdx = [];
+  document.querySelectorAll('#lnTable tbody tr[data-ln]').forEach(function (tr) {
+    const i = tr.getAttribute('data-ln');
+    if ((val('l' + i + '_item') || val('l' + i + '_desc').trim()) && val('l' + i + '_price') && M(val('l' + i + '_price')) !== 0) rowsIdx.push(i);
+  });
+  const P = collectPricing();
+  const err = tot.querySelector('.tot-err');
+  if (err) err.remove();
   try {
-    const v = cash ? cashSaleAmounts(lines, date, incl) : computeVat(lines, date);
-    const code = !cash && val('docWht');
+    const r = priceLines(lines, date, P);
+    r.rows.forEach(function (x, k) {
+      const e = document.querySelector('#lnTable [data-amt="' + rowsIdx[k] + '"]');
+      if (e) e.textContent = fmt(x.gross - x.discount);
+    });
+    const t = r.totals;
+    set('tSub', fmt(t.subTotal));
+    set('tDisc', t.discount ? 'ส่วนลดรวม ' + fmt(t.discount) + (t.lineDiscount && t.billDiscount ? ' (รายการ ' + fmt(t.lineDiscount) + ')' : '') : '');
+    set('tAfter', fmt(t.afterDiscount));
+    set('tExempt', fmt(t.exempt));
+    show('exempt', t.exempt !== 0);
+    set('tVatable', fmt(t.vatable));
+    set('tVat', fmt(t.vat) + (r.v.rate !== '0' ? ' (' + r.v.rate + '%)' : ''));
+    set('tTotal', fmt(t.total));
+    const code = val('docWht');
     let w = null;
     if (code) {
-      const rows = lines.map((l) => ({ itemCode: l.itemCode, amount: round2(mulQty(M(l.price), l.qty)) }));
-      w = docWht(code, { lines: rows, base: v.std + v.zero + v.exempt, total: v.total }, date);
+      const rows = lines.map((l, k) => ({ itemCode: l.itemCode, amount: r.rows[k].net }));
+      w = docWht(code, { lines: rows, base: r.v.std + r.v.zero + r.v.exempt, total: r.v.total }, date);
     }
-    el.innerHTML = 'มูลค่าก่อนภาษี <b>' + fmt(v.std + v.zero + v.exempt) + '</b> &nbsp; ภาษี <b>' + fmt(v.vat)
-      + '</b> &nbsp; รวมทั้งสิ้น <b>' + fmt(v.total) + '</b>' + (incl ? ' <span class="dim">(ราคาที่กรอกรวมภาษีแล้ว)</span>' : '')
-      + (w ? ' &nbsp; หัก ณ ที่จ่าย ' + w.whtRate + '% <b>' + fmt(w.wht) + '</b> &nbsp; ยอดชำระสุทธิ <b>' + fmt(w.payNet) + '</b>'
-        + (w.whtUnder ? ' <span class="dim">(ต่ำกว่า 1,000 บาท ไม่ต้องหัก)</span>' : '') : '');
-  } catch (e) { el.innerHTML = ''; }
+    show('wht', !!w);
+    if (w) {
+      set('tWht', fmt(w.wht) + ' (' + w.whtRate + '%' + (w.whtUnder ? ' · ต่ำกว่า 1,000 บาท ไม่ต้องหัก' : '') + ')');
+      set('tNet', fmt(w.payNet));
+    }
+    tot.classList.toggle('incl', P.mode === 'inclusive');
+  } catch (e) {
+    ['tSub', 'tAfter', 'tExempt', 'tVatable', 'tVat', 'tTotal', 'tWht', 'tNet'].forEach((id) => set(id, '—'));
+    set('tDisc', '');
+    if (e instanceof DomainError) tot.insertAdjacentHTML('beforeend', '<caption class="tot-err">' + esc(e.message) + '</caption>');
+  }
 }
 
 /* ปุ่มเพิ่ม/ลบบรรทัด · สลับขายเชื่อ/ขายเงินสด · ยอดรวมสด — ลงทะเบียนกับตัวรับเหตุการณ์กลางของ ui-core */
@@ -21200,7 +21590,8 @@ EXTRA_DISPATCH.push(function (head, rest) {
   return true;
 });
 EXTRA_INPUT.push(function (t) {
-  if (!/^l\d+_(qty|price|desc)$/.test(t.name || '') || !document.getElementById('lnTable')) return false;
+  if (!document.getElementById('lnTable')) return false;
+  if (!/^l\d+_(qty|price|desc|disc)$/.test(t.name || '') && t.name !== 'billDisc') return false;
   refreshLineSum();
   return true;
 });
@@ -21217,11 +21608,17 @@ EXTRA_CHANGE.push(function (t) {
     });
     const sb = document.querySelector('#modal [data-act="modal:submit"]');
     if (sb) sb.textContent = t.value === 'cash' ? 'รับเงินและออกใบกำกับอย่างย่อ' : 'ลงบัญชีและออกเลขที่';
+    /* หน้าร้านติดราคารวมภาษีเป็นปกติ ขายเชื่อกรอกราคาก่อนภาษี */
+    const pm = document.querySelector('#modal [name="priceMode"]');
+    if (pm) pm.value = t.value === 'cash' ? 'inclusive' : normPricing(null).mode;
+    const cd = document.querySelector('#modal [name="cashDate"]'), dd = document.querySelector('#modal [name="date"]');
+    if (cd && dd) { if (t.value === 'cash') cd.value = dd.value; else dd.value = cd.value; }
     refreshLineSum();
     return true;
   }
   /* เปลี่ยนอัตราภาษีหรือแบบราคา ยอดรวมเปลี่ยนตาม — วันที่ปล่อยให้ตัวรับอื่นทำงานต่อด้วย (ฟอร์มค่าใช้จ่ายใช้ช่องชื่อเดียวกัน) */
-  if (document.getElementById('lnTable') && (/^l\d+_tax$/.test(t.name || '') || t.name === 'vatIncl' || t.name === 'date')) {
+  if (document.getElementById('lnTable') && (/^l\d+_tax$/.test(t.name || '') || t.name === 'vatIncl' || t.name === 'date'
+      || t.name === 'priceMode' || t.name === 'discKind' || t.name === 'billDiscKind')) {
     refreshLineSum();
     return t.name !== 'date';
   }
@@ -21240,14 +21637,14 @@ function modalInvoice(kind) {
     body:'<div class="flds">'
       + field({ name:'saleKind', label:'ประเภทการขาย', type:'select', wide:true, value: cash ? 'cash' : 'credit',
           options:[['credit','ขายเชื่อ — ใบกำกับภาษีเต็มรูป/ใบส่งของ'], ['cash','ขายเงินสด — ใบกำกับภาษีอย่างย่อ (ม.86/6) ไม่ต้องมีข้อมูลผู้ซื้อ']] })
-      + field({ name:'date', label:'วันที่ออกเอกสาร', type:'date', value: defaultDate(),
-          hint:'ต้องอยู่ในงวดที่ยังเปิดอยู่ ระบบจะเลือกอัตราภาษีตามวันที่นี้' })
       + '</div>'
-      + '<div class="flds" data-sk="credit"' + show(!cash) + '>'
-      + field({ name:'partner', label:'ลูกค้า', type:'select',
-          options: custs.length ? custs : [['', '— ยังไม่มีลูกค้าในทะเบียน เพิ่มที่เมนูผู้ติดต่อ —']],
-          hint:'ผู้ซื้อที่จด VAT ต้องมีเลขผู้เสียภาษีและสาขา · บุคคลธรรมดามีชื่อและที่อยู่ก็ออกได้' })
-      + docWhtField('customer', partnerWht((custs[0] || [])[0]))
+      + '<div data-sk="credit"' + show(!cash) + '>'
+      + docHead({ side:'customer', parties: custs,
+          partnerHint:'ผู้ซื้อที่จด VAT ต้องมีเลขผู้เสียภาษีและสาขา · บุคคลธรรมดามีชื่อและที่อยู่ก็ออกได้' })
+      + '</div>'
+      + '<div class="flds" data-sk="cash"' + show(cash) + '>'
+      + field({ name:'cashDate', label:'วันที่ขาย', type:'date', value: defaultDate(),
+          hint:'ต้องอยู่ในงวดที่ยังเปิดอยู่ ระบบจะเลือกอัตราภาษีตามวันที่นี้' })
       + '</div>'
       + '<div class="flds" data-sk="cash"' + show(cash) + '>'
       + field({ name:'buyer', label:'ลูกค้า (ไม่บังคับ)', type:'select',
@@ -21257,19 +21654,21 @@ function modalInvoice(kind) {
           value: (DB.accounts.find((a) => a.postable && a.subType === 'cash') || {}).code })
       + field({ name:'method', label:'รับชำระโดย', type:'select', value:'cash',
           options:[['cash','เงินสด'], ['transfer','โอนเงิน/พร้อมเพย์'], ['card','บัตรเครดิต/เดบิต']] })
-      + field({ name:'vatIncl', label:'ราคาที่กรอก', type:'select', value:'yes',
-          options:[['yes','รวมภาษีมูลค่าเพิ่มแล้ว (ราคาป้าย)'], ['no','ยังไม่รวมภาษี — บวกเพิ่มให้']] })
       + '</div>'
-      + lineEditor(4, 'sale')
+      + lineEditor(4, 'sale', null, { mode: cash ? 'inclusive' : undefined },
+          '<div class="wide" data-sk="credit"' + show(!cash) + '>' + docWhtField('customer', partnerWht((custs[0] || [])[0])) + '</div>')
       /* เงินมัดจำที่รับไว้แล้วของลูกค้ารายนี้ หักในใบกำกับ (เฉพาะขายเชื่อ) */
-      + '<div id="invDeps" data-sk="credit"' + show(!cash) + '>' + depositPicker('ar', (custs[0] || [])[0]) + '</div>',
+      + '<div id="invDeps" data-sk="credit"' + show(!cash) + '>' + depositPicker('ar', (custs[0] || [])[0]) + '</div>'
+      + docNotes(null, 'เงื่อนไขการชำระเงิน เลขบัญชีสำหรับโอน ฯลฯ'),
     submitLabel: cash ? 'รับเงินและออกใบกำกับอย่างย่อ' : 'ลงบัญชีและออกเลขที่',
     note:'เลขที่เอกสารจะถูกจองเมื่อลงบัญชีสำเร็จเท่านั้น',
     onSubmit: function () {
       submitAction(function () {
         if (val('saleKind') === 'cash') {
-          const cs = issueCashSale({ date: val('date'), partnerCode: val('buyer') || null, buyerName: val('buyerName'),
-            payTo: val('payTo'), method: val('method'), vatInclusive: val('vatIncl') !== 'no', lines: collectLines() });
+          const pr = collectPricing();
+          const cs = issueCashSale({ date: val('cashDate'), partnerCode: val('buyer') || null, buyerName: val('buyerName'),
+            payTo: val('payTo'), method: val('method'), vatInclusive: pr.mode === 'inclusive', pricing: pr, lines: collectLines(),
+            note: val('note'), internalNote: val('internalNote') });
           STATE.screen = 'cashsales'; STATE.sel = cs.no;
           toast('ขายเงินสด ' + cs.no + ' แล้ว', 'ok', 'รับเงิน ' + fmt(cs.total) + ' บาท · ภาษีขาย ' + fmt(cs.vat) + ' บาท');
           return cs;
@@ -21278,10 +21677,9 @@ function modalInvoice(kind) {
           throw new DomainError('PARTNER_REQUIRED', 'ต้องเลือกลูกค้าก่อนออกใบกำกับเต็มรูป',
             'เพิ่มลูกค้าที่เมนูผู้ติดต่อ หรือเปลี่ยนเป็นขายเงินสดถ้าเป็นลูกค้าหน้าร้าน');
         }
-        const doc = issueInvoice({
-          partnerCode: val('partner'), date: val('date'), lines: collectLines(),
+        const doc = issueInvoice(Object.assign(collectDoc(), {
           deposits: collectDepositPicks(), whtCode: val('docWht') || null,
-        });
+        }));
         STATE.screen = 'invoices'; STATE.sel = doc.no;
         toast('ออกใบกำกับภาษี ' + doc.no + ' แล้ว', 'ok', 'รวมทั้งสิ้น ' + fmt(doc.total) + ' บาท');
         return doc;
@@ -21684,26 +22082,22 @@ function modalTradeDoc(kind, no) {
     title: d ? 'แก้ไข' + cfg.label + ' ' + d.no : 'ออก' + cfg.label,
     sub: d ? 'เลขที่เดิม · ยังไม่มีผลทางบัญชีจึงแก้ได้ ระบบบันทึกการแก้ไขไว้ในร่องรอยการตรวจสอบ'
       : 'ยังไม่ลงบัญชี ตัวเลขจะเข้าบัญชีตอนแปลงเป็นเอกสารขั้นถัดไป',
-    body:'<div class="flds">'
-      + field({ name:'partner', label: isCust ? 'ลูกค้า' : 'ผู้ขาย', type:'select', value: d ? d.partnerCode : undefined,
-          options: parties.length ? parties : [['', '— ยังไม่มี' + (isCust ? 'ลูกค้า' : 'ผู้ขาย') + 'ในทะเบียน —']] })
-      + field({ name:'date', label:'วันที่ออกเอกสาร', type:'date', value: d ? d.date : defaultDate() })
-      + (cfg.validDays
+    body: docHead({ side: cfg.side, parties, d,
+        extra: cfg.validDays
           ? field({ name:'validUntil', label:'ยืนราคาถึงวันที่', type:'date',
               value: d ? (d.validUntil || '') : addDays(defaultDate(), cfg.validDays),
               hint:'พ้นวันนี้แล้วระบบจะขึ้นสถานะหมดอายุให้เอง' })
-          : '')
-      + docWhtField(cfg.side, d ? (d.whtCode || '') : partnerWht((parties[0] || [])[0]))
-      + field({ name:'note', label:'หมายเหตุ', wide:true, value: d ? d.note : '', placeholder:'เงื่อนไขการชำระเงิน กำหนดส่งมอบ ฯลฯ' })
-      + '</div>' + (d ? '<span data-wht-edit hidden></span>' : '') + lineEditor(4, isCust ? 'sale' : 'purchase', d ? d.lines : null),
+          : '' })
+      + (d ? '<span data-wht-edit hidden></span>' : '') + lineEditor(4, isCust ? 'sale' : 'purchase', d ? d.lines : null, d ? d.pricing : null,
+          docWhtField(cfg.side, d ? (d.whtCode || '') : partnerWht((parties[0] || [])[0])))
+      + docNotes(d),
     submitLabel: d ? 'บันทึกการแก้ไข' : 'บันทึก' + cfg.label,
     onSubmit: function () {
       submitAction(function () {
-        const input = {
-          partnerCode: val('partner'), date: val('date'),
+        const input = Object.assign(collectDoc(), {
           validUntil: cfg.validDays ? (val('validUntil') || null) : null,
-          note: val('note'), lines: collectLines(), whtCode: val('docWht') || null,
-        };
+          whtCode: val('docWht') || null,
+        });
         const doc = d ? updateTradeDoc(kind, d.no, input) : issueTradeDoc(kind, input);
         STATE.screen = TRADE_SCREEN[kind];
         STATE.sel = doc.no;
@@ -22965,10 +23359,25 @@ function bindEvents() {
       const price = document.querySelector('[name="l' + i + '_price"]');
       const desc  = document.querySelector('[name="l' + i + '_desc"]');
       const qty   = document.querySelector('[name="l' + i + '_qty"]');
-      const unit = it ? (t.getAttribute('data-cost') ? it.avgCost : it.price) : 0;
-      if (it && price) price.value = unit ? fmt(unit) : '';
-      if (it && desc) desc.value = it.name;
+      /* เติมจากทะเบียนสินค้า: ฝั่งขายใช้ราคาขาย ฝั่งซื้อใช้ราคาซื้อ · ชนิดภาษีของสินค้าเลือกอัตราให้
+         ราคาในทะเบียนรวมภาษีแต่เอกสารไม่รวม (หรือกลับกัน) แปลงราคาให้ตรงกับแบบของเอกสาร */
+      const tb0 = document.getElementById('lnTable');
+      const buy = tb0 && tb0.getAttribute('data-mode') === 'purchase';
+      const vt = it ? (buy ? it.buyVat : it.sellVat) || 'exclusive' : 'exclusive';
+      let unit = it ? (t.getAttribute('data-cost') ? it.avgCost : buy ? (it.buyPrice || it.price) : it.price) : 0;
+      const docIncl = val('priceMode') === 'inclusive';
+      const r7 = M(resolveRate('VAT7', val('date') || TODAY).rate);
+      if (it && unit && !t.getAttribute('data-cost')) {
+        if (vt === 'inclusive' && !docIncl) unit = mulDiv(unit, 100 * S, 100 * S + r7);
+        if (vt === 'exclusive' && docIncl) unit = mulDiv(unit, 100 * S + r7, 100 * S);
+      }
+      if (it && price) price.value = unit ? (t.getAttribute('data-cost') ? fmt(unit) : plainNum(unit)) : '';
+      if (it && desc) desc.value = (buy ? it.buyDesc : it.sellDesc) || it.name;
       if (it && qty && !qty.value) qty.value = '1';
+      const uomEl = document.querySelector('[name="l' + i + '_uom"]');
+      if (it && uomEl) uomEl.value = it.uom || '';
+      const taxEl = document.querySelector('[name="l' + i + '_tax"]');
+      if (it && taxEl) taxEl.value = vt === 'zero' ? 'VAT0' : vt === 'exempt' ? 'EXEMPT' : 'VAT7';
       /* บัญชีของบรรทัดเปลี่ยนตามชนิดสินค้า — เลือกบริการแล้วรายได้ต้องเป็นรายได้ค่าบริการ */
       const accSel = document.querySelector('[name="l' + i + '_acc"]');
       const tb = document.getElementById('lnTable');
