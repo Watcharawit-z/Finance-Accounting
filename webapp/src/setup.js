@@ -260,9 +260,11 @@ function readOpenItemsFile(table, kind) {
     if (!amount) { skipped.push(line + ':ยอดเป็นศูนย์'); return; }
     if (amount < 0) { skipped.push(line + ':ยอดติดลบ (เงินรับล่วงหน้า/จ่ายเกิน) ให้บันทึกแยก'); return; }
     if (!docNo) { skipped.push(line + ':ไม่มีเลขที่เอกสาร'); return; }
-    const p = DB.partners.find((x) => x.kind === K.partnerKind && code && x.code === code)
-      || DB.partners.find((x) => x.kind === K.partnerKind && taxId && x.taxId === taxId)
-      || DB.partners.find((x) => x.kind === K.partnerKind && name && x.name === name);
+    /* ผู้จำหน่ายและลูกค้า (kind both) จับคู่ได้ทั้งฝั่งลูกหนี้และเจ้าหนี้ */
+    const role = K.partnerKind === 'vendor' ? isVendor : isCustomer;
+    const p = DB.partners.find((x) => role(x) && code && x.code === code)
+      || DB.partners.find((x) => role(x) && taxId && x.taxId === taxId)
+      || DB.partners.find((x) => role(x) && name && x.name === name);
     const key = p ? p.code : (taxId || name || code);
     if (!p && !name) { skipped.push(line + ':ไม่พบคู่ค้ารหัส ' + code); return; }
     if (!p && !creating.some((x) => x.key === key)) creating.push({ key, name, taxId: taxId || null });

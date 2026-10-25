@@ -303,6 +303,14 @@ function savePartner(input) {
   if (input.code && !existing) {
     throw new DomainError('PARTNER_NOT_FOUND', 'ไม่พบคู่ค้ารหัส ' + input.code);
   }
+  /* รหัสที่ตั้งเอง (เฉพาะตอนสร้าง) — ใช้รหัสเดิมจากโปรแกรมเก่าต่อได้ · ไม่ส่ง = ระบบตั้งให้ */
+  const ownCode = existing ? '' : String(input.newCode || '').trim();
+  if (ownCode && (!/^\S{1,20}$/.test(ownCode) || ownCode === 'OPENING')) {
+    throw new DomainError('PARTNER_CODE_INVALID', 'รหัสผู้ติดต่อ "' + ownCode + '" ใช้ไม่ได้', 'ไม่เกิน 20 ตัวอักษร ไม่มีช่องว่าง');
+  }
+  if (ownCode && DB.partners.some((x) => x.code === ownCode)) {
+    throw new DomainError('PARTNER_CODE_DUPLICATE', 'รหัสผู้ติดต่อ ' + ownCode + ' มีอยู่แล้ว', 'เว้นว่างให้ระบบตั้งรหัสให้ หรือใช้รหัสอื่น');
+  }
   /* ไม่ส่งมา = คงค่าเดิมไว้ — แก้ชื่อหรือเครดิตแล้วต้องไม่เผลอเปิดใช้งานรายที่ปิดไว้ หรือเปลี่ยนสถานะ VAT เอง */
   const given = (v) => v !== undefined && v !== null && v !== '';
   const vatRegistered = given(input.vatRegistered) ? input.vatRegistered === true || input.vatRegistered === 'yes'
@@ -326,7 +334,7 @@ function savePartner(input) {
     }
   }
   const rec = {
-    code: existing ? existing.code : nextRegCode(kind === 'vendor' ? 'VEN' : 'CUS', DB.partners),
+    code: existing ? existing.code : ownCode || nextRegCode(kind === 'vendor' ? 'VEN' : 'CUS', DB.partners),
     name: name, taxId: taxId || null, branch: branch,
     entityType: entityType, vatRegistered: vatRegistered, kind: kind,
     address: String(input.address || '').trim(),

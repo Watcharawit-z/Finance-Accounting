@@ -45,7 +45,7 @@ function modalAccount(code) {
 const OI_ROWS = 12;
 function modalOpenItems(kind) {
   const K = OPEN_ITEM_KIND[kind];
-  const partners = DB.partners.filter((p) => p.kind === K.partnerKind && p.code !== 'OPENING' && p.active !== false);
+  const partners = DB.partners.filter((p) => (K.partnerKind === 'vendor' ? isVendor(p) : isCustomer(p)) && p.code !== 'OPENING' && p.active !== false);
   if (!partners.length) {
     toast('ยังไม่มี' + (kind === 'ar' ? 'ลูกค้า' : 'ผู้ขาย') + 'ในทะเบียน', 'err', 'เพิ่มที่หน้า' + (kind === 'ar' ? 'ลูกค้า' : 'ผู้ขาย')
       + ' หรือลากไฟล์ยอดค้างรายใบเข้าหน้านี้ ระบบสร้างคู่ค้าให้');

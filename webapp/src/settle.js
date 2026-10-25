@@ -261,7 +261,7 @@ function depositUnallocated(side) {
 function registerDepositBalance(side, input) {
   const ar = side === 'ar';
   const p = partnerByCode(input.partnerCode);
-  if (p.kind !== (ar ? 'customer' : 'vendor')) {
+  if (!(ar ? isCustomer(p) : isVendor(p))) {
     throw new DomainError('PARTNER_WRONG_SIDE', p.name + ' ไม่ได้อยู่ในทะเบียน' + (ar ? 'ลูกค้า' : 'ผู้ขาย'));
   }
   if (!input.date) throw new DomainError('DATE_REQUIRED', 'ต้องระบุวันที่ของยอดยกมา');

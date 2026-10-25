@@ -626,6 +626,55 @@ input.qty-in:focus-visible,td select:focus-visible,.search:focus-visible,.fld-w 
 .fld-w.wide{grid-column:1/-1}
 .fld-w label{display:block; font-size:var(--text-sm); color:var(--color-ink-2); font-weight:500; margin-bottom:6px}
 .fld-hint{font-size:var(--text-xs); color:var(--color-muted); margin-top:5px; line-height:1.5}
+.fld-hint.ok{color:var(--color-pos)}
+.fld-hint.bad{color:var(--color-neg); font-weight:500}
+.fld-hint.wide{grid-column:1/-1; margin-top:calc(var(--space-xs) * -1)}
+/* ป้ายข้อความเหนือช่องที่ไม่ใช่ช่องกรอก (ข้อมูลอ่านอย่างเดียว) */
+.fld-w .fld-l{display:block; font-size:var(--text-sm); color:var(--color-ink-2); font-weight:500; margin-bottom:6px}
+.fld-static{display:flex; align-items:center; min-height:var(--ctl-h); padding:0 11px; border:1px dashed var(--color-rule-2);
+  border-radius:var(--radius-ctl); font-size:var(--text-sm); color:var(--color-muted)}
+.fld-w input[aria-invalid="true"],.nb-tbl input[aria-invalid="true"]{background:var(--color-neg-soft)}
+
+/* ---------- ฟอร์มทะเบียน: กลุ่มช่อง (ข้อมูลทั่วไป ติดต่อ ที่อยู่ ธนาคาร เงื่อนไขการค้า) ---------- */
+fieldset.fgrp{border:0; margin:0; padding:0; min-width:0}
+fieldset.fgrp + fieldset.fgrp{border-top:1px solid var(--color-rule)}
+fieldset.fgrp > legend{float:left; width:100%; padding:var(--space-md) var(--space-lg) 0;
+  font-family:var(--font-display); font-size:14px; font-weight:600; color:var(--color-ink)}
+fieldset.fgrp > legend + .flds{clear:both; padding-top:var(--space-sm)}
+/* ป้ายบอกบทบาทในทะเบียน (ผู้จำหน่ายและลูกค้า) — เส้นบาง ไม่ระบายสี */
+.ptag{display:inline-block; margin-left:6px; padding:0 6px; border:1px solid var(--color-rule-2); border-radius:var(--radius-ctl);
+  font-size:var(--text-xs); line-height:18px; color:var(--color-ink-2); background:var(--color-paper-2); white-space:nowrap; vertical-align:1px}
+
+/* ---------- ตั้งค่าเลขที่เอกสาร: คำนำหน้ารายเอกสาร + เลขที่ถัดไป ---------- */
+table.nb-tbl{width:100%; border-collapse:collapse; font-size:14px}
+.nb-tbl th,.nb-tbl td{padding:7px var(--space-sm); border-bottom:1px solid var(--color-rule); text-align:left; vertical-align:middle}
+.nb-tbl th:first-child,.nb-tbl td:first-child{padding-inline-start:var(--space-lg)}
+.nb-tbl thead th{font-size:var(--text-xs); font-weight:600; color:var(--color-muted)}
+.nb-tbl tbody th{font-weight:500; color:var(--color-ink)}
+.nb-tbl tbody th label{cursor:pointer}
+.nb-tbl tr.nb-g th{padding-top:var(--space-md); font-family:var(--font-display); font-weight:600; font-size:var(--text-sm); color:var(--color-ink-2); border-bottom-color:var(--color-rule-2)}
+.nb-tbl input{width:7.5rem; height:34px; padding:0 9px; font:inherit; font-family:var(--font-mono); font-size:var(--text-sm); text-transform:uppercase;
+  color:var(--color-ink); background:var(--color-paper); border:1px solid var(--color-rule-2); border-radius:var(--radius-ctl); outline:2px solid transparent; outline-offset:1px}
+.nb-tbl input::placeholder{color:var(--color-faint); text-transform:none}
+.nb-tbl input:focus{outline:2px solid var(--color-focus); border-color:var(--color-ink-2)}
+.nb-tbl [data-nbprev]{color:var(--color-ink)}
+.nb-note{font-size:var(--text-xs); color:var(--color-muted); margin-top:2px}
+.nb-note:empty{display:none}
+.nb-note.warn{color:var(--color-warn); font-weight:500}
+.nb-note.bad{color:var(--color-neg); font-weight:500}
+.nb-next-l{display:none}
+/* จอแคบ: แต่ละเอกสารเป็นการ์ดเล็ก ชื่อเอกสารบน คำนำหน้ากับเลขที่ถัดไปเรียงกันล่าง ไม่ต้องเลื่อนข้าง */
+@media (max-width:40rem){
+  .nb-tbl thead{display:none}
+  .nb-tbl tbody tr{display:grid; grid-template-columns:auto minmax(0,1fr); gap:6px 12px; align-items:center;
+    padding:10px var(--space-lg); border-bottom:1px solid var(--color-rule)}
+  .nb-tbl tbody th,.nb-tbl tbody td{padding:0; border:0}
+  .nb-tbl tbody th[scope="row"]{grid-column:1/-1; padding:0}
+  .nb-tbl tr.nb-g{display:block}
+  .nb-tbl tr.nb-g th{display:block; padding:var(--space-md) var(--space-lg) 6px}
+  .nb-tbl input{width:6.5rem}
+  .nb-next-l{display:inline; color:var(--color-muted); font-size:var(--text-xs)}
+}
 
 /* ---------- กราฟ — ชุดหลักโคบอลต์ ชุดรองเทาเย็น ---------- */
 .chart-wrap{padding:var(--space-sm) var(--space-md) 6px}
