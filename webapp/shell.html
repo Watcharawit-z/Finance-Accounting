@@ -405,7 +405,9 @@ table.dt tfoot tr{background:var(--color-paper-2); border-top:1px solid var(--co
   table.dt td.num{text-align:right; white-space:nowrap}
   table.dt td.mono{white-space:nowrap}
   table.dt td.ctr{text-align:center}
-  table.dt tfoot td{padding:10px 12px; border-top:1px solid var(--color-rule-2); border-bottom:none; background:var(--color-paper-2)}
+  /* ต้องระบุ display ซ้ำ: กฎมือถือ "table.dt tfoot td{display:flex}" เจาะจงกว่า "table.dt td" — ถ้าไม่ระบุ ช่องบรรทัดรวมจะซ้อนเป็นแนวตั้ง */
+  table.dt tfoot td{display:table-cell; width:auto; text-align:inherit; white-space:inherit;
+    padding:10px 12px; border-top:1px solid var(--color-rule-2); border-bottom:none; background:var(--color-paper-2)}
   table.dt td::before{content:none}
   table.dt td:first-child{font-weight:inherit}
   table.dt tbody tr:last-child td{border-bottom:none}
@@ -624,6 +626,8 @@ details.adv .flds{margin-bottom:10px}
 input.qty-in{width:96px; height:34px; padding:0 8px; text-align:right}
 /* ขาด ลา สาย ที่มาจากบันทึกเวลา (ยังไม่ได้แก้ทับในแผ่นงาน) — ตัวเลขจาง */
 input.qty-in.from-log{color:var(--color-muted); font-style:normal}
+/* แผ่นงานเงินเดือนมีหลายคอลัมน์ — ช่องชื่อพนักงานกว้างพอให้ชื่อไม่แตกหลายบรรทัด (ตารางเลื่อนข้างได้) */
+td.pay-emp{min-width:200px} td.pay-emp .mono{white-space:nowrap}
 td select{font-size:var(--text-sm); height:34px; padding:0 8px; max-width:280px}
 .fld-w input:focus-visible,.fld-w select:focus-visible,.lines input:focus-visible,.lines select:focus-visible,
 input.qty-in:focus-visible,td select:focus-visible,.search:focus-visible,.fld-w input:focus,.fld-w select:focus,

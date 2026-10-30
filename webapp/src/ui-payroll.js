@@ -145,7 +145,7 @@ function paySheetCard(d) {
       + (regular ? '<td class="ctr"><input type="checkbox" class="pay-skip" style="width:17px;height:17px;accent-color:var(--accent)"'
         + ' data-draft="' + esc(id) + '" data-emp="' + esc(s.code) + '" aria-label="จ่าย ' + esc(s.name) + '"'
         + (s.skip ? '' : ' checked') + (open ? '' : ' disabled') + '></td>' : '')
-      + '<td><span class="mono">' + esc(s.code) + '</span> ' + esc(s.name)
+      + '<td class="pay-emp"><span class="mono">' + esc(s.code) + '</span> ' + esc(s.name)
       + '<div' + at(s.code, 'warn') + '>' + paySheetWarn(s) + '</div></td>'
       + (regular ? num(s.code, 'salary', v.salary) + inp(s, 'ot') + inp(s, 'absent') + inp(s, 'late') + num(s.code, 'reduce', v.reduce) : inp(s, main))
       + '<td class="num"><span' + at(s.code, 'other') + '>' + (v.other ? fmt(v.other) : '—') + '</span> '

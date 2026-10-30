@@ -161,6 +161,12 @@ const DIR = fs.mkdtempSync(path.join(require('os').tmpdir(), 'att-'));
   await page.click('#modal [data-act="modal:submit"]');
   await T.closed(page);
   ok('บันทึกผ่อนผัน 5 นาทีแล้ว', await page.evaluate(() => payrollSetting('lateGrace') === 5));
+  /* บรรทัดรวมของตารางต้องเรียงเป็นแถวเดียวบนจอคอม (เคยซ้อนเป็นแนวตั้งเพราะกฎมือถือเจาะจงกว่า) */
+  ok('★ บรรทัดรวมของตารางเรียงแนวนอนบนจอคอม ไม่ซ้อนกัน', await page.evaluate(() => {
+    const tds = Array.from(document.querySelectorAll('#main tfoot td'));
+    const tops = new Set(tds.map((td) => Math.round(td.getBoundingClientRect().top)));
+    return tds.length >= 8 && tds.every((td) => getComputedStyle(td).display === 'table-cell') && tops.size === 1;
+  }));
   await page.setViewportSize({ width: 375, height: 812 });
   await page.evaluate(() => { STATE.screen = 'attendance'; render(); });
   await page.waitForTimeout(200);
