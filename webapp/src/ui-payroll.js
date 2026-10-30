@@ -43,7 +43,7 @@ function payMonthCard(period, runs, live, shown) {
   return card({
     title:'งวดจ่ายเงินเดือน', sub: thPeriod(period) + (live.length ? ' · จ่ายแล้ว ' + live.length + ' รอบ' : ' · ยังไม่ได้จ่าย'),
     actions: btn('paydraft:new', '+ จ่ายนอกรอบ (โบนัส ค่าคอมมิชชั่น เงินชดเชย)', open ? '' : 'disabled')
-      + btn('go:payrollfile', 'ภ.ง.ด.1 · สปส.1-10 · นำส่ง') + btn('paysettings', 'ตั้งค่า'),
+      + btn('go:attendance', 'ขาด ลา มาสาย') + btn('go:payrollfile', 'ภ.ง.ด.1 · สปส.1-10 · นำส่ง') + btn('paysettings', 'ตั้งค่า'),
     body: (live.length ? kpi([
         { label:'พนักงานที่ได้รับเงิน', value: people.size + ' คน' },
         { label:'เงินได้รวม', value: fmt(sum('gross')) },
@@ -78,12 +78,12 @@ function payRunCard(run) {
       + btnI('printdoc:payslips:' + payRunKey(run), 'printer', 'พิมพ์สลิปทุกคน')
       + (live ? btn('voidrun:payroll:' + payRunKey(run), 'ยกเลิกงวดนี้', 'danger') : ''),
     body: voidBanner(run) + tbl({
-      cols:[{t:'รหัส'},{t:'ชื่อ'},{t:'เงินเดือน',a:'r'},{t:'ค่าล่วงเวลา',a:'r'},{t:'เงินได้อื่น',a:'r'},{t:'รวมเงินได้',a:'r'},
+      cols:[{t:'รหัส'},{t:'ชื่อ'},{t:'เงินเดือน',a:'r'},{t:'หักขาด ลา สาย',a:'r'},{t:'ค่าล่วงเวลา',a:'r'},{t:'เงินได้อื่น',a:'r'},{t:'รวมเงินได้',a:'r'},
         {t:'ภาษีหัก',a:'r'},{t:'ประกันสังคม',a:'r'},{t:'กองทุนสำรองฯ',a:'r'},{t:'หักอื่น',a:'r'},{t:'คืนค่าใช้จ่าย',a:'r'},{t:'รับสุทธิ',a:'r'}],
-      rows: s.map((x) => [{mono:x.code}, x.name, {n:x.salary - (x.unpaid || 0)}, {n:x.ot || 0}, {n:slipOther(x)}, {n:x.gross},
+      rows: s.map((x) => [{mono:x.code}, x.name, {n:x.salary}, {n:-(x.unpaid || 0)}, {n:x.ot || 0}, {n:slipOther(x)}, {n:x.gross},
         {n:x.pit}, {n:x.sso}, {n:x.pvd}, {n:(x.loan || 0) + (x.otherDed || 0)}, {n:x.reimburse || 0}, {n:x.net}]),
       rowAttr: (r) => 'class="row-link" title="พิมพ์สลิปเงินเดือน" data-act="printdoc:payslip:' + payRunKey(run) + '/' + r[0].mono + '"',
-      foot: ['', 'รวม', {n:sum((x) => x.salary - (x.unpaid || 0))}, {n:sum((x) => x.ot || 0)}, {n:sum(slipOther)}, {n:run.gross},
+      foot: ['', 'รวม', {n:sum((x) => x.salary)}, {n:-sum((x) => x.unpaid || 0)}, {n:sum((x) => x.ot || 0)}, {n:sum(slipOther)}, {n:run.gross},
         {n:run.pit}, {n:run.ssoEmp}, {n:run.pvdEmp}, {n:(run.loan || 0) + (run.otherDed || 0)}, {n:run.reimburse || 0}, {n:run.net}],
     }),
     foot: 'กดที่แถวเพื่อพิมพ์สลิปเงินเดือนของคนนั้น · ฐานประกันสังคมสูงสุด ' + fmt(run.ssoCeiling) + ' บาท สมทบสูงสุด ' + fmt(run.ssoMax)
@@ -96,7 +96,7 @@ function payRunCard(run) {
    ถ้าวาดใหม่ทั้งหน้า ปุ่มที่ผู้ใช้กำลังกด (เช่น ทำเงินเดือน) จะถูกแทนที่ระหว่างกดแล้วการกดหายไป */
 const PAY_SHEET_COLS = ['gross', 'pit', 'sso', 'pvd', 'ded', 'net'];
 function paySheetVals(s) {
-  return { salary: s.salary - s.unpaid, other: s.variable - s.ot + s.exempt + s.reimburse, gross: s.gross,
+  return { salary: s.salary, reduce: s.unpaid, other: s.variable - s.ot + s.exempt + s.reimburse, gross: s.gross,
     pit: s.pit, sso: s.sso, pvd: s.pvd, ded: s.loan + s.otherDed, net: s.net };
 }
 function paySheetWarn(s) {
@@ -120,9 +120,12 @@ function paySheetCard(d) {
   const inp = function (s, t) {
     const L = d.lines[s.code] || {};
     const def = PAY_ITEMS[t];
-    const v = L[t] !== undefined ? L[t] : (t === 'ot' && regular ? (DB.employees.find((e) => e.code === s.code) || {}).otHours || 0 : 0);
+    /* ขาด ลา สาย ที่ไม่ได้กรอกทับ แสดงยอดจากบันทึกเวลา (ตัวเลขจาง) — กรอกแล้วคือแก้ทับ ลบจนว่างกลับไปใช้บันทึก */
+    const logged = def.att && L[t] === undefined && regular ? attendanceSummary(s.code, d.period).qty[def.att] : 0;
+    const v = L[t] !== undefined ? L[t] : def.att ? logged : (t === 'ot' && regular ? (DB.employees.find((e) => e.code === s.code) || {}).otHours || 0 : 0);
     const shown = def.unit ? (v ? String(v) : '') : payNum(v);
-    return '<td class="num"><input class="qty-in pay-in" inputmode="decimal" aria-label="' + esc(def.label + ' ' + s.name) + '"'
+    return '<td class="num"><input class="qty-in pay-in' + (logged ? ' from-log' : '') + '" inputmode="decimal" aria-label="' + esc(def.label + ' ' + s.name) + '"'
+      + (logged ? ' title="จากบันทึกขาด ลา มาสาย — พิมพ์ทับเพื่อแก้เฉพาะงวดนี้"' : '')
       + ' data-draft="' + esc(id) + '" data-emp="' + esc(s.code) + '" data-item="' + t + '" value="' + esc(shown) + '" data-v="' + esc(shown) + '"'
       + (open ? '' : ' disabled') + '></td>';
   };
@@ -132,7 +135,7 @@ function paySheetCard(d) {
     + (regular ? '' : payHeadField(id, 'label', 'ชื่อรอบที่จ่าย (พิมพ์บนสลิป)', 'text', d.label))
     + '</div>';
   const cols = (regular
-    ? ['จ่าย', 'พนักงาน', 'เงินเดือน', 'ค่าล่วงเวลา (ชม.)', 'ขาดงาน (วัน)', 'เงินได้อื่น']
+    ? ['จ่าย', 'พนักงาน', 'เงินเดือน', 'ค่าล่วงเวลา (ชม.)', 'ขาดงาน (วัน)', 'มาสาย (นาที)', 'หักขาด ลา สาย', 'เงินได้อื่น']
     : ['พนักงาน', PAY_ITEMS[main].label, 'เงินได้อื่น']).concat(['รวมเงินได้', 'ภาษีหัก', 'ประกันสังคม', 'กองทุนฯ', 'หักอื่น', 'รับสุทธิ']);
   const left = regular ? 2 : 1;
   let rows = '';
@@ -144,7 +147,7 @@ function paySheetCard(d) {
         + (s.skip ? '' : ' checked') + (open ? '' : ' disabled') + '></td>' : '')
       + '<td><span class="mono">' + esc(s.code) + '</span> ' + esc(s.name)
       + '<div' + at(s.code, 'warn') + '>' + paySheetWarn(s) + '</div></td>'
-      + (regular ? num(s.code, 'salary', v.salary) + inp(s, 'ot') + inp(s, 'unpaid') : inp(s, main))
+      + (regular ? num(s.code, 'salary', v.salary) + inp(s, 'ot') + inp(s, 'absent') + inp(s, 'late') + num(s.code, 'reduce', v.reduce) : inp(s, main))
       + '<td class="num"><span' + at(s.code, 'other') + '>' + (v.other ? fmt(v.other) : '—') + '</span> '
       + (open ? chip('payline:' + id + ':' + s.code, 'รายการ…') : '') + '</td>'
       + PAY_SHEET_COLS.map((f) => num(s.code, f, v[f])).join('') + '</tr>';
@@ -170,7 +173,9 @@ function paySheetCard(d) {
     body: head + table,
     foot: (regular
       ? 'เงินเดือนคิดตามวันที่ทำงานจริงในเดือน (เข้าหรือออกกลางเดือน) · ค่าล่วงเวลา = เงินเดือน ÷ 30 ÷ ' + (payrollSetting('hoursPerDay') || 8)
-        + ' ชม. × 1.5 · ขาดงาน = เงินเดือน ÷ 30 ต่อวัน · กด "รายการ…" เพื่อใส่ค่าตำแหน่ง ค่าคอมมิชชั่น โบนัส คืนค่าใช้จ่าย หักเงินกู้'
+        + ' ชม. × 1.5 · ขาดงาน ลาไม่รับค่าจ้าง = ' + DAY_BASIS[payrollSetting('dayBasis') || 'd30'] + ' ต่อวัน · มาสาย กลับก่อน = ค่าจ้างรายวัน ÷ '
+        + (payrollSetting('hoursPerDay') || 8) + ' ชม. ÷ 60 ต่อนาที · ตัวเลขจางคือยอดจากบันทึกขาด ลา มาสาย'
+        + ' · กด "รายการ…" เพื่อใส่ลาไม่รับค่าจ้าง กลับก่อนเวลา ค่าตำแหน่ง ค่าคอมมิชชั่น โบนัส คืนค่าใช้จ่าย หักเงินกู้'
       : 'จ่ายเฉพาะคนที่มีจำนวนเงิน · โบนัสและเงินได้ไม่ประจำหักภาษีส่วนเพิ่มทั้งก้อนในงวดที่จ่าย')
       + ' · ภาษีหัก ณ ที่จ่ายคิดแบบยอดสะสมทั้งปี: ภาษีทั้งปีจากเงินได้จริงตั้งแต่ต้นปีรวมเงินเดือนที่จะได้ต่อ ลบภาษีที่หักไปแล้ว เฉลี่ยตามงวดที่เหลือ',
   });
@@ -193,7 +198,7 @@ function paySheetRefresh(id) {
   const q = (sel) => document.querySelector('#main [' + sel + ']');
   pv.rows.forEach(function (s) {
     const v = paySheetVals(s);
-    ['salary', 'other'].concat(PAY_SHEET_COLS).forEach(function (f) {
+    ['salary', 'reduce', 'other'].concat(PAY_SHEET_COLS).forEach(function (f) {
       const el = q('data-pc="' + id + '|' + s.code + '|' + f + '"');
       if (el) el.textContent = v[f] ? fmt(v[f]) : '—';
     });
@@ -221,8 +226,17 @@ function payInputStore(el) {
     } else {
       /* ช่องในตารางที่ลบจนว่างคือศูนย์ — ไม่ใช่กลับไปใช้ชั่วโมงล่วงเวลาประจำจากทะเบียน ไม่งั้นลบแล้วยังจ่ายอยู่ */
       const o = {};
-      o[el.getAttribute('data-item')] = el.value.trim() === '' ? '0' : el.value;
+      const item = el.getAttribute('data-item');
+      /* ขาด ลา สาย: ลบจนว่าง = กลับไปใช้บันทึกเวลา (ต้องการศูนย์ให้พิมพ์ 0) */
+      o[item] = el.value.trim() === '' ? (PAY_ITEMS[item] && PAY_ITEMS[item].att ? '' : '0') : el.value;
       setPayLine(id, el.getAttribute('data-emp'), o);
+      /* ลบจนว่างแล้วกลับไปใช้บันทึกเวลา — เติมยอดจากบันทึกกลับในช่อง (ตัวเลขจาง) ให้เห็นว่ายังหักอยู่ */
+      if (o[item] === '') {
+        const dr = payDraftById(id);
+        const q = dr ? attendanceSummary(el.getAttribute('data-emp'), dr.period).qty[PAY_ITEMS[item].att] : 0;
+        el.value = q ? String(q) : '';
+        el.classList.toggle('from-log', !!q);
+      } else el.classList.remove('from-log');
       el.setAttribute('data-v', el.value);
     }
     save();
@@ -267,7 +281,11 @@ function modalPayLine(id, code) {
     if (def.offcycle === false && !regular) return '';
     const v = L[t] !== undefined ? L[t] : null;
     const value = v === null ? '' : def.unit ? String(v) : payNum(v);
-    const hint = t === 'ot' && regular ? 'ว่างไว้ = ตามทะเบียนพนักงาน ' + (e.otHours || 0) + ' ชม.'
+    const att = def.att && regular ? attendanceSummary(code, d.period) : null;
+    const hint = att ? 'ว่างไว้ = ตามบันทึกขาด ลา มาสาย ' + att.qty[def.att] + ' ' + def.unitLabel
+        + (t === 'late' && att.late.times ? ' (สาย ' + att.late.times + ' ครั้ง ' + att.late.minutes + ' นาที)' : '')
+        + ' · ' + (def.unit === 'days' ? 'วันละ ' + fmt(payDeductRates(e, d.period).perDay) : 'ชั่วโมงละ ' + fmt(payDeductRates(e, d.period).perHour)) + ' บาท'
+      : t === 'ot' && regular ? 'ว่างไว้ = ตามทะเบียนพนักงาน ' + (e.otHours || 0) + ' ชม.'
       : t === 'adjust' ? 'ใส่ติดลบถ้างวดก่อนจ่ายเกิน — ใช้แก้งวดที่ยื่น ภ.ง.ด.1 ไปแล้ว'
       : t === 'severanceExempt' ? 'ส่วนที่กฎหมายยกเว้นภาษี (ค่าจ้างวันทำงานสุดท้ายตามเพดานในกฎกระทรวง) ไม่เข้า ภ.ง.ด.1'
       : t === 'reimburse' ? 'จ่ายคืนตามใบเสร็จที่ออกในนามบริษัท ไม่ใช่เงินได้ ไม่เสียภาษี'
@@ -288,7 +306,8 @@ function modalPayLine(id, code) {
     body: info
       + group('เงินได้ที่ต้องเสียภาษี (เข้า ภ.ง.ด.1)', ['ot', 'otHoliday', 'holiday', 'allowance', 'commission', 'bonus', 'otherIncome', 'leavePay', 'severance', 'adjust'])
       + group('จ่ายแต่ไม่ต้องเสียภาษี', ['severanceExempt', 'reimburse'])
-      + group('รายการหัก', ['unpaid', 'loan', 'otherDed']),
+      + (regular ? group('ขาด ลา มาสาย — หักค่าจ้างตามเวลาที่ไม่ได้ทำงาน (ลดเงินได้ ประกันสังคม และกองทุนฯ)', ['absent', 'unpaid', 'late', 'early']) : '')
+      + group('รายการหักหลังภาษี', ['loan', 'otherDed']),
     submitLabel: 'บันทึกรายการ',
     onSubmit: function () {
       submitAction(function () {
@@ -362,18 +381,29 @@ function modalVoidPayRun(key) {
 function modalPaySettings() {
   modal({
     title: 'ตั้งค่าเงินเดือน',
-    sub: 'ใช้พิมพ์ลงแบบ สปส.1-10 และ 50 ทวิ และใช้คิดค่าล่วงเวลา',
+    sub: 'ใช้พิมพ์ลงแบบ สปส.1-10 และ 50 ทวิ ใช้คิดค่าล่วงเวลา และหักขาด ลา มาสาย',
     body: '<div class="flds">'
       + field({ name:'ssoAccount', label:'เลขที่บัญชีนายจ้าง (ประกันสังคม)', value: payrollSetting('ssoAccount') || '',
           hint:'ตัวเลข 10 หลัก ตามหนังสือขึ้นทะเบียนนายจ้าง' })
       + field({ name:'ssoBranch', label:'ลำดับที่สาขา (ประกันสังคม)', value: payrollSetting('ssoBranch') || '000000' })
       + field({ name:'hoursPerDay', label:'ชั่วโมงทำงานปกติต่อวัน', value: String(payrollSetting('hoursPerDay') || 8),
           hint:'ค่าจ้างรายชั่วโมง = เงินเดือน ÷ 30 ÷ ชั่วโมงนี้ (พ.ร.บ.คุ้มครองแรงงาน)' })
-      + '</div>',
+      + '</div><div class="sub-h">ขาด ลา มาสาย</div><div class="flds">'
+      + field({ name:'dayBasis', label:'ค่าจ้างรายวันสำหรับหักขาดงาน/ลา', type:'select', value: payrollSetting('dayBasis') || 'd30',
+          options: Object.keys(DAY_BASIS).map((k) => [k, DAY_BASIS[k]]), hint:'มาสาย กลับก่อน = ค่าจ้างรายวัน ÷ ชั่วโมงทำงาน ÷ 60 ต่อนาที · ค่าล่วงเวลายังคิด ÷ 30 ตามกฎหมาย' })
+      + field({ name:'workDays', label:'วันทำงานต่อเดือน (ถ้าเลือก ÷ วันทำงาน)', type:'number', value: String(payrollSetting('workDays') || 26) })
+      + field({ name:'lateGrace', label:'ผ่อนผันมาสายครั้งละ (นาที)', type:'number', value: String(payrollSetting('lateGrace') || 0),
+          hint:'สายไม่เกินนี้ไม่หัก สายเกินหักเฉพาะส่วนที่เกิน · 0 = หักทุกนาที' })
+      + field({ name:'workStart', label:'เวลาเข้างาน', type:'time', value: payrollSetting('workStart') || '08:30' })
+      + field({ name:'workEnd', label:'เวลาเลิกงาน', type:'time', value: payrollSetting('workEnd') || '17:30',
+          hint:'ใช้แปลงเวลาเข้า-ออกจากเครื่องสแกนนิ้วเป็นมาสาย/กลับก่อน' })
+      + '</div><div class="note">หักตามเวลาที่ไม่ได้ทำงานจริงเท่านั้น — ม.76 พ.ร.บ.คุ้มครองแรงงานห้ามหักค่าจ้างเป็นค่าปรับ'
+      + ' (เช่น สายครั้งละ 100 บาท) ระบบจึงไม่มีการหักแบบเหมาจ่าย</div>',
     submitLabel: 'บันทึก',
     onSubmit: function () {
       submitAction(function () {
-        saveSettingsPayroll({ ssoAccount: val('ssoAccount'), ssoBranch: val('ssoBranch'), hoursPerDay: val('hoursPerDay') });
+        saveSettingsPayroll({ ssoAccount: val('ssoAccount'), ssoBranch: val('ssoBranch'), hoursPerDay: val('hoursPerDay'),
+          dayBasis: val('dayBasis'), workDays: val('workDays'), lateGrace: val('lateGrace'), workStart: val('workStart'), workEnd: val('workEnd') });
         toast('บันทึกค่าตั้งเงินเดือนแล้ว', 'ok');
       });
     },
@@ -632,7 +662,7 @@ function payslipSheet(run, s) {
   if (s.salary) earn.push(['เงินเดือน' + (s.prorated ? ' (' + s.days + '/' + s.dim + ' วัน)' : ''), s.salary]);
   if (s.earn) {
     s.earn.forEach((r) => earn.push([r.label + (r.qty ? ' ' + r.qty + ' ' + r.unit : ''), r.amount]));
-    s.ded.forEach((r) => ded.push([r.label + (r.qty ? ' ' + r.qty + ' ' + r.unit : ''), r.amount]));
+    s.ded.forEach((r) => ded.push([r.label + (r.qty ? ' ' + r.qty + ' ' + r.unit : '') + (r.times ? ' (' + r.times + ' ครั้ง)' : ''), r.amount]));
   } else {
     /* สลิปรุ่นก่อน: เงินเดือน ค่าล่วงเวลา ภาษี ประกันสังคม กองทุน */
     if (s.ot) earn.push(['ค่าล่วงเวลา', s.ot]);

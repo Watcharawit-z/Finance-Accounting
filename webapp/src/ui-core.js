@@ -460,6 +460,7 @@ function navGroups() {
     ]},
     { g: 'เงินเดือน', icon: 'payroll', items: [
       ['payroll', 'งวดจ่ายเงินเดือน', null],
+      ['attendance', 'ขาด ลา มาสาย', null],
       ['employees', 'ทะเบียนพนักงาน', null],
       ['payrollfile', 'ภ.ง.ด.1 · สปส.1-10 · นำส่ง', null],
       ['payrollyear', 'สรุปทั้งปี · ภ.ง.ด.1ก · 50 ทวิ', null],

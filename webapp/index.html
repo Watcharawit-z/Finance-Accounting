@@ -622,6 +622,8 @@ details.adv .flds{margin-bottom:10px}
 .lines input[type=checkbox]{width:17px; min-width:0; height:17px; padding:0; accent-color:var(--color-accent); cursor:pointer}
 .lines td.num{text-align:right; font-variant-numeric:tabular-nums}
 input.qty-in{width:96px; height:34px; padding:0 8px; text-align:right}
+/* ขาด ลา สาย ที่มาจากบันทึกเวลา (ยังไม่ได้แก้ทับในแผ่นงาน) — ตัวเลขจาง */
+input.qty-in.from-log{color:var(--color-muted); font-style:normal}
 td select{font-size:var(--text-sm); height:34px; padding:0 8px; max-width:280px}
 .fld-w input:focus-visible,.fld-w select:focus-visible,.lines input:focus-visible,.lines select:focus-visible,
 input.qty-in:focus-visible,td select:focus-visible,.search:focus-visible,.fld-w input:focus,.fld-w select:focus,
@@ -1240,6 +1242,7 @@ function blankState() {
     bankBf: [],          // รายการค้าง ณ วันเริ่มกระทบยอด (เช็คค้างจ่าย เงินฝากระหว่างทาง)
     bankImports: [],     // ประวัติการนำเข้าไฟล์สเตทเมนต์ ใช้กันนำเข้าซ้ำและยกเลิกการนำเข้า
     masterImports: [],   // ประวัติการนำเข้าสมุดรายชื่อ/สินค้าจากไฟล์ พร้อมแถวที่นำเข้าไม่ได้ (import.js)
+    attendance: [],      // บันทึกเวลา ขาดงาน ลาไม่รับค่าจ้าง มาสาย กลับก่อน รายวัน (payroll.js)
     audit: [],
     settings: { hardLockDate: null, numbering: { style: 'fa', reset: 'month', prefixes: {} } },
     isDemo: false,       // true = ข้อมูลตัวอย่างที่ระบบสร้างให้ ไม่ใช่ข้อมูลจริงของผู้ใช้
@@ -8228,7 +8231,8 @@ undoBankImport = transactional(undoBankImport);
           exempt = เงินได้ที่ได้รับยกเว้นภาษี จ่ายให้พนักงานแต่ไม่เข้า ภ.ง.ด.1
           nontax = ไม่ใช่เงินได้ของพนักงาน (คืนค่าใช้จ่ายที่ออกแทนบริษัทตามใบเสร็จ)
           ded    = หักจากเงินที่จ่าย หลังคำนวณภาษีแล้ว ลงบัญชีตาม sub
-   unit   hours/days = กรอกเป็นชั่วโมงหรือวัน ระบบคิดเป็นเงินจากเงินเดือน · ไม่ระบุ = กรอกเป็นจำนวนเงิน
+   unit   hours/days/minutes = กรอกเป็นชั่วโมง วัน หรือนาที ระบบคิดเป็นเงินจากเงินเดือน · ไม่ระบุ = กรอกเป็นจำนวนเงิน
+   att    ชนิดในบันทึกเวลา (ขาด ลา มาสาย กลับก่อน) — ไม่ได้กรอกในแผ่นงาน ระบบใช้ยอดจากบันทึกเวลาของงวดนั้น
    mult   ตัวคูณค่าจ้างรายชั่วโมง [ตัวตั้ง, ตัวหาร] — เก็บเป็นเศษส่วนเพื่อไม่ใช้ทศนิยมลอยตัวกับเงิน
    sso    true = นับเป็น "ค่าจ้าง" ตาม พ.ร.บ.ประกันสังคม ม.5 (ค่าตอบแทนการทำงานในเวลาทำงานปกติ)
           ค่าล่วงเวลา โบนัส และเงินที่จ่ายครั้งเดียวไม่ใช่ค่าจ้าง จึงไม่คิดเงินสมทบ
@@ -8244,7 +8248,13 @@ const PAY_ITEMS = {
   leavePay:  { label:'ค่าจ้างวันลาพักร้อนที่ไม่ได้ใช้', group:'earn', sso:false },
   severance: { label:'ค่าชดเชยเลิกจ้าง ส่วนที่ต้องเสียภาษี', group:'earn', sso:false },
   adjust:    { label:'ปรับปรุงเงินได้ที่จ่ายผิดในงวดก่อน (+/−)', group:'earn', sso:false, signed:true },
-  unpaid:    { label:'หักขาดงาน/ลาไม่รับค่าจ้าง', unitLabel:'วัน', group:'reduce', unit:'days', sso:true, offcycle:false },
+  /* หักตามเวลาที่ไม่ได้ทำงานจริง (ไม่ทำงาน ไม่ได้ค่าจ้าง) — ลดเงินได้ ฐานประกันสังคม และฐานกองทุนสำรองฯ
+     ไม่ใช่ค่าปรับ: ม.76 พ.ร.บ.คุ้มครองแรงงานห้ามหักค่าจ้างเป็นค่าปรับ ระบบจึงคิดตามสัดส่วนเวลาเท่านั้น
+     unpaid คือรายการเดิม "หักขาดงาน/ลาไม่รับค่าจ้าง" — แผ่นงานที่บันทึกไว้แล้วยังหักเท่าเดิม */
+  absent:    { label:'หักขาดงาน', unitLabel:'วัน', group:'reduce', unit:'days', sso:true, offcycle:false, att:'absent' },
+  unpaid:    { label:'ลาไม่รับค่าจ้าง', unitLabel:'วัน', group:'reduce', unit:'days', sso:true, offcycle:false, att:'unpaid' },
+  late:      { label:'หักมาสาย', unitLabel:'นาที', group:'reduce', unit:'minutes', sso:true, offcycle:false, att:'late' },
+  early:     { label:'หักกลับก่อนเวลา', unitLabel:'นาที', group:'reduce', unit:'minutes', sso:true, offcycle:false, att:'early' },
   severanceExempt: { label:'ค่าชดเชยเลิกจ้าง ส่วนที่ได้รับยกเว้นภาษี', group:'exempt' },
   reimburse: { label:'คืนค่าใช้จ่ายที่ออกแทนบริษัทตามใบเสร็จ (ไม่ใช่เงินได้)', group:'nontax' },
   loan:      { label:'หักคืนเงินกู้/เงินเบิกล่วงหน้า', group:'ded', sub:'other_receivable' },
@@ -8332,6 +8342,34 @@ function employedSpan(e, period) {
   return { from, to, days: dayCount(from, to), dim: Number(end.slice(8)), full: from === start && to === end };
 }
 const spanSalary = (e, span) => (span.full ? e.salary : round2(mulDiv(e.salary, span.days, span.dim)));
+
+/* ===================================================================
+   อัตราหักขาดงาน ลาไม่รับค่าจ้าง มาสาย กลับก่อนเวลา
+   ค่าจ้างรายวัน = เงินเดือน ÷ ตัวหาร (ตั้งค่าได้: 30 วัน · จำนวนวันของเดือนนั้น · วันทำงานต่อเดือนที่บริษัทกำหนด)
+   ค่าจ้างรายนาที = ค่าจ้างรายวัน ÷ ชั่วโมงทำงานปกติต่อวัน ÷ 60
+   คิดจากเงินเดือนเต็มเสมอ (คนที่เข้า/ออกกลางเดือนก็ใช้อัตราเดียวกัน) และคำนวณเป็นเศษส่วนครั้งเดียว ปัดสตางค์ตอนจบ
+   =================================================================== */
+const DAY_BASIS = { d30: 'เงินเดือน ÷ 30 วัน', month: 'เงินเดือน ÷ จำนวนวันของเดือนนั้น', work: 'เงินเดือน ÷ วันทำงานต่อเดือน' };
+function dayDivisor(period) {
+  const b = payrollSetting('dayBasis') || 'd30';
+  if (b === 'month') return Number(endOfMonth(period + '-01').slice(8));
+  if (b === 'work') return payrollSetting('workDays') || 26;
+  return 30;
+}
+/** นาทีทำงานปกติต่อวัน (ชั่วโมงทำงานปกติ × 60) */
+const workMinutes = () => Math.round((payrollSetting('hoursPerDay') || 8) * 60);
+/** เงินที่หักตามเวลาที่ไม่ได้ทำงาน — unit 'days' หรือ 'minutes' */
+function timeDeduction(salary, period, unit, q) {
+  if (!q || !salary) return 0;
+  const div = dayDivisor(period) * (unit === 'minutes' ? workMinutes() : 1);
+  return round2(mulDiv(salary, M(String(q)), div * S));
+}
+/** อัตราที่แสดงให้ผู้ใช้เห็น — ต่อวัน ต่อชั่วโมง ต่อนาที */
+function payDeductRates(e, period) {
+  return { perDay: timeDeduction(e.salary, period, 'days', 1), perMinute: timeDeduction(e.salary, period, 'minutes', 1),
+    perHour: timeDeduction(e.salary, period, 'minutes', 60), divisor: dayDivisor(period), basis: payrollSetting('dayBasis') || 'd30',
+    minutes: workMinutes() };
+}
 function employedInYear(e, year) {
   if (e.active === false && !e.left) return false;
   return (!e.hired || e.hired <= year + '-12-31') && (!e.left || e.left >= year + '-01-01');
@@ -8422,7 +8460,10 @@ function paySlipCalc(e, d, L) {
   const regular = d.kind === 'regular';
   const span = regular ? employedSpan(e, d.period) : null;
   const base = span ? spanSalary(e, span) : 0;
-  const qty = (t) => (L[t] !== undefined ? L[t] : (t === 'ot' && regular ? (e.otHours || 0) : 0));
+  /* ขาด ลา มาสาย กลับก่อน ที่ไม่ได้กรอกในแผ่นงาน ใช้ยอดจากบันทึกเวลาของงวด (มาสายหักหลังหักนาทีผ่อนผันแล้ว) */
+  const att = regular ? attendanceSummary(e.code, d.period) : null;
+  const fromLog = (t) => (att && PAY_ITEMS[t].att ? att.qty[PAY_ITEMS[t].att] : 0);
+  const qty = (t) => (L[t] !== undefined ? L[t] : PAY_ITEMS[t].att ? fromLog(t) : (t === 'ot' && regular ? (e.otHours || 0) : 0));
   const hoursPerDay = payrollSetting('hoursPerDay') || 8;
   const earn = [], ded = [];
   let unpaid = 0, ot = 0, otHours = 0, variable = 0, ssoExtra = 0, exempt = 0, reimburse = 0, loan = 0, otherDed = 0;
@@ -8436,18 +8477,23 @@ function paySlipCalc(e, d, L) {
       /* ค่าจ้างรายชั่วโมง = เงินเดือน ÷ 30 ÷ ชั่วโมงทำงานปกติต่อวัน (พ.ร.บ.คุ้มครองแรงงาน) */
       amount = round2(mulDiv(e.salary, M(String(q)) * def.mult[0], 30 * hoursPerDay * S * def.mult[1]));
       ot += amount; otHours += q;
-    } else if (def.unit === 'days') {
-      amount = round2(mulDiv(e.salary, M(String(q)), 30 * S));      // ค่าจ้างรายวัน = เงินเดือน ÷ 30
+    } else if (def.unit === 'days' || def.unit === 'minutes') {
+      amount = timeDeduction(e.salary, d.period, def.unit, q);       // ค่าจ้างรายวัน = เงินเดือน ÷ ตัวหาร (ตั้งค่า)
     } else amount = q;
     if (!amount) return;
     const row = { type: t, label: def.label, qty: def.unit ? q : null, unit: def.unitLabel || null, amount };
+    /* มาสาย/กลับก่อนจากบันทึกเวลา บอกจำนวนครั้งด้วย (พิมพ์บนสลิป) · src บอกว่ามาจากบันทึกเวลาหรือกรอกเอง */
+    if (def.att) {
+      row.src = L[t] !== undefined ? 'sheet' : 'log';
+      if (row.src === 'log' && (t === 'late' || t === 'early')) row.times = att[t].times;
+    }
     if (def.group === 'earn') { variable += amount; if (def.sso) ssoExtra += amount; earn.push(row); }
     else if (def.group === 'reduce') { unpaid += amount; ded.push(row); }
     else if (def.group === 'exempt') { exempt += amount; earn.push(row); }
     else if (def.group === 'nontax') { reimburse += amount; earn.push(row); }
     else { if (t === 'loan') loan += amount; else otherDed += amount; ded.push(row); }
   });
-  if (unpaid > base) error = 'หักขาดงาน ' + fmt(unpaid) + ' บาท เกินเงินเดือนของงวดนี้ ' + fmt(base) + ' บาท';
+  if (unpaid > base) error = 'หักขาด ลา มาสาย ' + fmt(unpaid) + ' บาท เกินเงินเดือนของงวดนี้ ' + fmt(base) + ' บาท';
   const regularIncome = base - unpaid;
   const taxable = regularIncome + variable;
 
@@ -8493,6 +8539,9 @@ function paySlipCalc(e, d, L) {
     code: e.code, name: e.name, dept: e.dept, nationalId: e.nationalId || null, ssoNumber: e.ssoNumber || null,
     fullSalary: e.salary, days: span ? span.days : 0, dim: span ? span.dim : 0, prorated: !!(span && !span.full),
     salary: base, unpaid, ot, otHours, variable, taxable, exempt, reimburse, gross,
+    /* จำนวนขาด ลา มาสาย ที่ใช้คิดในสลิปนี้ — รายงานสรุปการมาทำงานใช้ */
+    time: { absent: qty('absent'), unpaid: qty('unpaid'), late: qty('late'), early: qty('early'),
+      lateTimes: att && L.late === undefined ? att.late.times : null, earlyTimes: att && L.early === undefined ? att.early.times : null },
     sso, ssoEr, ssoWage, ssoBase: ssoWage ? Math.min(Math.max(ssoWage, ssoR.floor), ssoR.ceiling) : 0,
     pvd, pvdEr, pvdWage, pit, loan, otherDed, net, earn, ded, pay, error,
     calc: { year, prevIncome: ytd.income, prevTax: ytd.tax, future: fut.months, futureIncome: fut.income,
@@ -8536,10 +8585,36 @@ function saveSettingsPayroll(input) {
   if (!(hours > 0 && hours <= 12)) {
     throw new DomainError('HOURS_PER_DAY_RANGE', 'ชั่วโมงทำงานปกติต่อวันต้องอยู่ระหว่าง 1 ถึง 12 ชั่วโมง');
   }
+  /* ขาด ลา มาสาย — ตัวหารค่าจ้างรายวัน นาทีผ่อนผันมาสายต่อครั้ง เวลาเข้า-ออกงาน (ใช้แปลงไฟล์เครื่องสแกนนิ้ว)
+     ไม่ส่งมา = คงค่าเดิม */
+  const given = (k) => input[k] !== undefined && input[k] !== null && String(input[k]).trim() !== '';
+  const basis = given('dayBasis') ? input.dayBasis : payrollSetting('dayBasis') || 'd30';
+  if (!DAY_BASIS[basis]) throw new DomainError('DAY_BASIS_INVALID', 'วิธีคิดค่าจ้างรายวันไม่ถูกต้อง');
+  const workDays = given('workDays') ? Number(input.workDays) : payrollSetting('workDays') || 26;
+  if (basis === 'work' && !(Number.isInteger(workDays) && workDays >= 20 && workDays <= 31)) {
+    throw new DomainError('WORK_DAYS_RANGE', 'วันทำงานต่อเดือนต้องเป็นจำนวนเต็ม 20 ถึง 31 วัน');
+  }
+  const grace = given('lateGrace') ? Number(input.lateGrace) : payrollSetting('lateGrace') || 0;
+  if (!(Number.isInteger(grace) && grace >= 0 && grace <= 60)) {
+    throw new DomainError('LATE_GRACE_RANGE', 'นาทีผ่อนผันมาสายต้องเป็นจำนวนเต็ม 0 ถึง 60 นาที');
+  }
+  const hhmm = function (k, def) {
+    const v = given(k) ? String(input[k]).trim() : payrollSetting(k) || def;
+    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(v)) throw new DomainError('WORK_TIME_INVALID', 'เวลาต้องอยู่ในรูป ชม.:นาที เช่น 08:30');
+    return v;
+  };
+  const workStart = hhmm('workStart', '08:30'), workEnd = hhmm('workEnd', '17:30');
+  if (workEnd <= workStart) throw new DomainError('WORK_TIME_INVALID', 'เวลาเลิกงานต้องหลังเวลาเข้างาน');
   payrollSettingSet('ssoAccount', ssoAccount || null);
   payrollSettingSet('ssoBranch', String(input.ssoBranch || '').trim() || '000000');
   payrollSettingSet('hoursPerDay', hours);
-  audit('payroll', 'settings', 'update', null, { ssoAccount: ssoAccount || '—', hoursPerDay: hours });
+  payrollSettingSet('dayBasis', basis);
+  payrollSettingSet('workDays', workDays);
+  payrollSettingSet('lateGrace', grace);
+  payrollSettingSet('workStart', workStart);
+  payrollSettingSet('workEnd', workEnd);
+  audit('payroll', 'settings', 'update', null, { ssoAccount: ssoAccount || '—', hoursPerDay: hours, dayBasis: basis,
+    workDays, lateGrace: grace, workStart, workEnd });
   return DB.settings.payroll;
 }
 
@@ -8625,10 +8700,12 @@ function setPayLine(id, code, values, skip) {
     }
     if (def.unit) {
       const n = Number(String(raw).replace(/,/g, ''));
-      if (!isFinite(n) || n < 0 || n > 744) {
-        throw new DomainError('PAY_QTY_INVALID', e.name + ': ' + def.label + ' ต้องเป็นจำนวน' + def.unitLabel + 'ตั้งแต่ 0 ขึ้นไป');
+      const max = def.unit === 'minutes' ? 31 * workMinutes() : 744;
+      if (!isFinite(n) || n < 0 || n > max) {
+        throw new DomainError('PAY_QTY_INVALID', e.name + ': ' + def.label + ' ต้องเป็นจำนวน' + def.unitLabel + 'ตั้งแต่ 0 ถึง ' + max.toLocaleString('en-US'));
       }
       if (def.unit === 'days' && n > 31) throw new DomainError('PAY_QTY_INVALID', e.name + ': ' + def.label + ' เกิน 31 วัน');
+      if (def.unit === 'minutes' && Math.round(n) !== n) throw new DomainError('PAY_QTY_INVALID', e.name + ': ' + def.label + ' ต้องเป็นนาทีเต็ม');
       L[t] = Math.round(n * 100) / 100;
     } else {
       const v = M(String(raw));
@@ -8650,6 +8727,143 @@ function deletePayDraft(id) {
   return d;
 }
 
+/* ===================================================================
+   บันทึกเวลา — ขาดงาน ลาไม่รับค่าจ้าง มาสาย กลับก่อนเวลา รายวัน
+   ใส่ทีละรายการ หรือนำเข้าจากไฟล์ (รายการขาด/ลา/สาย หรือเวลาเข้า-ออกจากเครื่องสแกนนิ้ว)
+   ยอดของงวดไหลเข้าแผ่นงานเงินเดือนเอง (ช่องที่ไม่ได้กรอกทับ) · มาสายหักหลังหักนาทีผ่อนผันต่อครั้ง
+   งวดที่ทำเงินเดือนแล้วแก้บันทึกเวลาไม่ได้ ตัวเลขในสลิปกับบันทึกจะได้ตรงกันเสมอ — ยกเลิกงวดแล้วแก้ได้
+   =================================================================== */
+const ATT_TYPES = {
+  absent: { label: 'ขาดงาน', unit: 'days' },
+  unpaid: { label: 'ลาไม่รับค่าจ้าง', unit: 'days' },
+  late:   { label: 'มาสาย', unit: 'minutes' },
+  early:  { label: 'กลับก่อนเวลา', unit: 'minutes' },
+};
+const attendanceList = () => DB.attendance || (DB.attendance = []);
+/** ยอดของพนักงานหนึ่งคนในงวด — qty คือจำนวนที่ใช้หัก (มาสายหลังหักนาทีผ่อนผันแล้ว) */
+function attendanceSummary(code, period) {
+  const grace = payrollSetting('lateGrace') || 0;
+  const entries = attendanceList().filter((x) => x.code === code && x.date.slice(0, 7) === period);
+  const out = { entries, absent: 0, unpaid: 0, late: { times: 0, minutes: 0, deduct: 0 }, early: { times: 0, minutes: 0, deduct: 0 } };
+  entries.forEach(function (x) {
+    if (x.type === 'absent' || x.type === 'unpaid') out[x.type] = Math.round((out[x.type] + x.days) * 100) / 100;
+    else {
+      const o = out[x.type];
+      o.times += 1; o.minutes += x.minutes;
+      o.deduct += x.type === 'late' ? Math.max(0, x.minutes - grace) : x.minutes;
+    }
+  });
+  out.qty = { absent: out.absent, unpaid: out.unpaid, late: out.late.deduct, early: out.early.deduct };
+  return out;
+}
+/** งวดที่แก้บันทึกเวลาได้ — งวดบัญชียังเปิด และยังไม่ได้ทำเงินเดือนปกติของเดือนนั้น */
+function assertAttendanceOpen(period) {
+  const p = DB.periods.find((x) => x.code === period);
+  if (!p) throw new DomainError('PERIOD_NOT_FOUND', 'ยังไม่ได้สร้างงวดบัญชี ' + period, 'สร้างรอบบัญชีในหน้าตั้งค่าก่อน');
+  if (p.status !== 'open') throw new DomainError('PERIOD_CLOSED', 'งวด ' + thPeriod(period) + ' ปิดแล้ว แก้บันทึกเวลาไม่ได้');
+  const run = activeRegularRun(period);
+  if (run) {
+    throw new DomainError('ATTENDANCE_PERIOD_PAID', 'ทำเงินเดือนงวด ' + thPeriod(period) + ' แล้ว (' + (run.no || run.entryNo) + ') แก้บันทึกเวลาไม่ได้',
+      'ยกเลิกงวดเงินเดือนก่อนแล้วแก้ หรือใส่ยอดที่ตกหล่นเป็นรายการปรับปรุงในงวดถัดไป');
+  }
+}
+/** เพิ่มหรือแก้หนึ่งรายการ — input = { id?, code, date, type, minutes | days, note } */
+function saveAttendance(input) {
+  const e = DB.employees.find((x) => x.code === input.code);
+  if (!e) throw new DomainError('EMPLOYEE_NOT_FOUND', 'ไม่พบพนักงานรหัส ' + (input.code || '—'));
+  const def = ATT_TYPES[input.type];
+  if (!def) throw new DomainError('ATTENDANCE_TYPE_INVALID', 'ประเภทต้องเป็น ขาดงาน ลาไม่รับค่าจ้าง มาสาย หรือกลับก่อนเวลา');
+  const date = String(input.date || '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || isNaN(Date.parse(date))) throw new DomainError('DATE_REQUIRED', 'ต้องระบุวันที่');
+  const old = input.id ? attendanceList().find((x) => x.id === input.id) : null;
+  if (input.id && !old) throw new DomainError('ATTENDANCE_NOT_FOUND', 'ไม่พบรายการนี้ อาจถูกลบไปแล้ว');
+  if ((e.hired && date < e.hired) || (e.left && date > e.left)) {
+    throw new DomainError('ATTENDANCE_NOT_EMPLOYED', e.name + ' ไม่ได้เป็นพนักงานในวันที่ ' + thDate(date),
+      'เริ่มงาน ' + (e.hired ? thDate(e.hired) : '—') + (e.left ? ' · พ้นสภาพ ' + thDate(e.left) : ''));
+  }
+  if (old) assertAttendanceOpen(old.date.slice(0, 7));
+  assertAttendanceOpen(date.slice(0, 7));
+  const rec = { id: old ? old.id : null, code: e.code, date, type: input.type, note: String(input.note || '').trim().slice(0, 200),
+    src: old ? old.src : input.src || 'manual' };
+  if (def.unit === 'days') {
+    const d = Number(input.days === undefined || input.days === '' ? 1 : input.days);
+    if (d !== 1 && d !== 0.5) throw new DomainError('ATTENDANCE_DAYS_INVALID', def.label + 'ต่อวันใส่ได้ 1 วัน หรือครึ่งวัน (0.5)');
+    rec.days = d;
+  } else {
+    const m = Number(String(input.minutes === undefined ? '' : input.minutes).replace(/,/g, ''));
+    if (!(Number.isInteger(m) && m >= 1 && m <= workMinutes())) {
+      throw new DomainError('ATTENDANCE_MINUTES_INVALID', def.label + ' ต้องเป็นนาทีเต็ม 1 ถึง ' + workMinutes() + ' นาที (ทั้งวันทำงาน)',
+        'ถ้าไม่มาทั้งวัน ให้บันทึกเป็นขาดงาน');
+    }
+    rec.minutes = m;
+  }
+  /* กันบันทึกซ้ำ/ขัดกันในวันเดียว: ประเภทเดียวกันซ้ำไม่ได้ · ขาด/ลารวมกันไม่เกิน 1 วัน · ขาดเต็มวันแล้วมาสาย/กลับก่อนไม่ได้ */
+  const same = attendanceList().filter((x) => x.code === e.code && x.date === date && x !== old);
+  if (same.some((x) => x.type === rec.type)) {
+    throw new DomainError('ATTENDANCE_DUPLICATE', e.name + ' มีรายการ' + def.label + 'วันที่ ' + thDate(date) + ' อยู่แล้ว', 'แก้รายการเดิมแทนการเพิ่มใหม่');
+  }
+  const dayOff = same.reduce((a, x) => a + (x.days || 0), 0) + (rec.days || 0);
+  if (dayOff > 1) throw new DomainError('ATTENDANCE_CONFLICT', e.name + ' ขาดงาน/ลาวันที่ ' + thDate(date) + ' รวมเกิน 1 วัน');
+  if (dayOff >= 1 && (same.some((x) => x.minutes) || rec.minutes)) {
+    throw new DomainError('ATTENDANCE_CONFLICT', e.name + ' ขาดงาน/ลาทั้งวันที่ ' + thDate(date) + ' จะมาสายหรือกลับก่อนในวันเดียวกันไม่ได้');
+  }
+  if (old) {
+    const before = { date: old.date, type: old.type, days: old.days, minutes: old.minutes };
+    Object.keys(old).forEach((k) => { delete old[k]; });
+    Object.assign(old, rec);
+    audit('attendance', old.id, 'update', before, { date, type: rec.type, days: rec.days, minutes: rec.minutes });
+    return old;
+  }
+  DB.seq.attendance = (DB.seq.attendance || 0) + 1;
+  rec.id = 'AT' + String(DB.seq.attendance).padStart(6, '0');
+  rec.at = new Date().toISOString();
+  attendanceList().push(rec);
+  audit('attendance', rec.id, 'create', null, { code: e.code, date, type: rec.type, days: rec.days, minutes: rec.minutes });
+  return rec;
+}
+function deleteAttendance(id) {
+  const list = attendanceList();
+  const i = list.findIndex((x) => x.id === id);
+  if (i < 0) throw new DomainError('ATTENDANCE_NOT_FOUND', 'ไม่พบรายการนี้ อาจถูกลบไปแล้ว');
+  assertAttendanceOpen(list[i].date.slice(0, 7));
+  const x = list[i];
+  list.splice(i, 1);
+  audit('attendance', id, 'delete', { code: x.code, date: x.date, type: x.type, days: x.days, minutes: x.minutes }, null);
+  return x;
+}
+/** นาทีจากเวลา "08:45" */
+const hhmmMinutes = (t) => { const m = /^(\d{1,2})[:.](\d{2})/.exec(String(t || '').trim()); return m ? Number(m[1]) * 60 + Number(m[2]) : null; };
+/** แปลงเวลาเข้า-ออกหนึ่งวันเป็นรายการ: เข้าหลังเวลาเข้างาน = มาสาย · ออกก่อนเวลาเลิกงาน = กลับก่อน · ไม่มีทั้งเข้าและออก = ขาดงาน
+    มีเวลาเข้าแต่ไม่มีเวลาออก (ลืมสแกน) ไม่เดาว่ากลับก่อน */
+function clockToAttendance(code, date, tin, tout) {
+  const start = hhmmMinutes(payrollSetting('workStart') || '08:30'), end = hhmmMinutes(payrollSetting('workEnd') || '17:30');
+  const a = hhmmMinutes(tin), b = hhmmMinutes(tout);
+  if (a === null && b === null) return [{ code, date, type: 'absent', days: 1, note: 'ไม่มีเวลาเข้า-ออก', src: 'clock' }];
+  const out = [];
+  if (a !== null && a > start) out.push({ code, date, type: 'late', minutes: Math.min(a - start, workMinutes()), note: 'เข้า ' + tin, src: 'clock' });
+  if (b !== null && b < end) out.push({ code, date, type: 'early', minutes: Math.min(end - b, workMinutes()), note: 'ออก ' + tout, src: 'clock' });
+  return out;
+}
+/** นำเข้าหลายรายการในชุดเดียว — แถวที่ผิดไม่เข้า (บอกเหตุผลรายแถว) แถวที่ถูกเข้าทั้งหมด
+    rows = [{ row, code, date, type, minutes, days, note }] (แปลงจากไฟล์แล้ว) · dryRun = ตรวจอย่างเดียว ไม่บันทึก */
+function importAttendance(rows, dryRun) {
+  const ok = [], bad = [];
+  try {
+    atomically(function () {
+      (rows || []).forEach(function (r) {
+        try { ok.push(Object.assign({}, saveAttendance(Object.assign({}, r, { id: null, src: r.src || 'import' })))); }
+        catch (err) {
+          if (!(err instanceof DomainError)) throw err;
+          bad.push({ row: r.row, code: r.code, date: r.date, type: r.type, reason: err.message });
+        }
+      });
+      /* ตรวจอย่างเดียว: ลองบันทึกจริงทุกแถว (จับรายการซ้ำในไฟล์เดียวกันได้ด้วย) แล้วคืนสภาพทั้งหมด */
+      if (dryRun) throw new DomainError('DRY_RUN', 'ตรวจอย่างเดียว');
+    });
+  } catch (err) { if (!(err instanceof DomainError) || err.code !== 'DRY_RUN') throw err; }
+  return { added: ok.length, rows: ok, bad, dryRun: !!dryRun };
+}
+
 /** ตัวอย่างผลของแผ่นงาน (ยังไม่ลงบัญชี) — แสดงบนหน้าจอและใช้ตอนลงบัญชีจริง ผลจึงตรงกันเสมอ */
 function payrollPreview(d) {
   const regular = d.kind === 'regular';
@@ -8665,6 +8879,16 @@ function payrollPreview(d) {
     if (s.pay && !e.nationalId) s.warn.push('ไม่มีเลขประจำตัวประชาชน — ภ.ง.ด.1 และ 50 ทวิ ต้องใช้');
     if (regular && !e.salary) s.warn.push('ยังไม่ได้กรอกเงินเดือนในทะเบียนพนักงาน');
     if (s.prorated) s.warn.push('ทำงาน ' + s.days + ' จาก ' + s.dim + ' วัน — คิดเงินเดือนตามสัดส่วน');
+    /* กรอกจำนวนในแผ่นงานทับบันทึกเวลา — เตือนให้เห็นว่าตัวเลขสองที่ไม่ตรงกัน */
+    if (regular) {
+      const att = attendanceSummary(e.code, d.period);
+      ['absent', 'unpaid', 'late', 'early'].forEach(function (t) {
+        if (L[t] !== undefined && att.entries.some((x) => x.type === t) && L[t] !== att.qty[t]) {
+          s.warn.push(PAY_ITEMS[t].label + ' กรอกในแผ่นงาน ' + L[t] + ' ' + PAY_ITEMS[t].unitLabel
+            + ' ไม่ใช้บันทึกเวลา (' + att.qty[t] + ' ' + PAY_ITEMS[t].unitLabel + ')');
+        }
+      });
+    }
     return s;
   });
   const paid = rows.filter((s) => s.pay);
@@ -11692,6 +11916,7 @@ function navGroups() {
     ]},
     { g: 'เงินเดือน', icon: 'payroll', items: [
       ['payroll', 'งวดจ่ายเงินเดือน', null],
+      ['attendance', 'ขาด ลา มาสาย', null],
       ['employees', 'ทะเบียนพนักงาน', null],
       ['payrollfile', 'ภ.ง.ด.1 · สปส.1-10 · นำส่ง', null],
       ['payrollyear', 'สรุปทั้งปี · ภ.ง.ด.1ก · 50 ทวิ', null],
@@ -21216,7 +21441,7 @@ function payMonthCard(period, runs, live, shown) {
   return card({
     title:'งวดจ่ายเงินเดือน', sub: thPeriod(period) + (live.length ? ' · จ่ายแล้ว ' + live.length + ' รอบ' : ' · ยังไม่ได้จ่าย'),
     actions: btn('paydraft:new', '+ จ่ายนอกรอบ (โบนัส ค่าคอมมิชชั่น เงินชดเชย)', open ? '' : 'disabled')
-      + btn('go:payrollfile', 'ภ.ง.ด.1 · สปส.1-10 · นำส่ง') + btn('paysettings', 'ตั้งค่า'),
+      + btn('go:attendance', 'ขาด ลา มาสาย') + btn('go:payrollfile', 'ภ.ง.ด.1 · สปส.1-10 · นำส่ง') + btn('paysettings', 'ตั้งค่า'),
     body: (live.length ? kpi([
         { label:'พนักงานที่ได้รับเงิน', value: people.size + ' คน' },
         { label:'เงินได้รวม', value: fmt(sum('gross')) },
@@ -21251,12 +21476,12 @@ function payRunCard(run) {
       + btnI('printdoc:payslips:' + payRunKey(run), 'printer', 'พิมพ์สลิปทุกคน')
       + (live ? btn('voidrun:payroll:' + payRunKey(run), 'ยกเลิกงวดนี้', 'danger') : ''),
     body: voidBanner(run) + tbl({
-      cols:[{t:'รหัส'},{t:'ชื่อ'},{t:'เงินเดือน',a:'r'},{t:'ค่าล่วงเวลา',a:'r'},{t:'เงินได้อื่น',a:'r'},{t:'รวมเงินได้',a:'r'},
+      cols:[{t:'รหัส'},{t:'ชื่อ'},{t:'เงินเดือน',a:'r'},{t:'หักขาด ลา สาย',a:'r'},{t:'ค่าล่วงเวลา',a:'r'},{t:'เงินได้อื่น',a:'r'},{t:'รวมเงินได้',a:'r'},
         {t:'ภาษีหัก',a:'r'},{t:'ประกันสังคม',a:'r'},{t:'กองทุนสำรองฯ',a:'r'},{t:'หักอื่น',a:'r'},{t:'คืนค่าใช้จ่าย',a:'r'},{t:'รับสุทธิ',a:'r'}],
-      rows: s.map((x) => [{mono:x.code}, x.name, {n:x.salary - (x.unpaid || 0)}, {n:x.ot || 0}, {n:slipOther(x)}, {n:x.gross},
+      rows: s.map((x) => [{mono:x.code}, x.name, {n:x.salary}, {n:-(x.unpaid || 0)}, {n:x.ot || 0}, {n:slipOther(x)}, {n:x.gross},
         {n:x.pit}, {n:x.sso}, {n:x.pvd}, {n:(x.loan || 0) + (x.otherDed || 0)}, {n:x.reimburse || 0}, {n:x.net}]),
       rowAttr: (r) => 'class="row-link" title="พิมพ์สลิปเงินเดือน" data-act="printdoc:payslip:' + payRunKey(run) + '/' + r[0].mono + '"',
-      foot: ['', 'รวม', {n:sum((x) => x.salary - (x.unpaid || 0))}, {n:sum((x) => x.ot || 0)}, {n:sum(slipOther)}, {n:run.gross},
+      foot: ['', 'รวม', {n:sum((x) => x.salary)}, {n:-sum((x) => x.unpaid || 0)}, {n:sum((x) => x.ot || 0)}, {n:sum(slipOther)}, {n:run.gross},
         {n:run.pit}, {n:run.ssoEmp}, {n:run.pvdEmp}, {n:(run.loan || 0) + (run.otherDed || 0)}, {n:run.reimburse || 0}, {n:run.net}],
     }),
     foot: 'กดที่แถวเพื่อพิมพ์สลิปเงินเดือนของคนนั้น · ฐานประกันสังคมสูงสุด ' + fmt(run.ssoCeiling) + ' บาท สมทบสูงสุด ' + fmt(run.ssoMax)
@@ -21269,7 +21494,7 @@ function payRunCard(run) {
    ถ้าวาดใหม่ทั้งหน้า ปุ่มที่ผู้ใช้กำลังกด (เช่น ทำเงินเดือน) จะถูกแทนที่ระหว่างกดแล้วการกดหายไป */
 const PAY_SHEET_COLS = ['gross', 'pit', 'sso', 'pvd', 'ded', 'net'];
 function paySheetVals(s) {
-  return { salary: s.salary - s.unpaid, other: s.variable - s.ot + s.exempt + s.reimburse, gross: s.gross,
+  return { salary: s.salary, reduce: s.unpaid, other: s.variable - s.ot + s.exempt + s.reimburse, gross: s.gross,
     pit: s.pit, sso: s.sso, pvd: s.pvd, ded: s.loan + s.otherDed, net: s.net };
 }
 function paySheetWarn(s) {
@@ -21293,9 +21518,12 @@ function paySheetCard(d) {
   const inp = function (s, t) {
     const L = d.lines[s.code] || {};
     const def = PAY_ITEMS[t];
-    const v = L[t] !== undefined ? L[t] : (t === 'ot' && regular ? (DB.employees.find((e) => e.code === s.code) || {}).otHours || 0 : 0);
+    /* ขาด ลา สาย ที่ไม่ได้กรอกทับ แสดงยอดจากบันทึกเวลา (ตัวเลขจาง) — กรอกแล้วคือแก้ทับ ลบจนว่างกลับไปใช้บันทึก */
+    const logged = def.att && L[t] === undefined && regular ? attendanceSummary(s.code, d.period).qty[def.att] : 0;
+    const v = L[t] !== undefined ? L[t] : def.att ? logged : (t === 'ot' && regular ? (DB.employees.find((e) => e.code === s.code) || {}).otHours || 0 : 0);
     const shown = def.unit ? (v ? String(v) : '') : payNum(v);
-    return '<td class="num"><input class="qty-in pay-in" inputmode="decimal" aria-label="' + esc(def.label + ' ' + s.name) + '"'
+    return '<td class="num"><input class="qty-in pay-in' + (logged ? ' from-log' : '') + '" inputmode="decimal" aria-label="' + esc(def.label + ' ' + s.name) + '"'
+      + (logged ? ' title="จากบันทึกขาด ลา มาสาย — พิมพ์ทับเพื่อแก้เฉพาะงวดนี้"' : '')
       + ' data-draft="' + esc(id) + '" data-emp="' + esc(s.code) + '" data-item="' + t + '" value="' + esc(shown) + '" data-v="' + esc(shown) + '"'
       + (open ? '' : ' disabled') + '></td>';
   };
@@ -21305,7 +21533,7 @@ function paySheetCard(d) {
     + (regular ? '' : payHeadField(id, 'label', 'ชื่อรอบที่จ่าย (พิมพ์บนสลิป)', 'text', d.label))
     + '</div>';
   const cols = (regular
-    ? ['จ่าย', 'พนักงาน', 'เงินเดือน', 'ค่าล่วงเวลา (ชม.)', 'ขาดงาน (วัน)', 'เงินได้อื่น']
+    ? ['จ่าย', 'พนักงาน', 'เงินเดือน', 'ค่าล่วงเวลา (ชม.)', 'ขาดงาน (วัน)', 'มาสาย (นาที)', 'หักขาด ลา สาย', 'เงินได้อื่น']
     : ['พนักงาน', PAY_ITEMS[main].label, 'เงินได้อื่น']).concat(['รวมเงินได้', 'ภาษีหัก', 'ประกันสังคม', 'กองทุนฯ', 'หักอื่น', 'รับสุทธิ']);
   const left = regular ? 2 : 1;
   let rows = '';
@@ -21317,7 +21545,7 @@ function paySheetCard(d) {
         + (s.skip ? '' : ' checked') + (open ? '' : ' disabled') + '></td>' : '')
       + '<td><span class="mono">' + esc(s.code) + '</span> ' + esc(s.name)
       + '<div' + at(s.code, 'warn') + '>' + paySheetWarn(s) + '</div></td>'
-      + (regular ? num(s.code, 'salary', v.salary) + inp(s, 'ot') + inp(s, 'unpaid') : inp(s, main))
+      + (regular ? num(s.code, 'salary', v.salary) + inp(s, 'ot') + inp(s, 'absent') + inp(s, 'late') + num(s.code, 'reduce', v.reduce) : inp(s, main))
       + '<td class="num"><span' + at(s.code, 'other') + '>' + (v.other ? fmt(v.other) : '—') + '</span> '
       + (open ? chip('payline:' + id + ':' + s.code, 'รายการ…') : '') + '</td>'
       + PAY_SHEET_COLS.map((f) => num(s.code, f, v[f])).join('') + '</tr>';
@@ -21343,7 +21571,9 @@ function paySheetCard(d) {
     body: head + table,
     foot: (regular
       ? 'เงินเดือนคิดตามวันที่ทำงานจริงในเดือน (เข้าหรือออกกลางเดือน) · ค่าล่วงเวลา = เงินเดือน ÷ 30 ÷ ' + (payrollSetting('hoursPerDay') || 8)
-        + ' ชม. × 1.5 · ขาดงาน = เงินเดือน ÷ 30 ต่อวัน · กด "รายการ…" เพื่อใส่ค่าตำแหน่ง ค่าคอมมิชชั่น โบนัส คืนค่าใช้จ่าย หักเงินกู้'
+        + ' ชม. × 1.5 · ขาดงาน ลาไม่รับค่าจ้าง = ' + DAY_BASIS[payrollSetting('dayBasis') || 'd30'] + ' ต่อวัน · มาสาย กลับก่อน = ค่าจ้างรายวัน ÷ '
+        + (payrollSetting('hoursPerDay') || 8) + ' ชม. ÷ 60 ต่อนาที · ตัวเลขจางคือยอดจากบันทึกขาด ลา มาสาย'
+        + ' · กด "รายการ…" เพื่อใส่ลาไม่รับค่าจ้าง กลับก่อนเวลา ค่าตำแหน่ง ค่าคอมมิชชั่น โบนัส คืนค่าใช้จ่าย หักเงินกู้'
       : 'จ่ายเฉพาะคนที่มีจำนวนเงิน · โบนัสและเงินได้ไม่ประจำหักภาษีส่วนเพิ่มทั้งก้อนในงวดที่จ่าย')
       + ' · ภาษีหัก ณ ที่จ่ายคิดแบบยอดสะสมทั้งปี: ภาษีทั้งปีจากเงินได้จริงตั้งแต่ต้นปีรวมเงินเดือนที่จะได้ต่อ ลบภาษีที่หักไปแล้ว เฉลี่ยตามงวดที่เหลือ',
   });
@@ -21366,7 +21596,7 @@ function paySheetRefresh(id) {
   const q = (sel) => document.querySelector('#main [' + sel + ']');
   pv.rows.forEach(function (s) {
     const v = paySheetVals(s);
-    ['salary', 'other'].concat(PAY_SHEET_COLS).forEach(function (f) {
+    ['salary', 'reduce', 'other'].concat(PAY_SHEET_COLS).forEach(function (f) {
       const el = q('data-pc="' + id + '|' + s.code + '|' + f + '"');
       if (el) el.textContent = v[f] ? fmt(v[f]) : '—';
     });
@@ -21394,8 +21624,17 @@ function payInputStore(el) {
     } else {
       /* ช่องในตารางที่ลบจนว่างคือศูนย์ — ไม่ใช่กลับไปใช้ชั่วโมงล่วงเวลาประจำจากทะเบียน ไม่งั้นลบแล้วยังจ่ายอยู่ */
       const o = {};
-      o[el.getAttribute('data-item')] = el.value.trim() === '' ? '0' : el.value;
+      const item = el.getAttribute('data-item');
+      /* ขาด ลา สาย: ลบจนว่าง = กลับไปใช้บันทึกเวลา (ต้องการศูนย์ให้พิมพ์ 0) */
+      o[item] = el.value.trim() === '' ? (PAY_ITEMS[item] && PAY_ITEMS[item].att ? '' : '0') : el.value;
       setPayLine(id, el.getAttribute('data-emp'), o);
+      /* ลบจนว่างแล้วกลับไปใช้บันทึกเวลา — เติมยอดจากบันทึกกลับในช่อง (ตัวเลขจาง) ให้เห็นว่ายังหักอยู่ */
+      if (o[item] === '') {
+        const dr = payDraftById(id);
+        const q = dr ? attendanceSummary(el.getAttribute('data-emp'), dr.period).qty[PAY_ITEMS[item].att] : 0;
+        el.value = q ? String(q) : '';
+        el.classList.toggle('from-log', !!q);
+      } else el.classList.remove('from-log');
       el.setAttribute('data-v', el.value);
     }
     save();
@@ -21440,7 +21679,11 @@ function modalPayLine(id, code) {
     if (def.offcycle === false && !regular) return '';
     const v = L[t] !== undefined ? L[t] : null;
     const value = v === null ? '' : def.unit ? String(v) : payNum(v);
-    const hint = t === 'ot' && regular ? 'ว่างไว้ = ตามทะเบียนพนักงาน ' + (e.otHours || 0) + ' ชม.'
+    const att = def.att && regular ? attendanceSummary(code, d.period) : null;
+    const hint = att ? 'ว่างไว้ = ตามบันทึกขาด ลา มาสาย ' + att.qty[def.att] + ' ' + def.unitLabel
+        + (t === 'late' && att.late.times ? ' (สาย ' + att.late.times + ' ครั้ง ' + att.late.minutes + ' นาที)' : '')
+        + ' · ' + (def.unit === 'days' ? 'วันละ ' + fmt(payDeductRates(e, d.period).perDay) : 'ชั่วโมงละ ' + fmt(payDeductRates(e, d.period).perHour)) + ' บาท'
+      : t === 'ot' && regular ? 'ว่างไว้ = ตามทะเบียนพนักงาน ' + (e.otHours || 0) + ' ชม.'
       : t === 'adjust' ? 'ใส่ติดลบถ้างวดก่อนจ่ายเกิน — ใช้แก้งวดที่ยื่น ภ.ง.ด.1 ไปแล้ว'
       : t === 'severanceExempt' ? 'ส่วนที่กฎหมายยกเว้นภาษี (ค่าจ้างวันทำงานสุดท้ายตามเพดานในกฎกระทรวง) ไม่เข้า ภ.ง.ด.1'
       : t === 'reimburse' ? 'จ่ายคืนตามใบเสร็จที่ออกในนามบริษัท ไม่ใช่เงินได้ ไม่เสียภาษี'
@@ -21461,7 +21704,8 @@ function modalPayLine(id, code) {
     body: info
       + group('เงินได้ที่ต้องเสียภาษี (เข้า ภ.ง.ด.1)', ['ot', 'otHoliday', 'holiday', 'allowance', 'commission', 'bonus', 'otherIncome', 'leavePay', 'severance', 'adjust'])
       + group('จ่ายแต่ไม่ต้องเสียภาษี', ['severanceExempt', 'reimburse'])
-      + group('รายการหัก', ['unpaid', 'loan', 'otherDed']),
+      + (regular ? group('ขาด ลา มาสาย — หักค่าจ้างตามเวลาที่ไม่ได้ทำงาน (ลดเงินได้ ประกันสังคม และกองทุนฯ)', ['absent', 'unpaid', 'late', 'early']) : '')
+      + group('รายการหักหลังภาษี', ['loan', 'otherDed']),
     submitLabel: 'บันทึกรายการ',
     onSubmit: function () {
       submitAction(function () {
@@ -21535,18 +21779,29 @@ function modalVoidPayRun(key) {
 function modalPaySettings() {
   modal({
     title: 'ตั้งค่าเงินเดือน',
-    sub: 'ใช้พิมพ์ลงแบบ สปส.1-10 และ 50 ทวิ และใช้คิดค่าล่วงเวลา',
+    sub: 'ใช้พิมพ์ลงแบบ สปส.1-10 และ 50 ทวิ ใช้คิดค่าล่วงเวลา และหักขาด ลา มาสาย',
     body: '<div class="flds">'
       + field({ name:'ssoAccount', label:'เลขที่บัญชีนายจ้าง (ประกันสังคม)', value: payrollSetting('ssoAccount') || '',
           hint:'ตัวเลข 10 หลัก ตามหนังสือขึ้นทะเบียนนายจ้าง' })
       + field({ name:'ssoBranch', label:'ลำดับที่สาขา (ประกันสังคม)', value: payrollSetting('ssoBranch') || '000000' })
       + field({ name:'hoursPerDay', label:'ชั่วโมงทำงานปกติต่อวัน', value: String(payrollSetting('hoursPerDay') || 8),
           hint:'ค่าจ้างรายชั่วโมง = เงินเดือน ÷ 30 ÷ ชั่วโมงนี้ (พ.ร.บ.คุ้มครองแรงงาน)' })
-      + '</div>',
+      + '</div><div class="sub-h">ขาด ลา มาสาย</div><div class="flds">'
+      + field({ name:'dayBasis', label:'ค่าจ้างรายวันสำหรับหักขาดงาน/ลา', type:'select', value: payrollSetting('dayBasis') || 'd30',
+          options: Object.keys(DAY_BASIS).map((k) => [k, DAY_BASIS[k]]), hint:'มาสาย กลับก่อน = ค่าจ้างรายวัน ÷ ชั่วโมงทำงาน ÷ 60 ต่อนาที · ค่าล่วงเวลายังคิด ÷ 30 ตามกฎหมาย' })
+      + field({ name:'workDays', label:'วันทำงานต่อเดือน (ถ้าเลือก ÷ วันทำงาน)', type:'number', value: String(payrollSetting('workDays') || 26) })
+      + field({ name:'lateGrace', label:'ผ่อนผันมาสายครั้งละ (นาที)', type:'number', value: String(payrollSetting('lateGrace') || 0),
+          hint:'สายไม่เกินนี้ไม่หัก สายเกินหักเฉพาะส่วนที่เกิน · 0 = หักทุกนาที' })
+      + field({ name:'workStart', label:'เวลาเข้างาน', type:'time', value: payrollSetting('workStart') || '08:30' })
+      + field({ name:'workEnd', label:'เวลาเลิกงาน', type:'time', value: payrollSetting('workEnd') || '17:30',
+          hint:'ใช้แปลงเวลาเข้า-ออกจากเครื่องสแกนนิ้วเป็นมาสาย/กลับก่อน' })
+      + '</div><div class="note">หักตามเวลาที่ไม่ได้ทำงานจริงเท่านั้น — ม.76 พ.ร.บ.คุ้มครองแรงงานห้ามหักค่าจ้างเป็นค่าปรับ'
+      + ' (เช่น สายครั้งละ 100 บาท) ระบบจึงไม่มีการหักแบบเหมาจ่าย</div>',
     submitLabel: 'บันทึก',
     onSubmit: function () {
       submitAction(function () {
-        saveSettingsPayroll({ ssoAccount: val('ssoAccount'), ssoBranch: val('ssoBranch'), hoursPerDay: val('hoursPerDay') });
+        saveSettingsPayroll({ ssoAccount: val('ssoAccount'), ssoBranch: val('ssoBranch'), hoursPerDay: val('hoursPerDay'),
+          dayBasis: val('dayBasis'), workDays: val('workDays'), lateGrace: val('lateGrace'), workStart: val('workStart'), workEnd: val('workEnd') });
         toast('บันทึกค่าตั้งเงินเดือนแล้ว', 'ok');
       });
     },
@@ -21805,7 +22060,7 @@ function payslipSheet(run, s) {
   if (s.salary) earn.push(['เงินเดือน' + (s.prorated ? ' (' + s.days + '/' + s.dim + ' วัน)' : ''), s.salary]);
   if (s.earn) {
     s.earn.forEach((r) => earn.push([r.label + (r.qty ? ' ' + r.qty + ' ' + r.unit : ''), r.amount]));
-    s.ded.forEach((r) => ded.push([r.label + (r.qty ? ' ' + r.qty + ' ' + r.unit : ''), r.amount]));
+    s.ded.forEach((r) => ded.push([r.label + (r.qty ? ' ' + r.qty + ' ' + r.unit : '') + (r.times ? ' (' + r.times + ' ครั้ง)' : ''), r.amount]));
   } else {
     /* สลิปรุ่นก่อน: เงินเดือน ค่าล่วงเวลา ภาษี ประกันสังคม กองทุน */
     if (s.ot) earn.push(['ค่าล่วงเวลา', s.ot]);
@@ -22059,6 +22314,311 @@ EXTRA_CHANGE.push(function (t) {
   const id = t.getAttribute('data-draft');
   if (payInputStore(t)) paySheetRefresh(id);
   return true;
+});
+
+
+/* ===== ui-attendance.js ===== */
+/* ===================================================================
+   ขาด ลา มาสาย — บันทึกเวลาของพนักงานรายวัน (ตรรกะอยู่ใน payroll.js)
+   - สรุปรายคนของงวด: จำนวนและเงินที่จะหักในแผ่นงานเงินเดือน (หักตามเวลาที่ไม่ได้ทำงาน ไม่ใช่ค่าปรับ)
+   - รายการรายวัน เพิ่ม แก้ ลบได้จนกว่าจะทำเงินเดือนงวดนั้น
+   - นำเข้าไฟล์ CSV/Excel: รายการขาด/ลา/สาย หรือเวลาเข้า-ออกจากเครื่องสแกนนิ้ว — ตรวจทุกแถวก่อนนำเข้า
+   =================================================================== */
+const ATT_ST = { absent:['late','ขาดงาน'], unpaid:['wait','ลาไม่รับค่าจ้าง'], late:['open','มาสาย'], early:['open','กลับก่อนเวลา'] };
+const ATT_SRC = { manual:'กรอกเอง', import:'นำเข้าไฟล์', clock:'เครื่องสแกนนิ้ว' };
+const attQtyText = (x) => (x.type === 'absent' || x.type === 'unpaid' ? (x.days === 0.5 ? 'ครึ่งวัน' : x.days + ' วัน') : x.minutes + ' นาที');
+const attEmpName = (code) => { const e = DB.employees.find((x) => x.code === code); return e ? e.name : code; };
+/** จำนวนเป็นข้อความสั้น ๆ ในตาราง — ศูนย์แสดงขีด */
+const attNum = (v, unit) => (v ? String(v) + (unit ? ' ' + unit : '') : '—');
+
+function scAttendance() {
+  const period = STATE.period;
+  const run = activeRegularRun(period);
+  const open = periodIsOpen() && !run;
+  const grace = payrollSetting('lateGrace') || 0;
+  const emps = DB.employees.filter((e) => employedSpan(e, period));
+  const sums = emps.map(function (e) {
+    const a = attendanceSummary(e.code, period);
+    const amt = (unit, q) => timeDeduction(e.salary, period, unit, q);
+    const money = amt('days', a.qty.absent) + amt('days', a.qty.unpaid) + amt('minutes', a.qty.late) + amt('minutes', a.qty.early);
+    return { e, a, money };
+  });
+  const T = sums.reduce((t, x) => ({ absent: t.absent + x.a.absent, unpaid: t.unpaid + x.a.unpaid, lateTimes: t.lateTimes + x.a.late.times,
+    late: t.late + x.a.late.deduct, early: t.early + x.a.early.deduct, money: t.money + x.money }),
+    { absent: 0, unpaid: 0, lateTimes: 0, late: 0, early: 0, money: 0 });
+  const basis = DAY_BASIS[payrollSetting('dayBasis') || 'd30'];
+  const summary = card({
+    title: 'ขาด ลา มาสาย', sub: thPeriod(period) + ' · ' + emps.length + ' คนที่ทำงานในงวด'
+      + (run ? ' · ทำเงินเดือนแล้ว (' + (run.no || run.entryNo) + ')' : ' · ยอดนี้ไหลเข้าแผ่นงานเงินเดือนเอง'),
+    actions: btn('att:new', '+ บันทึกขาด ลา สาย', open ? 'primary' : 'disabled') + btn('att:import', 'นำเข้าไฟล์', open ? '' : 'disabled')
+      + btn('paysettings', 'ตั้งค่าเวลาทำงาน') + btn('go:payroll', 'ไปแผ่นงานเงินเดือน'),
+    body: (run ? '<div class="note">ทำเงินเดือนงวดนี้แล้ว บันทึกเวลาถูกล็อกให้ตรงกับสลิป — ถ้าต้องแก้ ให้ยกเลิกงวดเงินเดือนก่อน'
+        + ' หรือใส่ส่วนที่ตกหล่นเป็นรายการปรับปรุงในงวดถัดไป</div>' : '')
+      + (emps.length ? tbl({
+        cols: [{t:'รหัส'}, {t:'พนักงาน'}, {t:'ขาดงาน',a:'r'}, {t:'ลาไม่รับค่าจ้าง',a:'r'}, {t:'มาสาย (ครั้ง)',a:'r'},
+          {t:'มาสายที่หัก',a:'r'}, {t:'กลับก่อนเวลา',a:'r'}, {t:'เงินที่หัก (บาท)',a:'r'}],
+        rows: sums.map((x) => [{mono:x.e.code}, x.e.name, {c:attNum(x.a.absent, 'วัน')}, {c:attNum(x.a.unpaid, 'วัน')},
+          {c:attNum(x.a.late.times)},
+          {c: x.a.late.minutes ? x.a.late.deduct + ' นาที' + (x.a.late.deduct !== x.a.late.minutes ? ' (สาย ' + x.a.late.minutes + ')' : '') : '—'},
+          {c:attNum(x.a.early.deduct, 'นาที')}, {n:x.money}]),
+        rowAttr: (r, i) => 'class="row-link" data-act="attemp:' + esc(sums[i].e.code) + '" title="ดูรายการของคนนี้"',
+        foot: ['', 'รวม', {c:attNum(Math.round(T.absent * 100) / 100, 'วัน')}, {c:attNum(Math.round(T.unpaid * 100) / 100, 'วัน')},
+          {c:attNum(T.lateTimes)}, {c:attNum(T.late, 'นาที')}, {c:attNum(T.early, 'นาที')}, {n:T.money}],
+      }) : '<div class="empty">ไม่มีพนักงานที่ทำงานในงวดนี้</div>'),
+    foot: 'หักตามเวลาที่ไม่ได้ทำงานจริง ไม่ใช่ค่าปรับ (ม.76 พ.ร.บ.คุ้มครองแรงงานห้ามหักค่าจ้างเป็นค่าปรับ) · ค่าจ้างรายวัน = ' + basis
+      + ' · รายนาที = รายวัน ÷ ' + (payrollSetting('hoursPerDay') || 8) + ' ชม. ÷ 60'
+      + (grace ? ' · มาสายผ่อนผันครั้งละ ' + grace + ' นาที (สายเกินนั้นหักเฉพาะส่วนที่เกิน)' : '')
+      + ' · ยอดในแผ่นงานเงินเดือนแก้ทับได้ ระบบเตือนถ้าไม่ตรงกับบันทึก',
+  });
+
+  /* รายการรายวัน — กรองตามประเภทและชื่อพนักงาน */
+  const type = STATE.attType || 'all';
+  const all = attendanceList().filter((x) => x.date.slice(0, 7) === period).slice().sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.code < b.code ? -1 : 1));
+  const shown = all.filter((x) => (type === 'all' || x.type === type) && (hit(x.code) || hit(attEmpName(x.code)) || hit(x.note || '')));
+  const n = (t) => all.filter((x) => x.type === t).length;
+  const log = card({
+    title: 'รายการรายวัน', sub: all.length + ' รายการในงวด ' + thPeriod(period),
+    filters: searchBox('ค้นหาชื่อ รหัสพนักงาน หรือหมายเหตุ')
+      + chip('atttype:all', 'ทั้งหมด ' + all.length, type === 'all')
+      + Object.keys(ATT_ST).map((k) => chip('atttype:' + k, ATT_ST[k][1] + ' ' + n(k), type === k)).join(''),
+    body: shown.length ? tbl({
+      cols: [{t:'วันที่'}, {t:'พนักงาน'}, {t:'ประเภท'}, {t:'จำนวน',a:'r'}, {t:'หมายเหตุ'}, {t:'ที่มา'}, {t:''}],
+      rows: shown.map((x) => [thDateNum(x.date), {html:'<span class="mono">' + esc(x.code) + '</span> ' + esc(attEmpName(x.code))},
+        {st: ATT_ST[x.type]}, {c: attQtyText(x)}, x.note || '', ATT_SRC[x.src] || x.src || '',
+        {html: open ? btn('att:edit:' + x.id, 'แก้') + btn('att:del:' + x.id, 'ลบ', 'danger') : ''}]),
+    }) : '<div class="empty">' + (all.length ? 'ไม่มีรายการที่ตรงกับตัวกรอง' : 'ยังไม่มีบันทึกขาด ลา สายในงวดนี้')
+      + (open && !all.length ? '<div style="margin-top:12px">' + btn('att:new', '+ บันทึกรายการแรก', 'primary') + ' ' + btn('att:import', 'นำเข้าไฟล์') + '</div>' : '') + '</div>',
+  });
+  return summary + log;
+}
+
+/** เพิ่ม/แก้รายการ — x = รายการเดิม (แก้) · code = พนักงานที่เลือกไว้ */
+function modalAttendance(x, code) {
+  const period = STATE.period;
+  const emps = DB.employees.filter((e) => employedSpan(e, period) || (x && e.code === x.code));
+  if (!emps.length) { toast('ไม่มีพนักงานที่ทำงานในงวด ' + thPeriod(period), 'err', 'เพิ่มพนักงานในทะเบียนพนักงานก่อน'); return; }
+  const type = x ? x.type : 'late';
+  const isDays = (t) => t === 'absent' || t === 'unpaid';
+  modal({
+    title: x ? 'แก้รายการ ' + ATT_ST[x.type][1] + ' · ' + attEmpName(x.code) : 'บันทึกขาด ลา มาสาย',
+    sub: 'หักค่าจ้างตามเวลาที่ไม่ได้ทำงานในแผ่นงานเงินเดือนงวด ' + thPeriod(period) + ' ให้เอง',
+    body: '<div class="flds">'
+      + field({ name:'attCode', label:'พนักงาน', type:'select', value: x ? x.code : code || emps[0].code,
+          options: emps.map((e) => [e.code, e.code + ' · ' + e.name]) })
+      + field({ name:'attDate', label:'วันที่', type:'date', value: x ? x.date : defaultDate() })
+      + field({ name:'attType', label:'ประเภท', type:'select', value: type,
+          options: Object.keys(ATT_TYPES).map((k) => [k, ATT_TYPES[k].label]) })
+      + '<div data-att-unit="minutes"' + (isDays(type) ? ' hidden' : '') + '>'
+      + field({ name:'attMinutes', label:'จำนวนนาที', type:'number', value: x && x.minutes ? String(x.minutes) : '',
+          placeholder:'เช่น 15', hint:'นาทีเต็ม ไม่เกิน ' + workMinutes() + ' นาที · ไม่มาทั้งวันให้เลือกขาดงาน' })
+      + '</div><div data-att-unit="days"' + (isDays(type) ? '' : ' hidden') + '>'
+      + field({ name:'attDays', label:'จำนวน', type:'select', value: x && x.days === 0.5 ? '0.5' : '1',
+          options: [['1', 'ทั้งวัน'], ['0.5', 'ครึ่งวัน']] })
+      + '</div>'
+      + field({ name:'attNote', label:'หมายเหตุ', value: x ? x.note || '' : '', placeholder:'เช่น รถติด ลากิจเกินสิทธิ์', wide:true })
+      + '</div><div class="note" id="attRate"></div>',
+    submitLabel: x ? 'บันทึกการแก้ไข' : 'บันทึก',
+    onSubmit: function () {
+      submitAction(function () {
+        const t = val('attType');
+        const r = saveAttendance({ id: x ? x.id : null, code: val('attCode'), date: val('attDate'), type: t,
+          minutes: isDays(t) ? undefined : val('attMinutes'), days: isDays(t) ? val('attDays') : undefined, note: val('attNote') });
+        if (r.date.slice(0, 7) !== STATE.period && DB.periods.some((p) => p.code === r.date.slice(0, 7))) STATE.period = r.date.slice(0, 7);
+        STATE.screen = 'attendance';
+        toast((x ? 'แก้' : 'บันทึก') + ATT_TYPES[t].label + ' ' + attEmpName(r.code) + ' แล้ว', 'ok',
+          thDate(r.date) + ' · ' + attQtyText(r) + ' · ไหลเข้าแผ่นงานเงินเดือนงวด ' + thPeriod(r.date.slice(0, 7)));
+        return r;
+      });
+    },
+  });
+  attRateHint();
+}
+/** บอกอัตราหักของพนักงานที่เลือก — ผู้ใช้เห็นก่อนบันทึกว่าจะหักเท่าไร */
+function attRateHint() {
+  const el = document.getElementById('attRate');
+  const e = DB.employees.find((x) => x.code === val('attCode'));
+  if (!el || !e) return;
+  const t = val('attType');
+  const days = t === 'absent' || t === 'unpaid';
+  const period = (val('attDate') || STATE.period + '-01').slice(0, 7);
+  const r = payDeductRates(e, period);
+  const q = days ? Number(val('attDays') || 1) : Number(val('attMinutes') || 0);
+  const grace = t === 'late' ? payrollSetting('lateGrace') || 0 : 0;
+  const amount = q ? timeDeduction(e.salary, period, days ? 'days' : 'minutes', days ? q : Math.max(0, q - grace)) : 0;
+  el.innerHTML = 'อัตราของ ' + esc(e.name) + ': วันละ <b>' + fmt(r.perDay) + '</b> · ชั่วโมงละ ' + fmt(r.perHour)
+    + ' บาท (เงินเดือน ' + fmt(e.salary) + ' ÷ ' + r.divisor + ' วัน)'
+    + (q ? ' · รายการนี้หัก <b>' + fmt(amount) + '</b> บาท' + (grace && q ? ' (ผ่อนผัน ' + grace + ' นาที)' : '') : '');
+}
+
+/* ---------- นำเข้าไฟล์ ---------- */
+let ATT_PENDING = null;
+const ATT_TEMPLATES = {
+  event: ['รหัสพนักงาน,วันที่,ประเภท,นาที,วัน,หมายเหตุ', 'EMP-0001,2026-07-03,มาสาย,15,,รถติด', 'EMP-0002,2026-07-08,ขาดงาน,,1,',
+    'EMP-0002,2026-07-09,ลาไม่รับค่าจ้าง,,0.5,ลากิจเกินสิทธิ์', 'EMP-0001,2026-07-10,กลับก่อนเวลา,30,,'],
+  clock: ['รหัสพนักงาน,วันที่,เวลาเข้า,เวลาออก', 'EMP-0001,2026-07-01,08:42,17:35', 'EMP-0001,2026-07-02,08:25,16:50', 'EMP-0002,2026-07-01,,'],
+};
+function modalAttendanceImport() {
+  ATT_PENDING = null;
+  modal({
+    title: 'นำเข้าขาด ลา มาสาย จากไฟล์',
+    sub: 'CSV หรือ Excel · ระบบดูหัวคอลัมน์เองว่าเป็นรายการขาด/ลา/สาย หรือเวลาเข้า-ออกจากเครื่องสแกนนิ้ว',
+    body: '<div class="flds">'
+      + '<div class="fld-w wide"><label for="attFile">เลือกไฟล์</label><input id="attFile" type="file" accept=".csv,.txt,.xlsx"></div>'
+      + '</div>'
+      + '<div class="note">แบบที่ 1 รายการ: รหัสพนักงาน · วันที่ · ประเภท (ขาดงาน / ลาไม่รับค่าจ้าง / มาสาย / กลับก่อนเวลา) · นาที · วัน · หมายเหตุ'
+      + '<br>แบบที่ 2 เวลาเข้า-ออก: รหัสพนักงาน · วันที่ · เวลาเข้า · เวลาออก — เข้าหลัง ' + esc(payrollSetting('workStart') || '08:30')
+      + ' = มาสาย · ออกก่อน ' + esc(payrollSetting('workEnd') || '17:30') + ' = กลับก่อน · ไม่มีทั้งเข้าและออก = ขาดงาน'
+      + '<div style="margin-top:8px">' + btn('att:tpl:event', 'ดาวน์โหลดแบบที่ 1') + ' ' + btn('att:tpl:clock', 'ดาวน์โหลดแบบที่ 2') + '</div></div>'
+      + '<div id="attPreview"></div>',
+    submitLabel: 'นำเข้า',
+    onSubmit: function () {
+      if (!ATT_PENDING || !ATT_PENDING.rows.length) { toast('ยังไม่มีแถวที่นำเข้าได้', 'err', 'เลือกไฟล์ก่อน แล้วดูผลตรวจด้านล่าง'); return; }
+      submitAction(function () {
+        const r = importAttendance(ATT_PENDING.rows);
+        STATE.screen = 'attendance';
+        toast('นำเข้า ' + r.added + ' รายการแล้ว', r.bad.length ? 'warn' : 'ok',
+          r.bad.length ? 'ข้าม ' + r.bad.length + ' แถวที่ไม่ผ่าน — ดาวน์โหลดรายการแถวที่ไม่ผ่านได้จากหน้าต่างก่อนนำเข้า' : 'ยอดไหลเข้าแผ่นงานเงินเดือนแล้ว');
+        ATT_PENDING = null;
+        return r;
+      });
+    },
+  });
+}
+/** วันที่จากไฟล์: 2026-07-03 · 3/7/2026 · 3/7/2569 (พ.ศ.) · เลขวันที่ของ Excel */
+function attDate(v) {
+  const s = String(v === undefined || v === null ? '' : v).trim();
+  let m = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(s);
+  if (m) return m[1] + '-' + m[2].padStart(2, '0') + '-' + m[3].padStart(2, '0');
+  m = /^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$/.exec(s);
+  if (m) { const y = Number(m[3]) > 2400 ? Number(m[3]) - 543 : Number(m[3]); return y + '-' + m[2].padStart(2, '0') + '-' + m[1].padStart(2, '0'); }
+  if (/^\d{5}(\.\d+)?$/.test(s)) return new Date(Date.UTC(1899, 11, 30) + Math.floor(Number(s)) * 86400000).toISOString().slice(0, 10);
+  return s;
+}
+/** เวลาจากไฟล์: 08:45 · 8.45 · เศษส่วนของวันจาก Excel (0.364583) */
+function attTime(v) {
+  const s = String(v === undefined || v === null ? '' : v).trim();
+  if (!s) return '';
+  if (/^0?\.\d+$/.test(s)) { const m = Math.round(Number(s) * 1440); return String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0'); }
+  const m = /(\d{1,2})[:.](\d{2})/.exec(s);
+  return m ? m[1].padStart(2, '0') + ':' + m[2] : s;
+}
+const ATT_WORDS = [[/ขาด|absent/i, 'absent'], [/ลา|leave|unpaid/i, 'unpaid'], [/กลับก่อน|ออกก่อน|early/i, 'early'], [/สาย|late/i, 'late']];
+/** อ่านแถวจากไฟล์เป็นรายการที่ส่งเข้า importAttendance */
+function attParse(rows) {
+  const norm = (c) => String(c || '').trim().toLowerCase();
+  let hi = -1, cols = null;
+  for (let i = 0; i < Math.min(rows.length, 10) && hi < 0; i++) {
+    const r = rows[i].map(norm);
+    const find = (re, not) => r.findIndex((c) => re.test(c) && !(not && not.test(c)));
+    const code = find(/รหัส|code|emp|^id$/, /ประชาชน|ภาษี/), date = find(/วันที่|date/);
+    if (code < 0 || date < 0) continue;
+    hi = i;
+    cols = { code, date, type: find(/ประเภท|type|รายการ/), minutes: find(/นาที|minute/), days: find(/^วัน$|จำนวนวัน|^days?$/),
+      tin: find(/เวลาเข้า|^เข้า|time ?in|check ?in|^in$/), tout: find(/เวลาออก|^ออก|time ?out|check ?out|^out$/), note: find(/หมายเหตุ|note|remark/) };
+  }
+  if (hi < 0) throw new DomainError('ATT_FILE_HEADER', 'ไม่พบหัวคอลัมน์ "รหัสพนักงาน" และ "วันที่" ในไฟล์',
+    'ดาวน์โหลดแบบฟอร์มในหน้าต่างนี้ไปกรอก หรือแก้หัวคอลัมน์ของไฟล์จากเครื่องสแกนนิ้วให้ตรง');
+  const clock = cols.tin >= 0 || cols.tout >= 0;
+  if (!clock && cols.type < 0) throw new DomainError('ATT_FILE_HEADER', 'ไม่พบคอลัมน์ "ประเภท" หรือ "เวลาเข้า/เวลาออก"');
+  const empOf = function (raw) {
+    const s = String(raw || '').trim();
+    return DB.employees.find((e) => e.code === s) || DB.employees.find((e) => e.nationalId && e.nationalId === s.replace(/\D/g, ''))
+      || DB.employees.find((e) => e.name === s) || null;
+  };
+  const out = [], bad = [];
+  rows.slice(hi + 1).forEach(function (r, k) {
+    const row = (r.line || hi + 2 + k);
+    const cell = (i) => (i >= 0 ? r[i] : '');
+    const raw = String(cell(cols.code) || '').trim();
+    if (!raw && !String(cell(cols.date) || '').trim()) return;
+    const e = empOf(raw);
+    const code = e ? e.code : raw;
+    const date = attDate(cell(cols.date));
+    if (clock) {
+      clockToAttendance(code, date, attTime(cell(cols.tin)), attTime(cell(cols.tout))).forEach((x) => out.push(Object.assign({ row }, x)));
+      return;
+    }
+    const w = ATT_WORDS.find((p) => p[0].test(String(cell(cols.type) || '')));
+    if (!w) { bad.push({ row, code, date, type: '', reason: 'ไม่รู้จักประเภท "' + String(cell(cols.type) || '') + '"' }); return; }
+    const t = w[1];
+    const dv = String(cell(cols.days) || '').trim();
+    out.push({ row, code, date, type: t, note: String(cell(cols.note) || '').trim(),
+      minutes: t === 'late' || t === 'early' ? String(cell(cols.minutes) || '').trim() : undefined,
+      days: t === 'absent' || t === 'unpaid' ? (/ครึ่ง/.test(dv) ? 0.5 : dv === '' ? 1 : dv) : undefined });
+  });
+  return { rows: out, bad, format: clock ? 'clock' : 'event' };
+}
+async function attFileChosen(file) {
+  const box = document.getElementById('attPreview');
+  ATT_PENDING = null;
+  if (!box || !file) return;
+  box.innerHTML = '<div class="dim">กำลังอ่านไฟล์…</div>';
+  try {
+    const buf = await file.arrayBuffer();
+    const head = new Uint8Array(buf.slice(0, 2));
+    const rows = head[0] === 0x50 && head[1] === 0x4b ? await readXlsx(buf) : parseCsv(decodeText(buf));
+    const p = attParse(rows);
+    const dry = importAttendance(p.rows, true);
+    const bad = p.bad.concat(dry.bad).sort((a, b) => a.row - b.row);
+    ATT_PENDING = { rows: p.rows.filter((r) => !dry.bad.some((b) => b.row === r.row && b.type === r.type)), bad, name: file.name };
+    const byType = {};
+    dry.rows.forEach((r) => { byType[r.type] = (byType[r.type] || 0) + 1; });
+    box.innerHTML = '<div class="note' + (bad.length ? ' warn' : '') + '">' + esc(file.name) + ' · '
+      + (p.format === 'clock' ? 'เวลาเข้า-ออกจากเครื่องสแกนนิ้ว' : 'รายการขาด ลา สาย') + ' · นำเข้าได้ <b>' + dry.added + '</b> รายการ'
+      + (dry.added ? ' (' + Object.keys(byType).map((k) => ATT_TYPES[k].label + ' ' + byType[k]).join(' · ') + ')' : '')
+      + (bad.length ? ' · <b>ไม่ผ่าน ' + bad.length + ' แถว</b> จะถูกข้าม ' + btn('att:baddl', 'ดาวน์โหลดแถวที่ไม่ผ่าน') : '') + '</div>'
+      + (bad.length ? tbl({ cols: [{t:'แถว',a:'r'}, {t:'รหัส'}, {t:'วันที่'}, {t:'เหตุผล'}],
+          rows: bad.slice(0, 50).map((b) => [{c:String(b.row)}, b.code || '', b.date || '', b.reason]) }) : '');
+  } catch (err) {
+    box.innerHTML = '<div class="note warn">' + esc(err.message || String(err)) + (err.hint ? '<div class="dim">' + esc(err.hint) + '</div>' : '') + '</div>';
+  }
+}
+
+SCREENS.attendance = scAttendance;
+PAGE_INFO.attendance = { d:'บันทึกขาดงาน ลาไม่รับค่าจ้าง มาสาย และกลับก่อนเวลาของพนักงานรายวัน — ยอดของงวดไหลเข้าแผ่นงานเงินเดือนและหักตามเวลาที่ไม่ได้ทำงาน',
+  je: NOJE('ไม่ลงบัญชีเอง — หักในเงินเดือนตอนทำเงินเดือนของงวด') };
+FLOW_OF.attendance = 'pay';
+FLOWS.pay.steps.splice(FLOWS.pay.steps.indexOf('payroll'), 0, 'attendance');
+SCREEN_WORDS.attendance = 'ขาดงาน มาสาย สาย ลา ลาไม่รับค่าจ้าง กลับก่อน เวลาเข้างาน สแกนนิ้ว attendance late absent';
+CREATE_MENU.forEach(function (g) { if (g.s === 'เงินเดือน') g.items.unshift(['att:new', 'บันทึกขาด ลา มาสาย']); });
+
+EXTRA_DISPATCH.push(function (head, rest, arg) {
+  if (head === 'atttype') { STATE.attType = rest[0]; render(); return true; }
+  if (head === 'attemp') { STATE.filter = rest[0]; STATE.attType = 'all'; render(); return true; }
+  if (head !== 'att') return false;
+  if (rest[0] === 'new') {
+    if (STATE.screen !== 'attendance') { STATE.screen = 'attendance'; STATE.sel = null; render(); }
+    modalAttendance(null, STATE.filter && DB.employees.some((e) => e.code === STATE.filter) ? STATE.filter : null);
+  }
+  if (rest[0] === 'edit') { const x = attendanceList().find((r) => r.id === rest[1]); if (x) modalAttendance(x); }
+  if (rest[0] === 'del') {
+    const x = attendanceList().find((r) => r.id === rest[1]);
+    if (x && window.confirm('ลบรายการ' + ATT_TYPES[x.type].label + ' ' + attEmpName(x.code) + ' วันที่ ' + thDate(x.date) + '?')) {
+      runAction(function () { deleteAttendance(x.id); toast('ลบรายการแล้ว', 'ok', 'ยอดในแผ่นงานเงินเดือนเปลี่ยนตาม'); });
+    }
+  }
+  if (rest[0] === 'import') modalAttendanceImport();
+  if (rest[0] === 'tpl') masterDownload('attendance_' + rest[1] + '.csv', '﻿' + ATT_TEMPLATES[rest[1]].join('\r\n'));
+  if (rest[0] === 'baddl' && ATT_PENDING) {
+    masterDownload('attendance_rejected.csv', '﻿' + ['แถว,รหัสพนักงาน,วันที่,เหตุผล'].concat(ATT_PENDING.bad.map((b) =>
+      [b.row, b.code || '', b.date || '', b.reason].map(csvQuote).join(','))).join('\r\n'));
+  }
+  return true;
+});
+EXTRA_CHANGE.push(function (t) {
+  if (t.id === 'attFile') { attFileChosen(t.files && t.files[0]); return true; }
+  if (t.name === 'attType') {
+    const days = t.value === 'absent' || t.value === 'unpaid';
+    document.querySelectorAll('#modal [data-att-unit]').forEach((el) => { el.hidden = el.getAttribute('data-att-unit') !== (days ? 'days' : 'minutes'); });
+    attRateHint();
+    return true;
+  }
+  if (t.name === 'attCode' || t.name === 'attDays' || t.name === 'attDate') { attRateHint(); return true; }
+  return false;
+});
+EXTRA_INPUT.push(function (t) {
+  if (t.name === 'attMinutes') { attRateHint(); return true; }
+  return false;
 });
 
 

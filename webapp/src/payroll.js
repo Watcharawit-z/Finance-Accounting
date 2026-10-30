@@ -14,7 +14,8 @@
           exempt = เงินได้ที่ได้รับยกเว้นภาษี จ่ายให้พนักงานแต่ไม่เข้า ภ.ง.ด.1
           nontax = ไม่ใช่เงินได้ของพนักงาน (คืนค่าใช้จ่ายที่ออกแทนบริษัทตามใบเสร็จ)
           ded    = หักจากเงินที่จ่าย หลังคำนวณภาษีแล้ว ลงบัญชีตาม sub
-   unit   hours/days = กรอกเป็นชั่วโมงหรือวัน ระบบคิดเป็นเงินจากเงินเดือน · ไม่ระบุ = กรอกเป็นจำนวนเงิน
+   unit   hours/days/minutes = กรอกเป็นชั่วโมง วัน หรือนาที ระบบคิดเป็นเงินจากเงินเดือน · ไม่ระบุ = กรอกเป็นจำนวนเงิน
+   att    ชนิดในบันทึกเวลา (ขาด ลา มาสาย กลับก่อน) — ไม่ได้กรอกในแผ่นงาน ระบบใช้ยอดจากบันทึกเวลาของงวดนั้น
    mult   ตัวคูณค่าจ้างรายชั่วโมง [ตัวตั้ง, ตัวหาร] — เก็บเป็นเศษส่วนเพื่อไม่ใช้ทศนิยมลอยตัวกับเงิน
    sso    true = นับเป็น "ค่าจ้าง" ตาม พ.ร.บ.ประกันสังคม ม.5 (ค่าตอบแทนการทำงานในเวลาทำงานปกติ)
           ค่าล่วงเวลา โบนัส และเงินที่จ่ายครั้งเดียวไม่ใช่ค่าจ้าง จึงไม่คิดเงินสมทบ
@@ -30,7 +31,13 @@ const PAY_ITEMS = {
   leavePay:  { label:'ค่าจ้างวันลาพักร้อนที่ไม่ได้ใช้', group:'earn', sso:false },
   severance: { label:'ค่าชดเชยเลิกจ้าง ส่วนที่ต้องเสียภาษี', group:'earn', sso:false },
   adjust:    { label:'ปรับปรุงเงินได้ที่จ่ายผิดในงวดก่อน (+/−)', group:'earn', sso:false, signed:true },
-  unpaid:    { label:'หักขาดงาน/ลาไม่รับค่าจ้าง', unitLabel:'วัน', group:'reduce', unit:'days', sso:true, offcycle:false },
+  /* หักตามเวลาที่ไม่ได้ทำงานจริง (ไม่ทำงาน ไม่ได้ค่าจ้าง) — ลดเงินได้ ฐานประกันสังคม และฐานกองทุนสำรองฯ
+     ไม่ใช่ค่าปรับ: ม.76 พ.ร.บ.คุ้มครองแรงงานห้ามหักค่าจ้างเป็นค่าปรับ ระบบจึงคิดตามสัดส่วนเวลาเท่านั้น
+     unpaid คือรายการเดิม "หักขาดงาน/ลาไม่รับค่าจ้าง" — แผ่นงานที่บันทึกไว้แล้วยังหักเท่าเดิม */
+  absent:    { label:'หักขาดงาน', unitLabel:'วัน', group:'reduce', unit:'days', sso:true, offcycle:false, att:'absent' },
+  unpaid:    { label:'ลาไม่รับค่าจ้าง', unitLabel:'วัน', group:'reduce', unit:'days', sso:true, offcycle:false, att:'unpaid' },
+  late:      { label:'หักมาสาย', unitLabel:'นาที', group:'reduce', unit:'minutes', sso:true, offcycle:false, att:'late' },
+  early:     { label:'หักกลับก่อนเวลา', unitLabel:'นาที', group:'reduce', unit:'minutes', sso:true, offcycle:false, att:'early' },
   severanceExempt: { label:'ค่าชดเชยเลิกจ้าง ส่วนที่ได้รับยกเว้นภาษี', group:'exempt' },
   reimburse: { label:'คืนค่าใช้จ่ายที่ออกแทนบริษัทตามใบเสร็จ (ไม่ใช่เงินได้)', group:'nontax' },
   loan:      { label:'หักคืนเงินกู้/เงินเบิกล่วงหน้า', group:'ded', sub:'other_receivable' },
@@ -118,6 +125,34 @@ function employedSpan(e, period) {
   return { from, to, days: dayCount(from, to), dim: Number(end.slice(8)), full: from === start && to === end };
 }
 const spanSalary = (e, span) => (span.full ? e.salary : round2(mulDiv(e.salary, span.days, span.dim)));
+
+/* ===================================================================
+   อัตราหักขาดงาน ลาไม่รับค่าจ้าง มาสาย กลับก่อนเวลา
+   ค่าจ้างรายวัน = เงินเดือน ÷ ตัวหาร (ตั้งค่าได้: 30 วัน · จำนวนวันของเดือนนั้น · วันทำงานต่อเดือนที่บริษัทกำหนด)
+   ค่าจ้างรายนาที = ค่าจ้างรายวัน ÷ ชั่วโมงทำงานปกติต่อวัน ÷ 60
+   คิดจากเงินเดือนเต็มเสมอ (คนที่เข้า/ออกกลางเดือนก็ใช้อัตราเดียวกัน) และคำนวณเป็นเศษส่วนครั้งเดียว ปัดสตางค์ตอนจบ
+   =================================================================== */
+const DAY_BASIS = { d30: 'เงินเดือน ÷ 30 วัน', month: 'เงินเดือน ÷ จำนวนวันของเดือนนั้น', work: 'เงินเดือน ÷ วันทำงานต่อเดือน' };
+function dayDivisor(period) {
+  const b = payrollSetting('dayBasis') || 'd30';
+  if (b === 'month') return Number(endOfMonth(period + '-01').slice(8));
+  if (b === 'work') return payrollSetting('workDays') || 26;
+  return 30;
+}
+/** นาทีทำงานปกติต่อวัน (ชั่วโมงทำงานปกติ × 60) */
+const workMinutes = () => Math.round((payrollSetting('hoursPerDay') || 8) * 60);
+/** เงินที่หักตามเวลาที่ไม่ได้ทำงาน — unit 'days' หรือ 'minutes' */
+function timeDeduction(salary, period, unit, q) {
+  if (!q || !salary) return 0;
+  const div = dayDivisor(period) * (unit === 'minutes' ? workMinutes() : 1);
+  return round2(mulDiv(salary, M(String(q)), div * S));
+}
+/** อัตราที่แสดงให้ผู้ใช้เห็น — ต่อวัน ต่อชั่วโมง ต่อนาที */
+function payDeductRates(e, period) {
+  return { perDay: timeDeduction(e.salary, period, 'days', 1), perMinute: timeDeduction(e.salary, period, 'minutes', 1),
+    perHour: timeDeduction(e.salary, period, 'minutes', 60), divisor: dayDivisor(period), basis: payrollSetting('dayBasis') || 'd30',
+    minutes: workMinutes() };
+}
 function employedInYear(e, year) {
   if (e.active === false && !e.left) return false;
   return (!e.hired || e.hired <= year + '-12-31') && (!e.left || e.left >= year + '-01-01');
@@ -208,7 +243,10 @@ function paySlipCalc(e, d, L) {
   const regular = d.kind === 'regular';
   const span = regular ? employedSpan(e, d.period) : null;
   const base = span ? spanSalary(e, span) : 0;
-  const qty = (t) => (L[t] !== undefined ? L[t] : (t === 'ot' && regular ? (e.otHours || 0) : 0));
+  /* ขาด ลา มาสาย กลับก่อน ที่ไม่ได้กรอกในแผ่นงาน ใช้ยอดจากบันทึกเวลาของงวด (มาสายหักหลังหักนาทีผ่อนผันแล้ว) */
+  const att = regular ? attendanceSummary(e.code, d.period) : null;
+  const fromLog = (t) => (att && PAY_ITEMS[t].att ? att.qty[PAY_ITEMS[t].att] : 0);
+  const qty = (t) => (L[t] !== undefined ? L[t] : PAY_ITEMS[t].att ? fromLog(t) : (t === 'ot' && regular ? (e.otHours || 0) : 0));
   const hoursPerDay = payrollSetting('hoursPerDay') || 8;
   const earn = [], ded = [];
   let unpaid = 0, ot = 0, otHours = 0, variable = 0, ssoExtra = 0, exempt = 0, reimburse = 0, loan = 0, otherDed = 0;
@@ -222,18 +260,23 @@ function paySlipCalc(e, d, L) {
       /* ค่าจ้างรายชั่วโมง = เงินเดือน ÷ 30 ÷ ชั่วโมงทำงานปกติต่อวัน (พ.ร.บ.คุ้มครองแรงงาน) */
       amount = round2(mulDiv(e.salary, M(String(q)) * def.mult[0], 30 * hoursPerDay * S * def.mult[1]));
       ot += amount; otHours += q;
-    } else if (def.unit === 'days') {
-      amount = round2(mulDiv(e.salary, M(String(q)), 30 * S));      // ค่าจ้างรายวัน = เงินเดือน ÷ 30
+    } else if (def.unit === 'days' || def.unit === 'minutes') {
+      amount = timeDeduction(e.salary, d.period, def.unit, q);       // ค่าจ้างรายวัน = เงินเดือน ÷ ตัวหาร (ตั้งค่า)
     } else amount = q;
     if (!amount) return;
     const row = { type: t, label: def.label, qty: def.unit ? q : null, unit: def.unitLabel || null, amount };
+    /* มาสาย/กลับก่อนจากบันทึกเวลา บอกจำนวนครั้งด้วย (พิมพ์บนสลิป) · src บอกว่ามาจากบันทึกเวลาหรือกรอกเอง */
+    if (def.att) {
+      row.src = L[t] !== undefined ? 'sheet' : 'log';
+      if (row.src === 'log' && (t === 'late' || t === 'early')) row.times = att[t].times;
+    }
     if (def.group === 'earn') { variable += amount; if (def.sso) ssoExtra += amount; earn.push(row); }
     else if (def.group === 'reduce') { unpaid += amount; ded.push(row); }
     else if (def.group === 'exempt') { exempt += amount; earn.push(row); }
     else if (def.group === 'nontax') { reimburse += amount; earn.push(row); }
     else { if (t === 'loan') loan += amount; else otherDed += amount; ded.push(row); }
   });
-  if (unpaid > base) error = 'หักขาดงาน ' + fmt(unpaid) + ' บาท เกินเงินเดือนของงวดนี้ ' + fmt(base) + ' บาท';
+  if (unpaid > base) error = 'หักขาด ลา มาสาย ' + fmt(unpaid) + ' บาท เกินเงินเดือนของงวดนี้ ' + fmt(base) + ' บาท';
   const regularIncome = base - unpaid;
   const taxable = regularIncome + variable;
 
@@ -279,6 +322,9 @@ function paySlipCalc(e, d, L) {
     code: e.code, name: e.name, dept: e.dept, nationalId: e.nationalId || null, ssoNumber: e.ssoNumber || null,
     fullSalary: e.salary, days: span ? span.days : 0, dim: span ? span.dim : 0, prorated: !!(span && !span.full),
     salary: base, unpaid, ot, otHours, variable, taxable, exempt, reimburse, gross,
+    /* จำนวนขาด ลา มาสาย ที่ใช้คิดในสลิปนี้ — รายงานสรุปการมาทำงานใช้ */
+    time: { absent: qty('absent'), unpaid: qty('unpaid'), late: qty('late'), early: qty('early'),
+      lateTimes: att && L.late === undefined ? att.late.times : null, earlyTimes: att && L.early === undefined ? att.early.times : null },
     sso, ssoEr, ssoWage, ssoBase: ssoWage ? Math.min(Math.max(ssoWage, ssoR.floor), ssoR.ceiling) : 0,
     pvd, pvdEr, pvdWage, pit, loan, otherDed, net, earn, ded, pay, error,
     calc: { year, prevIncome: ytd.income, prevTax: ytd.tax, future: fut.months, futureIncome: fut.income,
@@ -322,10 +368,36 @@ function saveSettingsPayroll(input) {
   if (!(hours > 0 && hours <= 12)) {
     throw new DomainError('HOURS_PER_DAY_RANGE', 'ชั่วโมงทำงานปกติต่อวันต้องอยู่ระหว่าง 1 ถึง 12 ชั่วโมง');
   }
+  /* ขาด ลา มาสาย — ตัวหารค่าจ้างรายวัน นาทีผ่อนผันมาสายต่อครั้ง เวลาเข้า-ออกงาน (ใช้แปลงไฟล์เครื่องสแกนนิ้ว)
+     ไม่ส่งมา = คงค่าเดิม */
+  const given = (k) => input[k] !== undefined && input[k] !== null && String(input[k]).trim() !== '';
+  const basis = given('dayBasis') ? input.dayBasis : payrollSetting('dayBasis') || 'd30';
+  if (!DAY_BASIS[basis]) throw new DomainError('DAY_BASIS_INVALID', 'วิธีคิดค่าจ้างรายวันไม่ถูกต้อง');
+  const workDays = given('workDays') ? Number(input.workDays) : payrollSetting('workDays') || 26;
+  if (basis === 'work' && !(Number.isInteger(workDays) && workDays >= 20 && workDays <= 31)) {
+    throw new DomainError('WORK_DAYS_RANGE', 'วันทำงานต่อเดือนต้องเป็นจำนวนเต็ม 20 ถึง 31 วัน');
+  }
+  const grace = given('lateGrace') ? Number(input.lateGrace) : payrollSetting('lateGrace') || 0;
+  if (!(Number.isInteger(grace) && grace >= 0 && grace <= 60)) {
+    throw new DomainError('LATE_GRACE_RANGE', 'นาทีผ่อนผันมาสายต้องเป็นจำนวนเต็ม 0 ถึง 60 นาที');
+  }
+  const hhmm = function (k, def) {
+    const v = given(k) ? String(input[k]).trim() : payrollSetting(k) || def;
+    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(v)) throw new DomainError('WORK_TIME_INVALID', 'เวลาต้องอยู่ในรูป ชม.:นาที เช่น 08:30');
+    return v;
+  };
+  const workStart = hhmm('workStart', '08:30'), workEnd = hhmm('workEnd', '17:30');
+  if (workEnd <= workStart) throw new DomainError('WORK_TIME_INVALID', 'เวลาเลิกงานต้องหลังเวลาเข้างาน');
   payrollSettingSet('ssoAccount', ssoAccount || null);
   payrollSettingSet('ssoBranch', String(input.ssoBranch || '').trim() || '000000');
   payrollSettingSet('hoursPerDay', hours);
-  audit('payroll', 'settings', 'update', null, { ssoAccount: ssoAccount || '—', hoursPerDay: hours });
+  payrollSettingSet('dayBasis', basis);
+  payrollSettingSet('workDays', workDays);
+  payrollSettingSet('lateGrace', grace);
+  payrollSettingSet('workStart', workStart);
+  payrollSettingSet('workEnd', workEnd);
+  audit('payroll', 'settings', 'update', null, { ssoAccount: ssoAccount || '—', hoursPerDay: hours, dayBasis: basis,
+    workDays, lateGrace: grace, workStart, workEnd });
   return DB.settings.payroll;
 }
 
@@ -411,10 +483,12 @@ function setPayLine(id, code, values, skip) {
     }
     if (def.unit) {
       const n = Number(String(raw).replace(/,/g, ''));
-      if (!isFinite(n) || n < 0 || n > 744) {
-        throw new DomainError('PAY_QTY_INVALID', e.name + ': ' + def.label + ' ต้องเป็นจำนวน' + def.unitLabel + 'ตั้งแต่ 0 ขึ้นไป');
+      const max = def.unit === 'minutes' ? 31 * workMinutes() : 744;
+      if (!isFinite(n) || n < 0 || n > max) {
+        throw new DomainError('PAY_QTY_INVALID', e.name + ': ' + def.label + ' ต้องเป็นจำนวน' + def.unitLabel + 'ตั้งแต่ 0 ถึง ' + max.toLocaleString('en-US'));
       }
       if (def.unit === 'days' && n > 31) throw new DomainError('PAY_QTY_INVALID', e.name + ': ' + def.label + ' เกิน 31 วัน');
+      if (def.unit === 'minutes' && Math.round(n) !== n) throw new DomainError('PAY_QTY_INVALID', e.name + ': ' + def.label + ' ต้องเป็นนาทีเต็ม');
       L[t] = Math.round(n * 100) / 100;
     } else {
       const v = M(String(raw));
@@ -436,6 +510,143 @@ function deletePayDraft(id) {
   return d;
 }
 
+/* ===================================================================
+   บันทึกเวลา — ขาดงาน ลาไม่รับค่าจ้าง มาสาย กลับก่อนเวลา รายวัน
+   ใส่ทีละรายการ หรือนำเข้าจากไฟล์ (รายการขาด/ลา/สาย หรือเวลาเข้า-ออกจากเครื่องสแกนนิ้ว)
+   ยอดของงวดไหลเข้าแผ่นงานเงินเดือนเอง (ช่องที่ไม่ได้กรอกทับ) · มาสายหักหลังหักนาทีผ่อนผันต่อครั้ง
+   งวดที่ทำเงินเดือนแล้วแก้บันทึกเวลาไม่ได้ ตัวเลขในสลิปกับบันทึกจะได้ตรงกันเสมอ — ยกเลิกงวดแล้วแก้ได้
+   =================================================================== */
+const ATT_TYPES = {
+  absent: { label: 'ขาดงาน', unit: 'days' },
+  unpaid: { label: 'ลาไม่รับค่าจ้าง', unit: 'days' },
+  late:   { label: 'มาสาย', unit: 'minutes' },
+  early:  { label: 'กลับก่อนเวลา', unit: 'minutes' },
+};
+const attendanceList = () => DB.attendance || (DB.attendance = []);
+/** ยอดของพนักงานหนึ่งคนในงวด — qty คือจำนวนที่ใช้หัก (มาสายหลังหักนาทีผ่อนผันแล้ว) */
+function attendanceSummary(code, period) {
+  const grace = payrollSetting('lateGrace') || 0;
+  const entries = attendanceList().filter((x) => x.code === code && x.date.slice(0, 7) === period);
+  const out = { entries, absent: 0, unpaid: 0, late: { times: 0, minutes: 0, deduct: 0 }, early: { times: 0, minutes: 0, deduct: 0 } };
+  entries.forEach(function (x) {
+    if (x.type === 'absent' || x.type === 'unpaid') out[x.type] = Math.round((out[x.type] + x.days) * 100) / 100;
+    else {
+      const o = out[x.type];
+      o.times += 1; o.minutes += x.minutes;
+      o.deduct += x.type === 'late' ? Math.max(0, x.minutes - grace) : x.minutes;
+    }
+  });
+  out.qty = { absent: out.absent, unpaid: out.unpaid, late: out.late.deduct, early: out.early.deduct };
+  return out;
+}
+/** งวดที่แก้บันทึกเวลาได้ — งวดบัญชียังเปิด และยังไม่ได้ทำเงินเดือนปกติของเดือนนั้น */
+function assertAttendanceOpen(period) {
+  const p = DB.periods.find((x) => x.code === period);
+  if (!p) throw new DomainError('PERIOD_NOT_FOUND', 'ยังไม่ได้สร้างงวดบัญชี ' + period, 'สร้างรอบบัญชีในหน้าตั้งค่าก่อน');
+  if (p.status !== 'open') throw new DomainError('PERIOD_CLOSED', 'งวด ' + thPeriod(period) + ' ปิดแล้ว แก้บันทึกเวลาไม่ได้');
+  const run = activeRegularRun(period);
+  if (run) {
+    throw new DomainError('ATTENDANCE_PERIOD_PAID', 'ทำเงินเดือนงวด ' + thPeriod(period) + ' แล้ว (' + (run.no || run.entryNo) + ') แก้บันทึกเวลาไม่ได้',
+      'ยกเลิกงวดเงินเดือนก่อนแล้วแก้ หรือใส่ยอดที่ตกหล่นเป็นรายการปรับปรุงในงวดถัดไป');
+  }
+}
+/** เพิ่มหรือแก้หนึ่งรายการ — input = { id?, code, date, type, minutes | days, note } */
+function saveAttendance(input) {
+  const e = DB.employees.find((x) => x.code === input.code);
+  if (!e) throw new DomainError('EMPLOYEE_NOT_FOUND', 'ไม่พบพนักงานรหัส ' + (input.code || '—'));
+  const def = ATT_TYPES[input.type];
+  if (!def) throw new DomainError('ATTENDANCE_TYPE_INVALID', 'ประเภทต้องเป็น ขาดงาน ลาไม่รับค่าจ้าง มาสาย หรือกลับก่อนเวลา');
+  const date = String(input.date || '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || isNaN(Date.parse(date))) throw new DomainError('DATE_REQUIRED', 'ต้องระบุวันที่');
+  const old = input.id ? attendanceList().find((x) => x.id === input.id) : null;
+  if (input.id && !old) throw new DomainError('ATTENDANCE_NOT_FOUND', 'ไม่พบรายการนี้ อาจถูกลบไปแล้ว');
+  if ((e.hired && date < e.hired) || (e.left && date > e.left)) {
+    throw new DomainError('ATTENDANCE_NOT_EMPLOYED', e.name + ' ไม่ได้เป็นพนักงานในวันที่ ' + thDate(date),
+      'เริ่มงาน ' + (e.hired ? thDate(e.hired) : '—') + (e.left ? ' · พ้นสภาพ ' + thDate(e.left) : ''));
+  }
+  if (old) assertAttendanceOpen(old.date.slice(0, 7));
+  assertAttendanceOpen(date.slice(0, 7));
+  const rec = { id: old ? old.id : null, code: e.code, date, type: input.type, note: String(input.note || '').trim().slice(0, 200),
+    src: old ? old.src : input.src || 'manual' };
+  if (def.unit === 'days') {
+    const d = Number(input.days === undefined || input.days === '' ? 1 : input.days);
+    if (d !== 1 && d !== 0.5) throw new DomainError('ATTENDANCE_DAYS_INVALID', def.label + 'ต่อวันใส่ได้ 1 วัน หรือครึ่งวัน (0.5)');
+    rec.days = d;
+  } else {
+    const m = Number(String(input.minutes === undefined ? '' : input.minutes).replace(/,/g, ''));
+    if (!(Number.isInteger(m) && m >= 1 && m <= workMinutes())) {
+      throw new DomainError('ATTENDANCE_MINUTES_INVALID', def.label + ' ต้องเป็นนาทีเต็ม 1 ถึง ' + workMinutes() + ' นาที (ทั้งวันทำงาน)',
+        'ถ้าไม่มาทั้งวัน ให้บันทึกเป็นขาดงาน');
+    }
+    rec.minutes = m;
+  }
+  /* กันบันทึกซ้ำ/ขัดกันในวันเดียว: ประเภทเดียวกันซ้ำไม่ได้ · ขาด/ลารวมกันไม่เกิน 1 วัน · ขาดเต็มวันแล้วมาสาย/กลับก่อนไม่ได้ */
+  const same = attendanceList().filter((x) => x.code === e.code && x.date === date && x !== old);
+  if (same.some((x) => x.type === rec.type)) {
+    throw new DomainError('ATTENDANCE_DUPLICATE', e.name + ' มีรายการ' + def.label + 'วันที่ ' + thDate(date) + ' อยู่แล้ว', 'แก้รายการเดิมแทนการเพิ่มใหม่');
+  }
+  const dayOff = same.reduce((a, x) => a + (x.days || 0), 0) + (rec.days || 0);
+  if (dayOff > 1) throw new DomainError('ATTENDANCE_CONFLICT', e.name + ' ขาดงาน/ลาวันที่ ' + thDate(date) + ' รวมเกิน 1 วัน');
+  if (dayOff >= 1 && (same.some((x) => x.minutes) || rec.minutes)) {
+    throw new DomainError('ATTENDANCE_CONFLICT', e.name + ' ขาดงาน/ลาทั้งวันที่ ' + thDate(date) + ' จะมาสายหรือกลับก่อนในวันเดียวกันไม่ได้');
+  }
+  if (old) {
+    const before = { date: old.date, type: old.type, days: old.days, minutes: old.minutes };
+    Object.keys(old).forEach((k) => { delete old[k]; });
+    Object.assign(old, rec);
+    audit('attendance', old.id, 'update', before, { date, type: rec.type, days: rec.days, minutes: rec.minutes });
+    return old;
+  }
+  DB.seq.attendance = (DB.seq.attendance || 0) + 1;
+  rec.id = 'AT' + String(DB.seq.attendance).padStart(6, '0');
+  rec.at = new Date().toISOString();
+  attendanceList().push(rec);
+  audit('attendance', rec.id, 'create', null, { code: e.code, date, type: rec.type, days: rec.days, minutes: rec.minutes });
+  return rec;
+}
+function deleteAttendance(id) {
+  const list = attendanceList();
+  const i = list.findIndex((x) => x.id === id);
+  if (i < 0) throw new DomainError('ATTENDANCE_NOT_FOUND', 'ไม่พบรายการนี้ อาจถูกลบไปแล้ว');
+  assertAttendanceOpen(list[i].date.slice(0, 7));
+  const x = list[i];
+  list.splice(i, 1);
+  audit('attendance', id, 'delete', { code: x.code, date: x.date, type: x.type, days: x.days, minutes: x.minutes }, null);
+  return x;
+}
+/** นาทีจากเวลา "08:45" */
+const hhmmMinutes = (t) => { const m = /^(\d{1,2})[:.](\d{2})/.exec(String(t || '').trim()); return m ? Number(m[1]) * 60 + Number(m[2]) : null; };
+/** แปลงเวลาเข้า-ออกหนึ่งวันเป็นรายการ: เข้าหลังเวลาเข้างาน = มาสาย · ออกก่อนเวลาเลิกงาน = กลับก่อน · ไม่มีทั้งเข้าและออก = ขาดงาน
+    มีเวลาเข้าแต่ไม่มีเวลาออก (ลืมสแกน) ไม่เดาว่ากลับก่อน */
+function clockToAttendance(code, date, tin, tout) {
+  const start = hhmmMinutes(payrollSetting('workStart') || '08:30'), end = hhmmMinutes(payrollSetting('workEnd') || '17:30');
+  const a = hhmmMinutes(tin), b = hhmmMinutes(tout);
+  if (a === null && b === null) return [{ code, date, type: 'absent', days: 1, note: 'ไม่มีเวลาเข้า-ออก', src: 'clock' }];
+  const out = [];
+  if (a !== null && a > start) out.push({ code, date, type: 'late', minutes: Math.min(a - start, workMinutes()), note: 'เข้า ' + tin, src: 'clock' });
+  if (b !== null && b < end) out.push({ code, date, type: 'early', minutes: Math.min(end - b, workMinutes()), note: 'ออก ' + tout, src: 'clock' });
+  return out;
+}
+/** นำเข้าหลายรายการในชุดเดียว — แถวที่ผิดไม่เข้า (บอกเหตุผลรายแถว) แถวที่ถูกเข้าทั้งหมด
+    rows = [{ row, code, date, type, minutes, days, note }] (แปลงจากไฟล์แล้ว) · dryRun = ตรวจอย่างเดียว ไม่บันทึก */
+function importAttendance(rows, dryRun) {
+  const ok = [], bad = [];
+  try {
+    atomically(function () {
+      (rows || []).forEach(function (r) {
+        try { ok.push(Object.assign({}, saveAttendance(Object.assign({}, r, { id: null, src: r.src || 'import' })))); }
+        catch (err) {
+          if (!(err instanceof DomainError)) throw err;
+          bad.push({ row: r.row, code: r.code, date: r.date, type: r.type, reason: err.message });
+        }
+      });
+      /* ตรวจอย่างเดียว: ลองบันทึกจริงทุกแถว (จับรายการซ้ำในไฟล์เดียวกันได้ด้วย) แล้วคืนสภาพทั้งหมด */
+      if (dryRun) throw new DomainError('DRY_RUN', 'ตรวจอย่างเดียว');
+    });
+  } catch (err) { if (!(err instanceof DomainError) || err.code !== 'DRY_RUN') throw err; }
+  return { added: ok.length, rows: ok, bad, dryRun: !!dryRun };
+}
+
 /** ตัวอย่างผลของแผ่นงาน (ยังไม่ลงบัญชี) — แสดงบนหน้าจอและใช้ตอนลงบัญชีจริง ผลจึงตรงกันเสมอ */
 function payrollPreview(d) {
   const regular = d.kind === 'regular';
@@ -451,6 +662,16 @@ function payrollPreview(d) {
     if (s.pay && !e.nationalId) s.warn.push('ไม่มีเลขประจำตัวประชาชน — ภ.ง.ด.1 และ 50 ทวิ ต้องใช้');
     if (regular && !e.salary) s.warn.push('ยังไม่ได้กรอกเงินเดือนในทะเบียนพนักงาน');
     if (s.prorated) s.warn.push('ทำงาน ' + s.days + ' จาก ' + s.dim + ' วัน — คิดเงินเดือนตามสัดส่วน');
+    /* กรอกจำนวนในแผ่นงานทับบันทึกเวลา — เตือนให้เห็นว่าตัวเลขสองที่ไม่ตรงกัน */
+    if (regular) {
+      const att = attendanceSummary(e.code, d.period);
+      ['absent', 'unpaid', 'late', 'early'].forEach(function (t) {
+        if (L[t] !== undefined && att.entries.some((x) => x.type === t) && L[t] !== att.qty[t]) {
+          s.warn.push(PAY_ITEMS[t].label + ' กรอกในแผ่นงาน ' + L[t] + ' ' + PAY_ITEMS[t].unitLabel
+            + ' ไม่ใช้บันทึกเวลา (' + att.qty[t] + ' ' + PAY_ITEMS[t].unitLabel + ')');
+        }
+      });
+    }
     return s;
   });
   const paid = rows.filter((s) => s.pay);
