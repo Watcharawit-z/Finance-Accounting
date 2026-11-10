@@ -256,7 +256,8 @@ console.log('\n=== 9. ภาษีหัก ณ ที่จ่ายบนใ�
   C.updateTradeDoc('quotation', q.no, { whtCode: 'WHT_SERVICE' });
   const small = C.issueTradeDoc('quotation', { partnerCode: svcCust.code, date: '2026-07-01', whtCode: 'WHT_SERVICE',
     lines: [{ desc: 'ค่าบริการเล็กน้อย', qty: 1, price: '800' }] });
-  ok('★ มูลค่าต่ำกว่า 1,000 บาท ไม่ต้องหัก (ท.ป.4/2528)', small.wht === 0 && small.whtUnder);
+  ok('★ หัก ณ ที่จ่ายไม่มียอดขั้นต่ำ: ค่าบริการ 800 บาท หัก 3% = 24.00', small.wht === M('24') && small.whtBase === M('800')
+    && small.payNet === small.total - M('24') && !small.whtUnder, fmt(small.wht));
   C.setTradeDocStatus('quotation', q.no, 'approved');
   const so = C.convertTradeDoc('quotation', q.no, { date: '2026-07-02' });
   ok('ใบสั่งขายรับภาษีหัก ณ ที่จ่ายต่อจากใบเสนอราคา', so.whtCode === 'WHT_SERVICE' && so.wht === M('300'));

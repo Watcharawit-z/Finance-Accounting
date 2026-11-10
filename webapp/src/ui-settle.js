@@ -149,7 +149,7 @@ function refreshDepositSum() {
     const vat = val('taxCode') === 'VAT7' ? round2(pct(base, resolveRate('VAT7', date).rate)) : 0;
     const ch = val('channel') === 'e_wht' ? 'e_wht' : 'manual';
     const wb = val('whtBase') ? M(val('whtBase')) : base;
-    const wht = val('wht') && (side === 'ar' || base >= M('1000')) ? round2(pct(wb, resolveRate(val('wht'), date, { channel: ch }).rate)) : 0;
+    const wht = val('wht') ? round2(pct(wb, resolveRate(val('wht'), date, { channel: ch }).rate)) : 0;
     el.innerHTML = sumSpan('มูลค่า', base) + sumSpan(side === 'ar' ? 'ภาษีขาย' : 'ภาษีซื้อ', vat) + sumSpan('รวม', base + vat)
       + sumSpan(side === 'ar' ? 'ลูกค้าหัก ณ ที่จ่าย' : 'หัก ณ ที่จ่าย', wht) + sumSpan(side === 'ar' ? 'เงินเข้าบัญชี' : 'จ่ายสุทธิ', base + vat - wht);
   } catch (e) { el.textContent = ''; }
@@ -207,7 +207,7 @@ function modalVendorDeposit(partnerCode) {
       + field({ name:'method', label:'วิธีจ่าย', type:'select', value:'transfer', options:[['transfer','โอนเงิน'],['cheque','เช็ค'],['cash','เงินสด']] })
       + cashAccField('out', 'transfer', 'จ่ายจากบัญชี')
       + field({ name:'wht', label:'หักภาษี ณ ที่จ่าย (ประเภทเงินได้)', type:'select', value: first.whtCode || '', options: optWht(),
-          hint:'เติมจากทะเบียนผู้ขายให้ · จ่ายต่ำกว่า 1,000 บาทไม่ต้องหัก' })
+          hint:'เติมจากทะเบียนผู้ขายให้ · ไม่ต้องการหักเลือก "ไม่หัก"' })
       + field({ name:'whtBase', label:'ฐานภาษีหัก ณ ที่จ่าย', placeholder:'เว้นว่าง = เต็มจำนวนก่อนภาษี' })
       + field({ name:'channel', label:'ช่องทางนำส่งภาษี', type:'select', value:'manual',
           options:[['manual','หักและนำส่งเอง — ออก 50 ทวิ ให้'], ['e_wht','e-Withholding Tax — ธนาคารออกหลักฐานให้']] })

@@ -18,7 +18,7 @@ const ctx = new Function(src + '\nreturn {DB,buildSeed,trialBalance,balanceSheet
   'bahtText,equityStatement,saveCompany,companyGaps,verifyAgainstFile,importHealth,importFor,voidDocument,voidPreview,voidCheck,voidRun,runCheck,' +
   'creditableBase,matchBankTxn,reopenPeriod,repairDuplicateEntryNos,loadState,' +
   'tbFileChecks,importPreflight,readFileDates,decodeText,satangOf,defaultSet,importPackage,accBySub,acc,matchAccount,' +
-  'saveStockAdj,voidStockAdj,stockCard,stockSummary,stockValueAsOf,stockUnallocated,detectStockColumns,readStockFile,importOpeningStock};')();
+  'saveStockAdj,voidStockAdj,stockCard,stockSummary,stockValueAsOf,stockUnallocated,detectStockColumns,readStockFile,importOpeningStock,atomically};')();
 
 let pass = 0, fail = 0;
 function ok(label, cond, extra) {
@@ -585,9 +585,15 @@ console.log('\n=== 7.11 เอกสารชุดใหม่ที่ฝ่�
   throws('ลงบัญชีคุมเป็นค่าใช้จ่ายไม่ได้',
     () => ctx.recordExpense({ partnerCode:'VEN-0025', date:J, taxInvoiceNo:'X-1',
       lines:[{ desc:'ผิดบัญชี', qty:1, price:'2000', acc:'1131' }] }), 'EXPENSE_ACCOUNT_INVALID');
-  throws('ออก 50 ทวิ ยอดต่ำกว่า 1,000 บาทไม่ได้ (ไม่ต้องหัก)',
-    () => ctx.recordExpense({ partnerCode:'VEN-0012', date:J, requireWht:true, whtCode:'WHT_SERVICE',
-      lines:[{ desc:'ค่าบริการเล็กน้อย', qty:1, price:'800', acc:'5325', taxCode:'EXEMPT' }] }), 'WHT_BELOW_THRESHOLD');
+  /* หัก ณ ที่จ่ายไม่มียอดขั้นต่ำ — ลองในชุดที่ย้อนกลับทั้งหมด ตัวเลขของข้อถัดไปจึงไม่เปลี่ยน */
+  const dry = (fn) => { let r = null; try { ctx.atomically(() => { r = fn(); throw new Error('ROLLBACK'); }); } catch (e) { if (e.message !== 'ROLLBACK') throw e; } return r; };
+  const smallEx = dry(() => ctx.recordExpense({ partnerCode:'VEN-0012', date:J, requireWht:true, whtCode:'WHT_SERVICE',
+    lines:[{ desc:'ค่าบริการเล็กน้อย', qty:1, price:'800', acc:'5325', taxCode:'EXEMPT' }] }));
+  ok('★ ออก 50 ทวิ ยอดต่ำกว่า 1,000 บาทได้ (ไม่มีขั้นต่ำ): 800 หัก 3% = 24.00 จ่ายสุทธิ 776.00',
+    smallEx && smallEx.wht === ctx.M('24') && smallEx.net === ctx.M('776') && !!smallEx.certNo, smallEx && ctx.fmt(smallEx.wht));
+  const tinyEx = dry(() => ctx.recordExpense({ partnerCode:'VEN-0012', date:J, whtCode:'WHT_SERVICE',
+    lines:[{ desc:'ค่าบริการ', qty:1, price:'150', acc:'5325', taxCode:'EXEMPT' }] }));
+  ok('ค่าใช้จ่ายที่เลือกหัก ณ ที่จ่าย ยอด 150 บาท ก็หัก 4.50', tinyEx && tinyEx.wht === ctx.M('4.5'), tinyEx && ctx.fmt(tinyEx.wht));
   throws('ออก 50 ทวิ ต้องเลือกประเภทเงินได้',
     () => ctx.recordExpense({ partnerCode:'VEN-0012', date:J, requireWht:true,
       lines:[{ desc:'ค่าบริการ', qty:1, price:'5000', acc:'5325', taxCode:'EXEMPT' }] }), 'WHT_REQUIRED');
@@ -847,7 +853,7 @@ console.log('\n=== 7.14 ตัวเลขต้องไม่พลาด — 
   const A = new Function(src + '\nreturn {DB,buildSeed,issueInvoice,receivePayment,issueCreditNote,issueDebitNote,refundCustomer,' +
     'recordBill,payBill,recordExpense,fileVat,fileWht,runDepreciation,voidDocument,reconciliationChecks,aging,balBySub,' +
     'trialBalance,M,fmt,mulQty,mulDiv,invOutstanding,creditableBase,estimateBillWht,saveItem,createPaymentBatch,' +
-    'savePartner,openNextFiscalYear,unM};')();
+    'savePartner,openNextFiscalYear,unM,atomically};')();
   A.buildSeed();
   const X = A.DB, Mx = A.M;
   const recOk = (d) => { const r = A.reconciliationChecks(d || '2026-12-31'); return r.allPassed ? '' : r.checks.filter((c) => !c.ok).map((c) => c.label).join(' · '); };
@@ -944,12 +950,23 @@ console.log('\n=== 7.14 ตัวเลขต้องไม่พลาด — 
   const r8b = A.receivePayment({ date:'2026-10-23', invoiceNo: fr.no, whtCode:'WHT_SERVICE' });
   ok('★ รับครั้งสุดท้ายได้ฐานส่วนที่เหลือ ผลรวมฐานทุกครั้งเท่าค่าบริการเต็มพอดี', r8.whtBase + r8b.whtBase === fr.base, A.fmt(r8.whtBase + r8b.whtBase) + ' = ' + A.fmt(fr.base));
 
-  // 9) แบ่งจ่ายเพื่อเลี่ยงเกณฑ์ 1,000 บาทไม่ได้
+  // 9) แบ่งจ่ายหลายงวด หักตามสัดส่วนจนครบฐานทั้งใบ
   const sp = A.recordBill({ partnerCode: ven.code, date:'2026-10-24', vendorNo:'AUD-SPLIT-1',
     lines:[{ desc:'ค่าที่ปรึกษา', qty:1, price:'1500', expenseSub:'admin_expense' }], whtCode:'WHT_PROF' });
   const s1 = A.payBill({ date:'2026-10-25', billNo: sp.no, amount:'802.50', channel:'manual' });
   const s2 = A.payBill({ date:'2026-10-26', billNo: sp.no, channel:'manual' });
   ok('★ แบ่งจ่ายสองงวด งวดละไม่ถึง 1,000 บาท ยังต้องหัก ณ ที่จ่ายรวม 45.00', s1.wht + s2.wht === Mx('45'), A.fmt(s1.wht) + ' + ' + A.fmt(s2.wht));
+  /* ใบตั้งหนี้ยอดเล็ก (ไม่ถึง 1,000 บาท) จ่ายแล้วหัก ณ ที่จ่ายตามที่เลือกไว้ — ลองแล้วย้อนกลับ ตัวเลขข้อถัดไปไม่เปลี่ยน */
+  let smallPay = null;
+  try {
+    A.atomically(() => {
+      const b = A.recordBill({ partnerCode: ven.code, date:'2026-10-24', vendorNo:'AUD-SMALL-1',
+        lines:[{ desc:'ค่าบริการตรวจเช็ค', qty:1, price:'600', expenseSub:'admin_expense' }], whtCode:'WHT_PROF' });
+      smallPay = A.payBill({ date:'2026-10-25', billNo: b.no, channel:'manual' });
+      throw new Error('ROLLBACK');
+    });
+  } catch (e) { if (e.message !== 'ROLLBACK') throw e; }
+  ok('★ จ่ายใบตั้งหนี้ 600 บาท หัก ณ ที่จ่าย 3% = 18.00 (ไม่มียอดขั้นต่ำ)', smallPay && smallPay.wht === Mx('18'), smallPay && A.fmt(smallPay.wht));
 
   // 10) นำส่งภาษีเดือนธันวาคม
   const dbill = A.recordBill({ partnerCode: ven.code, date:'2026-12-10', vendorNo:'AUD-DEC-1',

@@ -1698,7 +1698,7 @@ function whtTotalsHtml(d, side) {
   if (!d.whtCode) return '';
   const who = side === 'customer' ? 'ลูกค้าหัก' : 'หัก';
   return '<div><span>' + who + 'ภาษี ณ ที่จ่าย ' + esc(d.whtRate) + '% (ฐาน ' + fmt(d.whtBase) + ')</span><b>' + fmt(d.wht) + '</b></div>'
-    + (d.whtUnder ? '<div><span class="dim">มูลค่าต่ำกว่า 1,000 บาท ไม่ต้องหัก</span><b></b></div>' : '')
+    + (d.whtUnder && !d.wht ? '<div><span class="dim">มูลค่าต่ำกว่า 1,000 บาท ไม่ต้องหัก</span><b></b></div>' : '')
     + '<div class="gt"><span>' + (side === 'customer' ? 'ยอดชำระสุทธิ' : 'ยอดจ่ายสุทธิ') + '</span><b>' + fmt(d.payNet) + '</b></div>';
 }
 function tradeDocDetail(kind, no) {

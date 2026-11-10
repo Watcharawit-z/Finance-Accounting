@@ -299,6 +299,11 @@ console.log('\n=== 14. เงินมัดจำจ่ายไม่มีใ
 {
   const vd = C.payVendorDeposit({ partnerCode: ven.code, date:'2026-07-03', base:'10000', taxCode:'NONE', whtCode:'WHT_SERVICE' });
   ok('ไม่มีภาษีซื้อ หัก 3% จากเงินที่จ่ายล่วงหน้า', vd.vat === 0 && vd.wht === M('300'));
+  /* หัก ณ ที่จ่ายไม่มียอดขั้นต่ำ — มัดจำ 500 บาทก็หัก (ลองแล้วย้อนกลับ ตัวเลขข้อถัดไปไม่เปลี่ยน) */
+  let small = null;
+  try { C.atomically(() => { small = C.payVendorDeposit({ partnerCode: ven.code, date:'2026-07-03', base:'500', taxCode:'NONE', whtCode:'WHT_SERVICE' }); throw new Error('ROLLBACK'); }); }
+  catch (e) { if (e.message !== 'ROLLBACK') throw e; }
+  ok('★ จ่ายมัดจำ 500 บาท หัก ณ ที่จ่าย 3% = 15.00 (ไม่มียอดขั้นต่ำ)', small && small.wht === M('15'), small && fmt(small.wht));
   throws('หักมัดจำที่ไม่มีใบกำกับเป็นมูลค่าในใบตั้งหนี้ไม่ได้', () => C.recordBill({ partnerCode: ven.code, date:'2026-07-04', vendorNo:'SV-FIN-2',
     lines:[{ desc:'งาน', qty:1, price:'30000', acc:'5325' }], deposits:[{ no: vd.no }] }), 'DEPOSIT_NOT_TAXABLE');
   const b = C.recordBill({ partnerCode: ven.code, date:'2026-07-04', vendorNo:'SV-FIN-2', lines:[{ desc:'งานติดตั้ง', qty:1, price:'30000', acc:'5325' }] });

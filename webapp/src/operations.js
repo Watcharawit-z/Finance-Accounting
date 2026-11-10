@@ -1076,8 +1076,7 @@ function tradeDocStatus(kind, d, asOf) {
 /* ---------- ภาษีหัก ณ ที่จ่ายบนเอกสาร (ใบเสนอราคา ใบสั่งขาย ใบสั่งซื้อ ใบกำกับ) ----------
    ยังไม่ลงบัญชี — บอกอีกฝ่ายว่าจะถูกหัก/ต้องหักเท่าไร และยอดชำระสุทธิเท่าไร ภาษีจริงคิดตอนรับ/จ่ายเงิน
    ฐานคือค่าบริการก่อนภาษีมูลค่าเพิ่ม ไม่รวมค่าสินค้าที่มีสต๊อก (ซื้อขายสินค้าไม่ต้องหัก)
-   มูลค่าทั้งใบต่ำกว่า 1,000 บาทไม่ต้องหัก (ท.ป.4/2528) */
-const WHT_DOC_MIN = M('1000');
+   ไม่มียอดขั้นต่ำ — เลือกประเภทเงินได้ไว้ก็หักทุกยอด ไม่ต้องการหักให้เลือก "ไม่หัก" */
 function docWht(whtCode, doc, date) {
   const code = whtCode && whtCode !== 'none' ? whtCode : null;
   if (!code) return { whtCode: null, whtRate: null, whtBase: 0, wht: 0, payNet: doc.total };
@@ -1089,9 +1088,9 @@ function docWht(whtCode, doc, date) {
   }, 0);
   /* doc.base หลังหักเงินมัดจำแล้ว (ใบกำกับ) — ส่วนของค่าบริการคิดตามสัดส่วนบรรทัด */
   const base = all ? round2(mulDiv(doc.base, all - goods, all)) : 0;
-  const under = doc.base < WHT_DOC_MIN;
-  const wht = under ? 0 : round2(pct(base, r.rate));
-  return { whtCode: code, whtRate: r.rate, whtBase: under ? 0 : base, wht, payNet: doc.total - wht, whtUnder: under || undefined };
+  const wht = round2(pct(base, r.rate));
+  /* whtUnder: undefined ล้างเครื่องหมาย "ต่ำกว่า 1,000 บาท" ของเอกสารเก่าเมื่อแก้ไข (Object.assign ทับค่าเดิม) */
+  return { whtCode: code, whtRate: r.rate, whtBase: base, wht, payNet: doc.total - wht, whtUnder: undefined };
 }
 
 /** คู่ค้าและบรรทัดของเอกสารก่อนลงบัญชี — ใช้ทั้งตอนออกใหม่และตอนแก้ไข
@@ -2831,13 +2830,8 @@ function recordExpense(input) {
       throw new DomainError('WHT_BASE_INVALID', 'ฐานภาษีหัก ณ ที่จ่าย ' + fmt(whtBase) + ' ต้องมากกว่าศูนย์และไม่เกินยอดก่อนภาษี ' + fmt(base),
         'ถ้าไม่ต้องหักเลย ให้เลือก "ไม่หักภาษี ณ ที่จ่าย"');
     }
-    /* จ่ายครั้งหนึ่งต่ำกว่า 1,000 บาทไม่ต้องหัก (ท.ป.4/2528) — กติกาเดียวกับการจ่ายชำระเจ้าหนี้ */
-    if (base >= M('1000')) { wht = round2(pct(whtBase, r.rate)); whtRate = r.rate; whtLabel = r.label; }
-    else if (input.requireWht) {
-      throw new DomainError('WHT_BELOW_THRESHOLD',
-        'ยอดจ่ายก่อนภาษี ' + fmt(base) + ' บาท ต่ำกว่า 1,000 บาท ไม่ต้องหักภาษี ณ ที่จ่าย',
-        'ตาม ท.ป.4/2528 การจ่ายครั้งหนึ่งต่ำกว่า 1,000 บาทไม่ต้องหัก ให้บันทึกเป็นค่าใช้จ่ายธรรมดา');
-    }
+    /* ไม่มียอดขั้นต่ำ — เลือกประเภทเงินได้ไว้ก็หักและออก 50 ทวิ ได้ทุกยอด */
+    wht = round2(pct(whtBase, r.rate)); whtRate = r.rate; whtLabel = r.label;
   }
   if (wht > 0 && !validTaxId(p.taxId || '')) {
     throw new DomainError('WHT_PAYEE_TAX_ID',
@@ -3658,8 +3652,7 @@ function receiptServiceShare(inv, gross) {
   if (gross >= invOutstanding(inv)) return Math.max(0, svc - prior);
   return Math.min(round2(mulDiv(svc, gross, due)), Math.max(0, svc - prior));
 }
-/** ภาษีหัก ณ ที่จ่ายของการจ่ายชำระเจ้าหนี้ครั้งนี้
-    เกณฑ์ 1,000 บาทดูจากมูลค่าทั้งใบ — แบ่งจ่ายหลายงวดเพื่อเลี่ยงการหักไม่ได้ (ท.ป.4/2528) */
+/** ภาษีหัก ณ ที่จ่ายของการจ่ายชำระเจ้าหนี้ครั้งนี้ — ไม่มียอดขั้นต่ำ แบ่งจ่ายกี่งวดก็หักตามสัดส่วนจนครบฐานทั้งใบ */
 function billWhtFor(bill, gross, date, channel, whtCode, baseOverride) {
   /* มูลค่าหลังใบลดหนี้จากผู้ขาย — ส่วนที่ผู้ขายลดให้ไม่ใช่เงินได้ของเขา */
   const cn = (DB.docs.vendorCreditNote || []).filter((c) => c.billNo === bill.no && liveDoc(c));
@@ -3676,7 +3669,7 @@ function billWhtFor(bill, gross, date, channel, whtCode, baseOverride) {
   /* ฐานที่ผู้ใช้ระบุเอง เช่น ค่าบริการ 4,000 + ค่าอะไหล่ 6,000 หักเฉพาะ 4,000 */
   const given = baseOverride !== undefined && baseOverride !== null && String(baseOverride).trim() !== '';
   const whtBase = given ? M(baseOverride) : share;
-  if (!whtCode || bill.base < M('1000') || whtBase <= 0) return { wht: 0, rate: null, base: whtBase, share };
+  if (!whtCode || whtBase <= 0) return { wht: 0, rate: null, base: whtBase, share };
   const r = resolveRate(whtCode, date, { channel });
   return { wht: round2(pct(whtBase, r.rate)), rate: r.rate, base: whtBase, share };
 }

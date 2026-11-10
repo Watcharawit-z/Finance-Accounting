@@ -179,7 +179,7 @@ function collectLines() {
   return out;
 }
 /** ตัวคิดหัก ณ ที่จ่ายของฟอร์มที่ใช้สูตรของตัวเอง (ค่าใช้จ่าย ตั้งหนี้: ฐานที่ระบุเอง ช่องทาง e-Withholding เงินมัดจำ)
-    ฟอร์มประกาศด้วย data-wht-calc="ชื่อ" · ตัวคิดรับ (ผล priceLines, บรรทัด, วันที่) คืน { wht, whtRate, whtUnder, payNet } หรือ null
+    ฟอร์มประกาศด้วย data-wht-calc="ชื่อ" · ตัวคิดรับ (ผล priceLines, บรรทัด, วันที่) คืน { wht, whtRate, payNet } หรือ null
     ไม่ประกาศ = ใช้ภาษีหัก ณ ที่จ่ายบนเอกสาร (ช่อง docWht) แบบเดิม */
 const LINE_WHT_CALC = {};
 /** ยอดท้ายเอกสาร คำนวณสดตอนพิมพ์ ด้วยสูตรเดียวกับตอนลงบัญชี (priceLines) — ผิดกติกา (ส่วนลดเกิน) ขึ้นเตือนแทนยอด */
@@ -238,7 +238,7 @@ function refreshLineSum() {
     }
     show('wht', !!w);
     if (w) {
-      set('tWht', fmt(w.wht) + ' (' + w.whtRate + '%' + (w.whtUnder ? ' · ต่ำกว่า 1,000 บาท ไม่ต้องหัก' : '') + ')');
+      set('tWht', fmt(w.wht) + ' (' + w.whtRate + '%)');
       set('tNet', fmt(w.payNet));
     }
     tot.classList.toggle('incl', P.mode === 'inclusive');
@@ -1293,9 +1293,8 @@ LINE_WHT_CALC.bill = function (r, lines, date) {
   if (!code) return null;
   const base = v.std + v.zero + v.exempt;
   const rate = resolveRate(code, date, { channel: 'manual' }).rate;
-  const under = base < M('1000');
-  const wht = under ? 0 : round2(pct(base, rate));
-  return { wht, whtRate: rate, whtUnder: under, payNet: v.total - wht };
+  const wht = round2(pct(base, rate));
+  return { wht, whtRate: rate, payNet: v.total - wht };
 };
 
 /** ฟอร์มตั้งหนี้ — บันทึกใบกำกับภาษีซื้อใหม่ หรือตั้งหนี้จากใบสั่งซื้อ (o.po) ที่เติมรายการ ราคา และหัวเอกสารให้ครบ */
@@ -1795,7 +1794,7 @@ function refreshGrBillSum() {
     const ded = previewDeposits('ap', v, date);
     const base = v.std + v.zero + v.exempt;
     const code = val('wht');
-    const wht = code && base >= M('1000') ? round2(pct(base, resolveRate(code, date, { channel: 'manual' }).rate)) : 0;
+    const wht = code ? round2(pct(base, resolveRate(code, date, { channel: 'manual' }).rate)) : 0;
     el.innerHTML = sumSpan('มูลค่าก่อนภาษี', full) + (ded ? sumSpan('หักเงินมัดจำ', ded) : '')
       + sumSpan(val('claim') === 'no' ? 'ภาษีซื้อต้องห้าม' : 'ภาษีซื้อ', v.vat) + sumSpan('ตั้งหนี้', v.total)
       + (code ? sumSpan('หัก ณ ที่จ่ายตอนจ่าย (ประมาณ)', wht) : '');
@@ -1819,7 +1818,7 @@ function poLinesForExpense(po) {
 }
 /** ใส่คุณสมบัติเพิ่มให้ช่องที่สร้างด้วย field() (เช่น data-pay hidden) */
 const fldAttr = (html, attrs) => html.replace(/<div class="fld-w/g, '<div ' + attrs + ' class="fld-w');
-/** หัก ณ ที่จ่ายของค่าใช้จ่าย — สูตรเดียวกับ recordExpense: ฐานทั้งใบก่อนภาษี (หรือฐานที่ระบุ) · ต่ำกว่า 1,000 บาทไม่หัก
+/** หัก ณ ที่จ่ายของค่าใช้จ่าย — สูตรเดียวกับ recordExpense: ฐานทั้งใบก่อนภาษี (หรือฐานที่ระบุ) · ไม่มียอดขั้นต่ำ
     จ่ายภายหลัง: ประมาณจากอัตราปกติ หักจริงตอนจ่าย */
 LINE_WHT_CALC.expense = function (r, lines, date) {
   const code = val('wht');
@@ -1829,9 +1828,8 @@ LINE_WHT_CALC.expense = function (r, lines, date) {
   const base = r.v.std + r.v.zero + r.v.exempt;
   const rate = resolveRate(code, date, { channel: ch }).rate;
   const wb = !later && val('whtBase') ? M(val('whtBase')) : base;
-  const under = base < M('1000');
-  const wht = under ? 0 : round2(pct(wb, rate));
-  return { wht, whtRate: rate, whtUnder: under, payNet: r.v.total - wht };
+  const wht = round2(pct(wb, rate));
+  return { wht, whtRate: rate, payNet: r.v.total - wht };
 };
 /** สลับจ่ายแล้ว/ยังไม่จ่าย — ช่องที่ไม่เกี่ยวซ่อนไว้ · เช็คแสดงเมื่อจ่ายด้วยเช็ค */
 function togglePayMode() {
@@ -1882,7 +1880,6 @@ function modalExpense(opts) {
       + docNotes(po, 'พิมพ์บนใบสำคัญจ่าย')
       + '</div>',
     submitLabel: o.requireWht ? 'จ่ายเงินและออกหนังสือรับรอง' : 'บันทึกและลงบัญชี',
-    note:'จ่ายครั้งหนึ่งต่ำกว่า 1,000 บาท ไม่ต้องหักภาษี ณ ที่จ่าย',
     onSubmit: function () {
       submitAction(function () {
         const later = !o.requireWht && val('payMode') === 'later';

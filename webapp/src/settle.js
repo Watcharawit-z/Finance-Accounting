@@ -191,8 +191,8 @@ function payVendorDeposit(input) {
   const vat = code === 'VAT7' ? round2(pct(base, resolveRate('VAT7', input.date).rate)) : 0;
   const total = base + vat;
   const channel = input.channel === 'e_wht' ? 'e_wht' : 'manual';
-  /* จ่ายครั้งหนึ่งต่ำกว่า 1,000 บาทไม่ต้องหัก (ท.ป.4/2528) */
-  const w = base >= M('1000') ? depositWht(input, base, total, channel) : { wht: 0, rate: null, base: 0, label: null };
+  /* หัก ณ ที่จ่ายไม่มียอดขั้นต่ำ */
+  const w = depositWht(input, base, total, channel);
   if (w.wht > 0 && !validTaxId(p.taxId || '')) {
     throw new DomainError('WHT_PAYEE_TAX_ID',
       'ผู้รับเงิน ' + p.name + ' ยังไม่มีเลขประจำตัวผู้เสียภาษีที่ถูกต้อง ออกหนังสือรับรองหัก ณ ที่จ่ายไม่ได้',

@@ -85,7 +85,8 @@ function whtSums(d, side) {
 /** หมายเหตุใต้ยอดรวม — ฐานภาษีหัก ณ ที่จ่ายเมื่อไม่เท่ามูลค่าทั้งใบ (มีค่าสินค้าปน) หรือยอดต่ำกว่าเกณฑ์ */
 function whtNote(d) {
   if (!d.whtCode) return '';
-  if (d.whtUnder) return '<div class="p-note">มูลค่าต่ำกว่า 1,000 บาท ไม่ต้องหักภาษี ณ ที่จ่าย</div>';
+  /* เอกสารที่ออกก่อนเลิกเกณฑ์ขั้นต่ำ 1,000 บาท — พิมพ์ตามที่บันทึกไว้ */
+  if (d.whtUnder && !d.wht) return '<div class="p-note">มูลค่าต่ำกว่า 1,000 บาท ไม่ต้องหักภาษี ณ ที่จ่าย</div>';
   return d.whtBase !== d.base ? '<div class="p-note">หักภาษี ณ ที่จ่าย ' + esc(d.whtRate) + '% จากค่าบริการ ' + pm(d.whtBase)
     + ' บาท (ไม่รวมค่าสินค้า)</div>' : '';
 }

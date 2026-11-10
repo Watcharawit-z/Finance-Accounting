@@ -247,6 +247,18 @@ const tid = (p12) => { let sum = 0; for (let i = 0; i < 12; i++) sum += Number(p
   T.ok('หนังสือรับรองมีคอลัมน์สถานะ เมนูพาไปเอกสารต้นทาง', items[0].act === 'open:expenses:' + cert.expenseNo);
   await page.keyboard.press('Escape');
 
+  console.log('\n[7.1] หัก ณ ที่จ่ายไม่มียอดขั้นต่ำ');
+  await page.evaluate(() => { STATE.screen = 'expenses'; render(); dispatch('new:expense'); });
+  await modalOpen();
+  await page.fill('#modal [name="l0_desc"]', 'ค่าบริการล้างแอร์');
+  await page.fill('#modal [name="l0_price"]', '800');
+  await page.selectOption('#modal [name="l0_tax"]', 'EXEMPT').catch(() => {});
+  await page.selectOption('#modal [name="wht"]', 'WHT_SERVICE');
+  await page.waitForTimeout(150);
+  T.ok('★ ค่าใช้จ่าย 800 บาท เลือกหัก 3% แล้วหักได้ 24.00 (ไม่มีขั้นต่ำ 1,000 บาท)', (await tot('tWht')).indexOf('24.00') === 0
+    && !/ไม่ต้องหัก/.test(await page.textContent('#modal')), await tot('tWht'));
+  await page.click('#modal [data-act="modal:close"]');
+
   console.log('\n[8] จอโทรศัพท์และยอดคุม');
   await page.setViewportSize({ width: 390, height: 844 });
   const over = await page.evaluate(() => ['purchaseorders', 'bills', 'expenses', 'goodsreceipts', 'payments', 'whtcert', 'paymentprep'].filter(function (s) {
