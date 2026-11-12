@@ -78,6 +78,14 @@ async function init() {
         saved_at    timestamptz NOT NULL DEFAULT now(),
         PRIMARY KEY (book, version)
       )`);
+    /* รหัสผ่านที่ตั้งจากในแอป (รหัสทีมบัญชี) — เก็บเฉพาะค่าแฮช scrypt + salt ไม่เก็บรหัสจริง */
+    await c.query(`
+      CREATE TABLE IF NOT EXISTS financii_auth (
+        key         text PRIMARY KEY,
+        hash        text NOT NULL,
+        salt        text NOT NULL,
+        updated_at  timestamptz NOT NULL DEFAULT now()
+      )`);
     /* ค่าแอดรายวัน (ข้อมูลของเจ้าของ) — แยกจากสมุดบัญชี ผู้ที่เข้าด้วยรหัสร่วมจึงไม่ได้รับข้อมูลนี้เลย
        หนึ่งแถว = ร้าน/บัญชีโฆษณาหนึ่งร้าน หนึ่งวัน (วันตามเวลาไทย) ส่งซ้ำวันเดิม = แทนที่ */
     await c.query(`
@@ -262,6 +270,19 @@ async function write(book, expectedVersion, data) {
   });
 }
 
+/* ---------- รหัสผ่านที่ตั้งจากในแอป ---------- */
+async function authGet(key) {
+  return withClient(async function (c) {
+    const r = await c.query('SELECT hash, salt, updated_at FROM financii_auth WHERE key = $1', [key]);
+    return r.rows.length ? { hash: r.rows[0].hash, salt: r.rows[0].salt, updatedAt: r.rows[0].updated_at } : null;
+  });
+}
+async function authSet(key, hash, salt) {
+  return withClient((c) => c.query(`
+    INSERT INTO financii_auth (key, hash, salt, updated_at) VALUES ($1, $2, $3, now())
+    ON CONFLICT (key) DO UPDATE SET hash = EXCLUDED.hash, salt = EXCLUDED.salt, updated_at = now()`, [key, hash, salt]));
+}
+
 /* ---------- ค่าแอดรายวัน ---------- */
 const MAX_AD_ITEMS = 2000;
 /** ตรวจรายการก่อนเขียน — ผิดแถวเดียวไม่รับทั้งชุด บอกแถวที่ผิด · amount null = ลบวันนั้น (เฉพาะที่อนุญาต) */
@@ -335,4 +356,4 @@ async function healthy() {
 }
 
 module.exports = { enabled, init, read, write, healthy, listBooks, removeBook, listTrash, restoreTrash, purgeTrash,
-  adsList, adsUpsert, cleanAdItems, validBook, DEFAULT_BOOK, BOOK: DEFAULT_BOOK };
+  adsList, adsUpsert, cleanAdItems, authGet, authSet, validBook, DEFAULT_BOOK, BOOK: DEFAULT_BOOK };

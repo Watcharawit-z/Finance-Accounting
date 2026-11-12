@@ -2489,10 +2489,11 @@ function dispatch(act) {
   }
   if (head === 'pass') {
     const code = val('passcode');
-    syncUnlock(code).then(function (ok) {
+    const remember = !!(document.querySelector('[name="passRemember"]') || {}).checked;
+    syncUnlock(code, remember).then(function (ok) {
       STATE.passWrong = !ok;
       render();
-      if (ok) toast('เปิดสมุดบัญชีแล้ว', 'ok', 'ข้อมูลชุดนี้เก็บบนเซิร์ฟเวอร์');
+      if (ok) toast('เข้าสู่ระบบแล้ว', 'ok', SYNC.role === 'owner' ? 'สิทธิ์เจ้าของ' : 'สิทธิ์ทีมบัญชี');
     });
     return;
   }
@@ -3149,10 +3150,7 @@ async function boot() {
   const onServer = await syncConfig();
 
   if (onServer) {
-    try {
-      SYNC.passcode = localStorage.getItem(PASS_KEY)
-        || localStorage.getItem('duly.passcode') || '';    // รับของที่เก็บไว้ใต้ชื่อเดิมด้วย
-    } catch (e) { SYNC.passcode = ''; }
+    SYNC.passcode = passLoad();
     if (SYNC.needsPasscode && !SYNC.passcode) {
       setStatus('locked');
       render();

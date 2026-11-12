@@ -14,6 +14,23 @@ const OWNER_PASSCODE = process.env.APP_OWNER_PASSCODE && process.env.APP_OWNER_P
   ? String(process.env.APP_OWNER_PASSCODE) : '';
 /* กุญแจสำหรับระบบอื่นส่งค่าแอดเข้ามา (เช่น SellerHub) — แยกจากรหัสเจ้าของ ไม่ต้องฝากรหัสเจ้าของไว้ในระบบอื่น */
 const INGEST_KEY = String(process.env.APP_INGEST_KEY || '');
+/* รหัสทีมบัญชีที่เจ้าของตั้งจากหน้าตั้งค่า (ใช้เมื่อไม่ได้ตั้ง APP_PASSCODE) — เก็บแฮชไว้ในฐานข้อมูล อ่านมาไว้ในหน่วยความจำตอนเริ่ม */
+let TEAM = null;          // { hash, salt } | null
+const scrypt = (pass, salt) => crypto.scryptSync(String(pass), Buffer.from(salt, 'hex'), 32).toString('hex');
+const teamPassSet = () => Boolean(PASSCODE || TEAM);
+/* scrypt ช้าโดยตั้งใจ — จำผลตรวจของรหัสที่เพิ่งตรวจไว้ (เก็บแค่แฮช sha256 ของรหัส) ไม่ต้องคิดใหม่ทุกครั้งที่บันทึก
+   เปลี่ยนรหัสทีมแล้วล้างทิ้งทั้งหมด */
+const TEAM_OK = new Map();
+function teamMatch(got) {
+  const k = crypto.createHash('sha256').update(String(got)).digest('hex');
+  if (TEAM_OK.has(k)) return TEAM_OK.get(k);
+  const ok = sameSecret(scrypt(got, TEAM.salt), TEAM.hash);
+  if (TEAM_OK.size > 50) TEAM_OK.clear();
+  TEAM_OK.set(k, ok);
+  return ok;
+}
+/* ตั้งรหัสใดรหัสหนึ่งไว้ = ต้องใส่รหัสก่อนเข้าทุกครั้ง (ไม่มีรหัสทีมแต่มีรหัสเจ้าของ = เข้าได้เฉพาะเจ้าของ จนกว่าจะตั้งรหัสทีม) */
+const needsPass = () => Boolean(PASSCODE || TEAM || OWNER_PASSCODE);
 const html = fs.readFileSync(path.join(__dirname, 'index.html'));
 const etag = '"' + crypto.createHash('sha1').update(html).digest('hex').slice(0, 16) + '"';
 
@@ -33,13 +50,16 @@ function sameSecret(got, want) {
   const b = crypto.createHash('sha256').update(String(want)).digest();
   return crypto.timingSafeEqual(a, b);
 }
-/** สิทธิ์ของผู้เรียก: owner (รหัสเจ้าของ) · staff (รหัสร่วม หรือไม่ได้ตั้งรหัสร่วม) · null = รหัสผิด */
+/** สิทธิ์ของผู้เรียก: owner (รหัสเจ้าของ) · staff (รหัสทีมบัญชี หรือไม่ได้ตั้งรหัสใดเลย) · null = รหัสผิด/ไม่มีรหัส */
 function roleOf(req) {
   const raw = String(req.headers['x-passcode'] || '');
   const got = raw ? Buffer.from(raw, 'base64').toString('utf8') : '';
   if (OWNER_PASSCODE && got && sameSecret(got, OWNER_PASSCODE)) return 'owner';
-  if (!PASSCODE) return 'staff';
-  return got && sameSecret(got, PASSCODE) ? 'staff' : null;
+  if (!needsPass()) return 'staff';
+  if (!got) return null;
+  if (PASSCODE) return sameSecret(got, PASSCODE) ? 'staff' : null;
+  if (TEAM) return teamMatch(got) ? 'staff' : null;
+  return null;
 }
 const passOk = (req) => roleOf(req) !== null;
 /** กุญแจของระบบที่ส่งข้อมูลเข้า — Authorization: Bearer <กุญแจ> หรือ x-api-key */
@@ -71,8 +91,9 @@ async function api(req, res, url, query) {
   if (url === '/api/config') {
     return json(res, 200, {
       storage: store.enabled() ? 'server' : 'browser',
-      needsPasscode: Boolean(PASSCODE),
+      needsPasscode: needsPass(),
       ownerLogin: Boolean(OWNER_PASSCODE),
+      teamPassSet: teamPassSet(),
       book: store.DEFAULT_BOOK,
       multiCompany: true,
     });
@@ -115,7 +136,29 @@ async function api(req, res, url, query) {
   }
 
   if (url === '/api/me' && req.method === 'GET') {
-    return json(res, 200, { role, ownerLogin: Boolean(OWNER_PASSCODE), ingest: Boolean(INGEST_KEY) });
+    return json(res, 200, { role, ownerLogin: Boolean(OWNER_PASSCODE), ingest: Boolean(INGEST_KEY),
+      teamPassSet: teamPassSet(), teamPassFrom: PASSCODE ? 'env' : TEAM ? 'app' : null });
+  }
+  /* เจ้าของตั้ง/เปลี่ยนรหัสทีมบัญชีจากหน้าตั้งค่า — ทุกเครื่องที่ใช้รหัสเดิมต้องเข้าใหม่ */
+  if (url === '/api/team-pass' && req.method === 'POST') {
+    if (role !== 'owner') return json(res, 403, { error: { code: 'OWNER_ONLY', message: 'เฉพาะเจ้าของตั้งรหัสทีมบัญชีได้' } });
+    if (PASSCODE) {
+      return json(res, 409, { error: { code: 'ENV_MANAGED',
+        message: 'รหัสทีมบัญชีตั้งไว้ที่ Railway (APP_PASSCODE) — ลบตัวแปรนั้นก่อน แล้วค่อยตั้งจากในแอป' } });
+    }
+    let body;
+    try { body = await readBody(req, 4096); } catch (e) { return json(res, 400, { error: { code: 'BAD_BODY', message: e.message } }); }
+    const pass = String((body && body.passcode) || '');
+    if (pass.length < 6) return json(res, 400, { error: { code: 'TOO_SHORT', message: 'รหัสทีมบัญชีต้องยาวอย่างน้อย 6 ตัวอักษร' } });
+    if (OWNER_PASSCODE && pass === OWNER_PASSCODE) {
+      return json(res, 400, { error: { code: 'SAME_AS_OWNER', message: 'รหัสทีมบัญชีต้องไม่ซ้ำกับรหัสเจ้าของ' } });
+    }
+    const salt = crypto.randomBytes(16).toString('hex');
+    const hash = scrypt(pass, salt);
+    await store.authSet('team', hash, salt);
+    TEAM = { hash, salt };
+    TEAM_OK.clear();
+    return json(res, 200, { ok: true });
   }
   /* ค่าแอดรายวัน — เฉพาะรหัสเจ้าของ (รหัสร่วมได้ 403 ข้อมูลไม่ออกจากเซิร์ฟเวอร์) */
   if (url === '/api/ads') {
@@ -238,17 +281,26 @@ const server = http.createServer(function (req, res) {
 });
 
 store.init()
+  .then(async function (on) {
+    if (on) {
+      try { const t = await store.authGet('team'); TEAM = t ? { hash: t.hash, salt: t.salt } : null; }
+      catch (e) { console.error('อ่านรหัสทีมบัญชีไม่ได้: ' + e.message); }
+    }
+    return on;
+  })
   .then(function (on) {
     server.listen(PORT, '0.0.0.0', function () {
       console.log('Financii — พอร์ต ' + PORT + ' · เก็บข้อมูล: '
         + (on ? 'ฐานข้อมูลบนเซิร์ฟเวอร์ · รองรับหลายบริษัท' : 'เบราว์เซอร์ของผู้ใช้')
-        + (PASSCODE ? ' · ต้องใส่รหัสผ่าน' : '') + (OWNER_PASSCODE ? ' · มีรหัสเจ้าของ' : '')
+        + (needsPass() ? ' · ต้องใส่รหัสผ่าน' : '') + (OWNER_PASSCODE ? ' · มีรหัสเจ้าของ' : '')
         + (INGEST_KEY ? ' · รับค่าแอดจากระบบอื่นได้' : ''));
       if (process.env.APP_OWNER_PASSCODE && !OWNER_PASSCODE) {
         console.warn('★ APP_OWNER_PASSCODE ซ้ำกับ APP_PASSCODE — ปิดสิทธิ์เจ้าของไว้ ตั้งรหัสเจ้าของให้ต่างจากรหัสร่วม');
       }
-      if (on && !PASSCODE) {
-        console.warn('★ ยังไม่ได้ตั้ง APP_PASSCODE — ใครที่รู้ URL จะอ่านและแก้ข้อมูลบัญชีได้ทั้งหมด');
+      if (on && !needsPass()) {
+        console.warn('★ ยังไม่ได้ตั้งรหัสผ่านใด ๆ (APP_OWNER_PASSCODE / APP_PASSCODE) — ใครที่รู้ URL จะอ่านและแก้ข้อมูลบัญชีได้ทั้งหมด');
+      } else if (on && !teamPassSet()) {
+        console.warn('★ ยังไม่มีรหัสทีมบัญชี — ตอนนี้เข้าได้เฉพาะเจ้าของ ให้เจ้าของเข้าแล้วตั้งรหัสทีมที่หน้าตั้งค่า');
       }
     });
   })

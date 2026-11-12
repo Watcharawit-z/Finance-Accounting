@@ -160,16 +160,59 @@ function ownerIngestCard() {
   });
 }
 
-/** การ์ดการเข้าใช้งานในหน้าตั้งค่า — สิทธิ์ที่ใช้อยู่ · เข้าสู่ระบบเจ้าของ · ออกจากระบบ */
+/** การ์ดการเข้าใช้งานในหน้าตั้งค่า — สิทธิ์ที่ใช้อยู่ · รหัสทีมบัญชี · เข้าสู่ระบบเจ้าของ · ออกจากระบบ */
 function accessCard() {
   if (SYNC.mode !== 'server') return '';
   const owner = SYNC.role === 'owner';
+  const team = SYNC.teamPassFrom === 'env' ? 'ตั้งไว้ที่ Railway (APP_PASSCODE)' : SYNC.teamPassFrom === 'app' ? 'ตั้งแล้ว (เจ้าของเปลี่ยนได้ที่นี่)'
+    : SYNC.ownerLogin ? 'ยังไม่ได้ตั้ง — ตอนนี้เข้าได้เฉพาะเจ้าของ' : 'ยังไม่ได้ตั้ง — ใครรู้ลิงก์ก็เข้าได้';
   return card({
-    title: 'การเข้าใช้งาน', sub: owner ? 'เข้าด้วยรหัสเจ้าของ' : 'เข้าด้วยรหัสร่วม',
-    actions: (!owner && SYNC.ownerLogin ? btn('owner:login', 'เข้าสู่ระบบเจ้าของ') : '')
+    title: 'การเข้าใช้งาน', sub: owner ? 'เข้าด้วยรหัสเจ้าของ' : 'เข้าด้วยรหัสทีมบัญชี',
+    actions: (owner && SYNC.teamPassFrom !== 'env' ? btn('owner:teampass', SYNC.teamPassFrom ? 'เปลี่ยนรหัสทีมบัญชี' : 'ตั้งรหัสทีมบัญชี', SYNC.teamPassFrom ? '' : 'primary') : '')
+      + (!owner && SYNC.ownerLogin ? btn('owner:login', 'เข้าสู่ระบบเจ้าของ') : '')
       + (SYNC.passcode ? btn('owner:logout', 'ออกจากระบบ') : ''),
-    body: '<div class="kv"><div><span>สิทธิ์</span><b>' + (owner ? 'เจ้าของ — เห็นหน้ายอดขาย กำไร ค่าแอด' : 'ทำบัญชีได้ทุกหน้า (ไม่เห็นค่าแอด)') + '</b></div></div>',
-    foot: 'ใช้เครื่องร่วมกับคนอื่น กดออกจากระบบทุกครั้ง — เบราว์เซอร์จำรหัสไว้จนกว่าจะออกจากระบบ',
+    body: '<div class="kv"><div><span>สิทธิ์ของคุณ</span><b>' + (owner ? 'เจ้าของ — ทุกหน้า และหน้ายอดขาย กำไร ค่าแอด' : 'ทีมบัญชี — ทำบัญชีได้ทุกหน้า (ไม่เห็นค่าแอด)') + '</b></div>'
+      + '<div><span>รหัสทีมบัญชี</span><b>' + esc(team) + '</b></div></div>',
+    foot: 'เปิดเว็บต้องใส่รหัสทุกครั้งที่เปิดเบราว์เซอร์ใหม่ (เว้นแต่ติ๊ก "จำไว้ในเครื่องนี้") · เปลี่ยนรหัสทีมแล้ว ทุกเครื่องที่ใช้รหัสเดิมต้องเข้าใหม่',
+  });
+}
+function modalTeamPass() {
+  modal({
+    title: SYNC.teamPassFrom ? 'เปลี่ยนรหัสทีมบัญชี' : 'ตั้งรหัสทีมบัญชี',
+    sub: 'รหัสที่น้องบัญชีใช้เข้าเว็บ — เห็นทุกหน้ายกเว้นหน้ายอดขาย กำไร ค่าแอด · อย่างน้อย 6 ตัวอักษร ไม่ซ้ำกับรหัสเจ้าของ',
+    body: '<div class="flds">' + field({ name: 'teamPass', label: 'รหัสทีมบัญชีใหม่', type: 'password' })
+      + field({ name: 'teamPass2', label: 'พิมพ์ซ้ำอีกครั้ง', type: 'password' }) + '</div>',
+    submitLabel: 'บันทึกรหัส',
+    onSubmit: function () {
+      const a = val('teamPass'), b = val('teamPass2');
+      if (a.length < 6) return toast('รหัสทีมบัญชีต้องยาวอย่างน้อย 6 ตัวอักษร', 'err');
+      if (a !== b) return toast('พิมพ์รหัสสองช่องไม่ตรงกัน', 'err');
+      fetch('/api/team-pass', { method: 'POST', headers: syncHeaders(), body: JSON.stringify({ passcode: a }) })
+        .then(function (r) { return r.json().catch(() => null).then((b2) => ({ r, b: b2 })); })
+        .then(function (x) {
+          if (!x.r.ok) return toast((x.b && x.b.error && x.b.error.message) || 'ตั้งรหัสไม่สำเร็จ', 'err');
+          return syncMe().then(function () {
+            closeModal();
+            toast('ตั้งรหัสทีมบัญชีแล้ว', 'ok', 'บอกรหัสนี้ให้น้องบัญชี — เครื่องที่ใช้รหัสเดิมต้องเข้าใหม่');
+            render();
+          });
+        })
+        .catch(function (e) { toast(e.message, 'err'); });
+    },
+  });
+}
+/** กดปุ่มผู้ใช้บนแถบบน */
+function modalUserAccount() {
+  const owner = SYNC.role === 'owner';
+  modal({
+    title: 'บัญชีผู้ใช้', sub: 'เข้าใช้งานด้วยสิทธิ์' + (owner ? 'เจ้าของ' : 'ทีมบัญชี'),
+    body: '<div class="note">' + (owner ? 'เห็นทุกหน้า รวมหน้ายอดขาย กำไร ค่าแอด และตั้งรหัสทีมบัญชีได้ที่หน้าข้อมูลกิจการ'
+      : 'ทำบัญชีได้ทุกหน้า — หน้ายอดขาย กำไร ค่าแอด สำหรับเจ้าของเท่านั้น') + '</div>'
+      + '<div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:12px">'
+      + (!owner && SYNC.ownerLogin ? btn('owner:login', 'เข้าสู่ระบบเจ้าของ') : '')
+      + btn('owner:logout', 'ออกจากระบบ', 'danger') + '</div>',
+    submitLabel: 'ปิด',
+    onSubmit: closeModal,
   });
 }
 
@@ -218,7 +261,7 @@ function modalOwnerLogin() {
           SYNC.passcode = before;
           return syncMe().then(function () { toast('รหัสเจ้าของไม่ถูกต้อง', 'err'); });
         }
-        try { localStorage.setItem(PASS_KEY, code); } catch (e) { /* ปิดการเก็บข้อมูลไว้ */ }
+        passSave(code, false);
         closeModal();
         STATE.screen = 'ownerdaily'; STATE.sel = null; OWNER.key = '';
         toast('เข้าสู่ระบบเจ้าของแล้ว', 'ok');
@@ -240,6 +283,8 @@ EXTRA_DISPATCH.push(function (head, rest, arg) {
   const what = rest[0];
   if (what === 'login') { modalOwnerLogin(); return true; }
   if (what === 'logout') { syncLogout(); return true; }
+  if (what === 'account') { modalUserAccount(); return true; }
+  if (what === 'teampass') { if (SYNC.role === 'owner') modalTeamPass(); return true; }
   if (!ownerVisible()) return true;
   if (what === 'ad') { modalOwnerAd(null); return true; }
   if (what === 'reload') { OWNER.key = ''; render(); return true; }

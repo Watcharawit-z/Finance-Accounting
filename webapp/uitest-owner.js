@@ -144,7 +144,25 @@ const { chromium } = require('/opt/node22/lib/node_modules/playwright');
       ok('การ์ดเชื่อม SellerHub บอกที่อยู่ส่งข้อมูลและสมุดบัญชี', /\/api\/ingest\/ad-spend/.test(ow.list) && /เปิดรับข้อมูลแล้ว/.test(ow.list));
       await p.click('#main [data-act="owner:logout"]');
       await p.waitForSelector('[name="passcode"]', { timeout: 10000 });
-      ok('★ ออกจากระบบแล้วเบราว์เซอร์ลืมรหัส กลับมาหน้าใส่รหัสผ่าน', await p.evaluate(() => !localStorage.getItem('financii.passcode')));
+      ok('★ ออกจากระบบแล้วเบราว์เซอร์ลืมรหัส กลับมาหน้าใส่รหัสผ่าน', await p.evaluate(() => !localStorage.getItem('financii.pass.v2')
+        && !sessionStorage.getItem('financii.pass.v2')));
+      /* ไม่ติ๊กจำไว้ = เปิดเบราว์เซอร์ใหม่ต้องใส่รหัสอีก · ติ๊กจำไว้ = เข้าได้เลย */
+      await p.fill('[name="passcode"]', 'staff-111');
+      await p.click('[data-act="pass:submit"]');
+      await p.waitForFunction(() => SYNC.role === 'staff', null, { timeout: 15000 });
+      const ctx2 = await browser.newContext();
+      const p2 = await ctx2.newPage();
+      await p2.goto(base);
+      await p2.waitForSelector('[name="passcode"]', { timeout: 15000 });
+      ok('★ ไม่ติ๊ก "จำไว้ในเครื่องนี้" → เปิดใหม่ต้องใส่รหัส (ไม่เข้าเว็บเองเหมือนเดิม)', await p.evaluate(() => !localStorage.getItem('financii.pass.v2')
+        && !!sessionStorage.getItem('financii.pass.v2')) && !!(await p2.$('[name="passcode"]')));
+      await p2.fill('[name="passcode"]', 'staff-111');
+      await p2.check('[name="passRemember"]');
+      await p2.click('[data-act="pass:submit"]');
+      await p2.waitForFunction(() => SYNC.role === 'staff', null, { timeout: 15000 });
+      ok('ติ๊กจำไว้ → เก็บไว้ในเครื่องนี้', await p2.evaluate(() => !!localStorage.getItem('financii.pass.v2')));
+      ok('แถบบนมีปุ่มผู้ใช้บอกสิทธิ์ "ทีมบัญชี"', await p2.evaluate(() => { const b = document.getElementById('userBtn'); return !b.hidden && /ทีมบัญชี/.test(b.textContent); }));
+      await ctx2.close();
       ok('ไม่มีข้อผิดพลาดในคอนโซล (ส่วนเซิร์ฟเวอร์)', errs.length === 0, errs.slice(0, 2).join(' | '));
     } finally {
       await browser.close();

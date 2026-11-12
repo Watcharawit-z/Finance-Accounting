@@ -77,8 +77,8 @@ function startServer(env, port) {
     console.log('    server log:', s1.log().slice(0, 300));
     throw e;
   }
-  ok('ยังไม่ใส่รหัสผ่านจะเจอหน้าล็อก', await A.$eval('#main h2',
-    (e) => e.textContent.indexOf('รหัสผ่าน') >= 0).catch(() => false));
+  ok('ยังไม่ใส่รหัสผ่านจะเจอหน้าเข้าสู่ระบบ', await A.$eval('#main h2',
+    (e) => e.textContent.indexOf('เข้าสู่ระบบ') >= 0).catch(() => false) && !!(await A.$('[name="passcode"]')));
 
   await A.fill('[name="passcode"]', 'ผิดแน่นอน');
   await A.click('[data-act="pass:submit"]');

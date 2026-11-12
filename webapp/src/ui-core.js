@@ -602,6 +602,16 @@ function renderTopTools() {
   tb.title = dark ? 'เปลี่ยนเป็นโหมดสว่าง' : 'เปลี่ยนเป็นโหมดมืด';
   const pw = document.getElementById('periodWrap');
   if (pw && !pw.querySelector('svg')) pw.insertAdjacentHTML('afterbegin', icon('calendar'));
+  /* ผู้ใช้ที่เข้าอยู่ — เฉพาะเปิดผ่านเซิร์ฟเวอร์ที่ใช้รหัส กดแล้วดูสิทธิ์ เข้าแบบเจ้าของ หรือออกจากระบบ */
+  const ub = document.getElementById('userBtn');
+  if (ub) {
+    const on = SYNC.mode === 'server' && !!SYNC.passcode;
+    ub.hidden = !on;
+    if (on) {
+      ub.innerHTML = icon('user') + '<span class="lbl">' + (SYNC.role === 'owner' ? 'เจ้าของ' : 'ทีมบัญชี') + '</span>';
+      ub.title = 'เข้าใช้งานด้วยสิทธิ์' + (SYNC.role === 'owner' ? 'เจ้าของ' : 'ทีมบัญชี') + ' — กดเพื่อออกจากระบบหรือสลับผู้ใช้';
+    }
+  }
 }
 
 function render() {

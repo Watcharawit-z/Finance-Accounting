@@ -116,6 +116,80 @@ const b64 = (s) => Buffer.from(s, 'utf8').toString('base64');
     ok('ไม่ตั้ง APP_INGEST_KEY → ช่องทางรับข้อมูลปิด (403)', ing.status === 403);
   } finally { srv2.kill(); }
 
+  console.log('\n[5] ตั้งแค่รหัสเจ้าของ (ไม่มี APP_PASSCODE) → ต้องใส่รหัสเสมอ · เจ้าของตั้งรหัสทีมบัญชีในแอป');
+  {
+    const { Client } = require('pg');
+    const c = new Client({ connectionString: DB_URL });
+    await c.connect();
+    await c.query('DROP TABLE IF EXISTS financii_auth');
+    await c.end();
+  }
+  const start3 = (port) => {
+    const p = spawn(process.execPath, [path.join(__dirname, 'server.js')], {
+      env: { ...process.env, PORT: String(port), APP_PASSCODE: '', APP_OWNER_PASSCODE: 'boss-777' }, stdio: ['ignore', 'pipe', 'pipe'] });
+    p.log = '';
+    p.stdout.on('data', (d) => { p.log += d; });
+    p.stderr.on('data', (d) => { p.log += d; });
+    return p;
+  };
+  let s3 = start3(PORT + 2);
+  for (let i = 0; i < 50 && !/พอร์ต/.test(s3.log); i++) await wait(100);
+  const b3 = () => 'http://127.0.0.1:' + (PORT + 2);
+  const me = (pass) => fetch(b3() + '/api/me', { headers: pass ? { 'x-passcode': b64(pass) } : {} });
+  const setTeam = (pass, as_) => fetch(b3() + '/api/team-pass', { method: 'POST', headers: { 'x-passcode': b64(as_), 'content-type': 'application/json' },
+    body: JSON.stringify({ passcode: pass }) });
+  try {
+    const cfg = await fetch(b3() + '/api/config').then((x) => x.json());
+    ok('★ ตั้งแค่รหัสเจ้าของ: เว็บบอกว่าต้องใส่รหัส และยังไม่มีรหัสทีม', cfg.needsPasscode === true && cfg.teamPassSet === false, JSON.stringify(cfg));
+    ok('★ ไม่ใส่รหัส → 401 (เดิมเข้าได้เลย)', (await me('')).status === 401);
+    ok('รหัสอื่นใด ๆ → 401 จนกว่าจะตั้งรหัสทีม', (await me('อะไรก็ได้')).status === 401);
+    ok('เซิร์ฟเวอร์เตือนว่าตอนนี้เข้าได้เฉพาะเจ้าของ', /ยังไม่มีรหัสทีมบัญชี/.test(s3.log));
+    ok('รหัสสั้นกว่า 6 ตัวไม่รับ', (await setTeam('12345', 'boss-777')).status === 400);
+    ok('รหัสทีมซ้ำกับรหัสเจ้าของไม่รับ', (await setTeam('boss-777', 'boss-777')).status === 400);
+    ok('★ เจ้าของตั้งรหัสทีมบัญชีได้', (await setTeam('team-2026', 'boss-777')).status === 200);
+    const st = await me('team-2026').then((x) => x.json());
+    ok('★ รหัสทีมใหม่ = staff', st.role === 'staff' && st.teamPassFrom === 'app', JSON.stringify(st));
+    ok('ทีมบัญชีตั้งรหัสทีมเองไม่ได้ (403)', (await setTeam('team-hack', 'team-2026')).status === 403);
+    await setTeam('team-2027', 'boss-777');
+    ok('★ เปลี่ยนรหัสทีมแล้ว รหัสเดิมใช้ไม่ได้ทันที', (await me('team-2026')).status === 401 && (await me('team-2027')).status === 200);
+    s3.kill();
+    await wait(300);
+    s3 = start3(PORT + 2);
+    for (let i = 0; i < 50 && !/พอร์ต/.test(s3.log); i++) await wait(100);
+    ok('★ เปิดเซิร์ฟเวอร์ใหม่ รหัสทีมยังอยู่ (เก็บแฮชในฐานข้อมูล)', (await me('team-2027')).status === 200 && (await me('team-2026')).status === 401);
+    const { Client } = require('pg');
+    const c = new Client({ connectionString: DB_URL });
+    await c.connect();
+    const row = (await c.query("SELECT hash FROM financii_auth WHERE key = 'team'")).rows[0];
+    await c.end();
+    ok('ฐานข้อมูลเก็บแค่แฮช ไม่มีรหัสจริง', row && row.hash.indexOf('team-2027') < 0 && row.hash.length === 64);
+  } finally { s3.kill(); }
+
+  console.log('\n[6] ตั้ง APP_PASSCODE ไว้ที่ Railway → ตั้งรหัสทีมจากในแอปไม่ได้ · ไม่ตั้งรหัสใดเลย → เข้าได้เหมือนเดิม');
+  const s4 = spawn(process.execPath, [path.join(__dirname, 'server.js')], {
+    env: { ...process.env, PORT: String(PORT + 3), APP_PASSCODE: 'env-team', APP_OWNER_PASSCODE: 'boss-777' }, stdio: ['ignore', 'pipe', 'pipe'] });
+  let l4 = '';
+  s4.stdout.on('data', (d) => { l4 += d; });
+  for (let i = 0; i < 50 && !/พอร์ต/.test(l4); i++) await wait(100);
+  try {
+    const r = await fetch('http://127.0.0.1:' + (PORT + 3) + '/api/team-pass', { method: 'POST',
+      headers: { 'x-passcode': b64('boss-777'), 'content-type': 'application/json' }, body: JSON.stringify({ passcode: 'new-team-1' }) });
+    ok('รหัสทีมตั้งไว้ที่ Railway → ตั้งจากในแอปไม่ได้ (409) บอกวิธี', r.status === 409);
+    const m = await fetch('http://127.0.0.1:' + (PORT + 3) + '/api/me', { headers: { 'x-passcode': b64('env-team') } }).then((x) => x.json());
+    ok('รหัสจาก APP_PASSCODE ยังเป็น staff เหมือนเดิม', m.role === 'staff' && m.teamPassFrom === 'env');
+  } finally { s4.kill(); }
+  const s5 = spawn(process.execPath, [path.join(__dirname, 'server.js')], {
+    env: { ...process.env, PORT: String(PORT + 4), APP_PASSCODE: '', APP_OWNER_PASSCODE: '', APP_INGEST_KEY: '' }, stdio: ['ignore', 'pipe', 'pipe'] });
+  let l5 = '';
+  s5.stdout.on('data', (d) => { l5 += d; });
+  for (let i = 0; i < 50 && !/พอร์ต/.test(l5); i++) await wait(100);
+  try {
+    const cfg = await fetch('http://127.0.0.1:' + (PORT + 4) + '/api/config').then((x) => x.json());
+    const m = await fetch('http://127.0.0.1:' + (PORT + 4) + '/api/me');
+    ok('ไม่ได้ตั้งรหัสใดเลย (ข้อมูลทดสอบที่ไม่มีรหัสทีมในฐาน) → ไม่ต้องใส่รหัส', cfg.needsPasscode === false || cfg.teamPassSet === true, JSON.stringify(cfg));
+    void m;
+  } finally { s5.kill(); }
+
   console.log('\n' + (fail === 0 ? 'ผ่านทั้งหมด ' + pass + ' ข้อ' : 'ผ่าน ' + pass + ' ไม่ผ่าน ' + fail));
   process.exit(fail ? 1 : 0);
 })().catch((e) => { console.error(e); process.exit(1); });

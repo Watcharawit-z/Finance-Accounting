@@ -19,7 +19,26 @@ const SYNC = {
   timer: null,
   retry: null,
 };
-const PASS_KEY = 'financii.passcode';
+/* รหัสที่ใช้เข้า — จำไว้แค่จนปิดเบราว์เซอร์ (sessionStorage) เว้นแต่ติ๊ก "จำไว้ในเครื่องนี้" (localStorage)
+   รุ่นก่อนจำไว้ถาวรใต้ชื่อ financii.passcode ทุกเครื่อง — ลบทิ้ง ทุกคนเข้าใหม่หนึ่งครั้ง */
+const PASS_KEY = 'financii.pass.v2';
+const OLD_PASS_KEYS = ['financii.passcode', 'duly.passcode'];
+function passLoad() {
+  try {
+    OLD_PASS_KEYS.forEach((k) => localStorage.removeItem(k));
+    return sessionStorage.getItem(PASS_KEY) || localStorage.getItem(PASS_KEY) || '';
+  } catch (e) { return ''; }
+}
+function passSave(code, remember) {
+  try {
+    sessionStorage.setItem(PASS_KEY, code);
+    if (remember) localStorage.setItem(PASS_KEY, code); else localStorage.removeItem(PASS_KEY);
+  } catch (e) { /* ปิดการเก็บข้อมูลไว้ — ใช้ได้จนรีเฟรชหน้า */ }
+}
+function passForget() {
+  try { sessionStorage.removeItem(PASS_KEY); localStorage.removeItem(PASS_KEY); OLD_PASS_KEYS.forEach((k) => localStorage.removeItem(k)); }
+  catch (e) { /* ปิดการเก็บข้อมูลไว้ */ }
+}
 
 /** ส่วนหัวของ HTTP รับได้แค่ ASCII รหัสผ่านภาษาไทยจึงต้องแปลงเป็น base64 ก่อนส่ง */
 function encodePass(s) {
@@ -63,6 +82,7 @@ async function syncConfig() {
     SYNC.mode = c.storage === 'server' ? 'server' : 'browser';
     SYNC.needsPasscode = Boolean(c.needsPasscode);
     SYNC.ownerLogin = Boolean(c.ownerLogin);
+    SYNC.teamPassSet = c.teamPassSet !== false;
     return SYNC.mode === 'server';
   } catch (e) {
     return false;                       // เปิดจากไฟล์ในเครื่อง ไม่มีเซิร์ฟเวอร์
@@ -108,7 +128,7 @@ async function syncPush() {
       headers: syncHeaders(),
       body: JSON.stringify({ version: SYNC.version, data: DB }),
     });
-    if (r.status === 401) { setStatus('locked'); return; }
+    if (r.status === 401) { syncLocked(); return; }
     if (r.status === 409) {
       /* อีกเครื่องบันทึกแทรกเข้ามา — ไม่เขียนทับ ให้ดึงของใหม่มาแทน
          ข้อมูลบัญชีหายเงียบ ๆ ไม่ได้ ต้องบอกให้รู้ทุกครั้ง */
@@ -150,15 +170,29 @@ function syncSave() {
 }
 
 function syncPasscodeScreen(wrong) {
-  return card({
-    title:'ใส่รหัสผ่านเพื่อเปิดสมุดบัญชี',
-    sub:'ข้อมูลชุดนี้เก็บบนเซิร์ฟเวอร์ร่วมกัน จึงต้องใส่รหัสผ่านก่อน',
+  const noTeam = SYNC.teamPassSet === false;
+  return '<div class="login-w">' + card({
+    title:'เข้าสู่ระบบ',
+    sub:'ใส่รหัสผ่านของคุณ — ทีมบัญชีใช้รหัสทีม เจ้าของใช้รหัสเจ้าของ',
     body:'<div class="flds">'
       + field({ name:'passcode', label:'รหัสผ่าน', type:'password', wide:true,
-          hint: wrong ? 'รหัสผ่านไม่ถูกต้อง ลองใหม่อีกครั้ง' : 'ผู้ดูแลเป็นผู้ตั้งไว้ในตัวแปร APP_PASSCODE' })
+          hint: wrong ? 'รหัสผ่านไม่ถูกต้อง ลองใหม่อีกครั้ง'
+            : noTeam ? 'ยังไม่ได้ตั้งรหัสทีมบัญชี — ตอนนี้เข้าได้เฉพาะเจ้าของ (เข้าแล้วตั้งรหัสทีมได้ที่หน้าตั้งค่า)' : '' })
+      + '<label class="chk-line"><input type="checkbox" name="passRemember"> จำไว้ในเครื่องนี้ (เฉพาะเครื่องส่วนตัว)</label>'
       + '</div>',
-    foot: btn('pass:submit', 'เปิดสมุดบัญชี', 'primary'),
-  });
+    foot: btn('pass:submit', 'เข้าสู่ระบบ', 'primary'),
+  }) + '</div>';
+}
+
+/** รหัสใช้ไม่ได้แล้วระหว่างใช้งาน (เจ้าของเปลี่ยนรหัสทีม) — ลืมรหัสเดิม แล้วขึ้นหน้าเข้าสู่ระบบ */
+function syncLocked() {
+  passForget();
+  SYNC.passcode = '';
+  SYNC.role = null;
+  setStatus('locked');
+  STATE.passWrong = false;
+  render();
+  toast('ต้องเข้าสู่ระบบใหม่', 'err', 'รหัสผ่านเปลี่ยนแล้ว หรือหมดสิทธิ์ใช้รหัสเดิม');
 }
 
 /** สลับบริษัท — ต้องบันทึกของเดิมให้จบก่อน แล้วค่อยยกข้อมูลใหม่เข้ามาแทนทั้งก้อน */
@@ -187,23 +221,25 @@ async function syncMe() {
     SYNC.role = b.role || null;
     SYNC.ownerLogin = Boolean(b.ownerLogin);
     SYNC.ingest = Boolean(b.ingest);
+    SYNC.teamPassSet = b.teamPassSet !== false;
+    SYNC.teamPassFrom = b.teamPassFrom || null;
   } catch (e) { SYNC.role = null; }
   return SYNC.role;
 }
 /** ออกจากระบบ — ลืมรหัสที่จำไว้ในเบราว์เซอร์นี้ แล้วเปิดหน้าใหม่ (ใช้เครื่องร่วมกับน้องบัญชีต้องกดทุกครั้ง) */
 function syncLogout() {
-  try { localStorage.removeItem(PASS_KEY); localStorage.removeItem('duly.passcode'); } catch (e) { /* ปิดการเก็บข้อมูลไว้ */ }
+  passForget();
   SYNC.passcode = '';
   SYNC.role = null;
   location.reload();
 }
 
-async function syncUnlock(code) {
+async function syncUnlock(code, remember) {
   SYNC.passcode = code;
   const r = await syncPull();
   if (r === 'locked') { SYNC.passcode = ''; return false; }
   await syncMe();
-  try { localStorage.setItem(PASS_KEY, code); } catch (e) { /* ปิดการเก็บข้อมูลไว้ */ }
+  passSave(code, remember);
   if (r === 'empty') { buildSeed(); await syncPush(); }
   return true;
 }
