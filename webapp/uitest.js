@@ -1289,8 +1289,11 @@ const overflowInfo = (page) => page.evaluate(() => {
   ok('★ บันทึกใบสำคัญรับในสมุดรายวันรับได้ และขึ้นในเล่มทันที',
     jv.e.type === 'receipt' && jv.e.src === 'manual' && jv.screen === 'jreceipt' && jv.listed, jv.e.no);
   await openNew('jgeneral', 'jv:general');
-  const ctlOffered = await page.$$eval('[name="j0_acc"] option', (os) => os.some((o) => o.value === '1131' || o.value === '2141'));
-  ok('บัญชีคุม (ลูกหนี้ ภาษีขาย) ไม่อยู่ในรายการให้เลือก', !ctlOffered);
+  /* บัญชีคุมแสดงในรายการให้เห็นครบผังบัญชี แต่ปิดไว้ เลือกไม่ได้ */
+  const ctl = await page.$$eval('[name="j0_acc"] option', (os) => os.filter((o) => o.value === '1131' || o.value === '2141')
+    .map((o) => ({ v: o.value, off: o.disabled, t: o.textContent })));
+  ok('บัญชีคุม (ลูกหนี้ ภาษีขาย) อยู่ในรายการแต่เลือกไม่ได้ พร้อมบอกว่าต้องลงจากเอกสาร',
+    ctl.length === 2 && ctl.every((o) => o.off && /บัญชีคุม/.test(o.t)), JSON.stringify(ctl));
   await page.click('[data-act="modal:close"]');
   ok('★ ลงบัญชีคุมด้วยมือไม่ได้แม้เรียกตรง ๆ', (await page.evaluate(() => {
     try {
