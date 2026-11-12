@@ -54,7 +54,7 @@ function modalInventoryMethod(method) {
       + '<div class="sub-h">สิ่งที่ระบบจะทำ</div>'
       + (what.length ? '<ul class="plain">' + what.map((t) => '<li>' + esc(t) + '</li>').join('') + '</ul>'
         : '<div class="dim">ไม่มีใบสำคัญที่ต้องลงใหม่ — มีผลกับเอกสารที่ออกหลังจากนี้</div>')
-      + (toPeriodic && what.length ? '<div class="fld-hint">ใบเดิมกลับรายการวันเดียวกันแล้วลงใบใหม่ เลขที่เอกสารไม่เปลี่ยน ตรวจย้อนได้ในสมุดรายวัน</div>' : ''),
+      + (toPeriodic && what.length ? '<div class="note">ใบสำคัญเดิมกลับรายการวันเดียวกันแล้วลงใบใหม่ เลขที่เอกสารไม่เปลี่ยน ตรวจย้อนได้ในสมุดรายวัน</div>' : ''),
     submitLabel:'เปลี่ยนวิธีบันทึกสินค้า',
     onSubmit: function () {
       submitAction(function () {
