@@ -10,6 +10,9 @@ const SYNC = {
   version: 0,
   needsPasscode: false,
   passcode: '',
+  role: null,             // staff | owner — เซิร์ฟเวอร์บอกตามรหัสที่ใช้เข้า (ui-owner.js)
+  ownerLogin: false,      // เซิร์ฟเวอร์ตั้งรหัสเจ้าของไว้
+  ingest: false,          // เซิร์ฟเวอร์รับค่าแอดจากระบบอื่นได้ (ตั้ง APP_INGEST_KEY แล้ว)
   status: 'idle',         // idle | saving | saved | error | conflict | locked
   message: '',
   pending: false,
@@ -59,6 +62,7 @@ async function syncConfig() {
     const c = await r.json();
     SYNC.mode = c.storage === 'server' ? 'server' : 'browser';
     SYNC.needsPasscode = Boolean(c.needsPasscode);
+    SYNC.ownerLogin = Boolean(c.ownerLogin);
     return SYNC.mode === 'server';
   } catch (e) {
     return false;                       // เปิดจากไฟล์ในเครื่อง ไม่มีเซิร์ฟเวอร์
@@ -173,10 +177,32 @@ async function syncSwitch(book) {
   return booksLoadLocal(book) ? 'ok' : 'empty';
 }
 
+/** สิทธิ์ของรหัสที่ใช้อยู่ — เซิร์ฟเวอร์เป็นคนบอก (หน้าจอแค่ซ่อนเมนู ข้อมูลค่าแอดเซิร์ฟเวอร์ไม่ส่งให้รหัสร่วมอยู่แล้ว) */
+async function syncMe() {
+  if (SYNC.mode !== 'server') { SYNC.role = null; return null; }
+  try {
+    const r = await fetch('/api/me', { headers: syncHeaders() });
+    if (!r.ok) { SYNC.role = null; return null; }
+    const b = await r.json();
+    SYNC.role = b.role || null;
+    SYNC.ownerLogin = Boolean(b.ownerLogin);
+    SYNC.ingest = Boolean(b.ingest);
+  } catch (e) { SYNC.role = null; }
+  return SYNC.role;
+}
+/** ออกจากระบบ — ลืมรหัสที่จำไว้ในเบราว์เซอร์นี้ แล้วเปิดหน้าใหม่ (ใช้เครื่องร่วมกับน้องบัญชีต้องกดทุกครั้ง) */
+function syncLogout() {
+  try { localStorage.removeItem(PASS_KEY); localStorage.removeItem('duly.passcode'); } catch (e) { /* ปิดการเก็บข้อมูลไว้ */ }
+  SYNC.passcode = '';
+  SYNC.role = null;
+  location.reload();
+}
+
 async function syncUnlock(code) {
   SYNC.passcode = code;
   const r = await syncPull();
   if (r === 'locked') { SYNC.passcode = ''; return false; }
+  await syncMe();
   try { localStorage.setItem(PASS_KEY, code); } catch (e) { /* ปิดการเก็บข้อมูลไว้ */ }
   if (r === 'empty') { buildSeed(); await syncPush(); }
   return true;

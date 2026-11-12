@@ -78,6 +78,18 @@ async function init() {
         saved_at    timestamptz NOT NULL DEFAULT now(),
         PRIMARY KEY (book, version)
       )`);
+    /* ค่าแอดรายวัน (ข้อมูลของเจ้าของ) — แยกจากสมุดบัญชี ผู้ที่เข้าด้วยรหัสร่วมจึงไม่ได้รับข้อมูลนี้เลย
+       หนึ่งแถว = ร้าน/บัญชีโฆษณาหนึ่งร้าน หนึ่งวัน (วันตามเวลาไทย) ส่งซ้ำวันเดิม = แทนที่ */
+    await c.query(`
+      CREATE TABLE IF NOT EXISTS financii_ad_spend (
+        book        text NOT NULL,
+        shop        text NOT NULL,
+        day         date NOT NULL,
+        amount      numeric(16,2) NOT NULL,
+        source      text NOT NULL DEFAULT 'manual',
+        updated_at  timestamptz NOT NULL DEFAULT now(),
+        PRIMARY KEY (book, shop, day)
+      )`);
   });
   return true;
 }
@@ -250,6 +262,72 @@ async function write(book, expectedVersion, data) {
   });
 }
 
+/* ---------- ค่าแอดรายวัน ---------- */
+const MAX_AD_ITEMS = 2000;
+/** ตรวจรายการก่อนเขียน — ผิดแถวเดียวไม่รับทั้งชุด บอกแถวที่ผิด · amount null = ลบวันนั้น (เฉพาะที่อนุญาต) */
+function cleanAdItems(items, allowDelete) {
+  if (!Array.isArray(items) || !items.length) throw fail('BAD_BODY', 'ต้องส่ง items เป็นรายการอย่างน้อย 1 แถว');
+  if (items.length > MAX_AD_ITEMS) throw fail('TOO_MANY', 'ส่งได้ครั้งละไม่เกิน ' + MAX_AD_ITEMS + ' แถว');
+  return items.map(function (x, i) {
+    const row = 'แถวที่ ' + (i + 1) + ': ';
+    const day = String((x && (x.date || x.day)) || '');
+    const d = new Date(day + 'T00:00:00Z');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || isNaN(d) || d.toISOString().slice(0, 10) !== day) {
+      throw fail('BAD_DATE', row + 'วันที่ต้องเป็น YYYY-MM-DD');
+    }
+    const shop = String((x && x.shop) || '').trim().slice(0, 80) || 'ไม่ระบุร้าน';
+    const raw = x ? x.amount : undefined;
+    if (raw === null && allowDelete) return { day, shop, amount: null };
+    const n = typeof raw === 'number' ? raw : Number(String(raw === undefined ? '' : raw).replace(/,/g, '').trim());
+    if (raw === undefined || raw === '' || !isFinite(n) || n < 0 || n > 9999999999) {
+      throw fail('BAD_AMOUNT', row + 'ยอดค่าแอดต้องเป็นตัวเลขตั้งแต่ 0 ขึ้นไป');
+    }
+    return { day, shop, amount: Math.round(n * 100) / 100 };
+  });
+}
+/** ค่าแอดของสมุดเล่มหนึ่ง ช่วงวันที่ที่ขอ (รวมทั้งสองวัน) */
+async function adsList(book, from, to) {
+  return withClient(async function (c) {
+    const r = await c.query(`
+      SELECT shop, to_char(day, 'YYYY-MM-DD') AS day, amount::text AS amount, source, updated_at
+        FROM financii_ad_spend
+       WHERE book = $1 AND ($2::date IS NULL OR day >= $2::date) AND ($3::date IS NULL OR day <= $3::date)
+       ORDER BY day, shop`, [book, from || null, to || null]);
+    return r.rows.map((x) => ({ date: x.day, shop: x.shop, amount: x.amount, source: x.source, updatedAt: x.updated_at }));
+  });
+}
+/** เขียนค่าแอดทีละหลายแถวในรายการเดียว — ส่งวันเดิมซ้ำ = แทนที่ยอดเดิม */
+async function adsUpsert(book, items, source, allowDelete) {
+  if (!validBook(book)) throw fail('BAD_BOOK', 'รหัสสมุดไม่ถูกต้อง');
+  const rows = cleanAdItems(items, allowDelete);
+  const src = String(source || 'manual').slice(0, 40);
+  return withClient(async function (c) {
+    await c.query('BEGIN');
+    try {
+      let saved = 0, deleted = 0;
+      for (const x of rows) {
+        if (x.amount === null) {
+          const r = await c.query('DELETE FROM financii_ad_spend WHERE book = $1 AND shop = $2 AND day = $3', [book, x.shop, x.day]);
+          deleted += r.rowCount;
+          continue;
+        }
+        await c.query(`
+          INSERT INTO financii_ad_spend (book, shop, day, amount, source, updated_at)
+          VALUES ($1, $2, $3, $4, $5, now())
+          ON CONFLICT (book, shop, day) DO UPDATE
+            SET amount = EXCLUDED.amount, source = EXCLUDED.source, updated_at = now()`,
+          [book, x.shop, x.day, x.amount.toFixed(2), src]);
+        saved++;
+      }
+      await c.query('COMMIT');
+      return { saved, deleted };
+    } catch (e) {
+      try { await c.query('ROLLBACK'); } catch (_) { /* ปิดไปแล้ว */ }
+      throw e;
+    }
+  });
+}
+
 async function healthy() {
   if (!enabled()) return false;
   try { await withClient((c) => c.query('SELECT 1')); return true; }
@@ -257,4 +335,4 @@ async function healthy() {
 }
 
 module.exports = { enabled, init, read, write, healthy, listBooks, removeBook, listTrash, restoreTrash, purgeTrash,
-  validBook, DEFAULT_BOOK, BOOK: DEFAULT_BOOK };
+  adsList, adsUpsert, cleanAdItems, validBook, DEFAULT_BOOK, BOOK: DEFAULT_BOOK };

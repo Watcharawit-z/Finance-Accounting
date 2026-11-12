@@ -8,6 +8,12 @@ const store = require('./store');
 
 const PORT = Number(process.env.PORT || 3000);
 const PASSCODE = String(process.env.APP_PASSCODE || '');
+/* รหัสเจ้าของ — เข้าได้ทุกหน้าเหมือนรหัสร่วม และเห็นหน้ายอดขาย กำไร ค่าแอด (ข้อมูลค่าแอดส่งให้เฉพาะรหัสนี้)
+   ตั้งซ้ำกับรหัสร่วมไม่ได้ ไม่งั้นทุกคนกลายเป็นเจ้าของ — ระบบปิดสิทธิ์เจ้าของไว้แทน */
+const OWNER_PASSCODE = process.env.APP_OWNER_PASSCODE && process.env.APP_OWNER_PASSCODE !== PASSCODE
+  ? String(process.env.APP_OWNER_PASSCODE) : '';
+/* กุญแจสำหรับระบบอื่นส่งค่าแอดเข้ามา (เช่น SellerHub) — แยกจากรหัสเจ้าของ ไม่ต้องฝากรหัสเจ้าของไว้ในระบบอื่น */
+const INGEST_KEY = String(process.env.APP_INGEST_KEY || '');
 const html = fs.readFileSync(path.join(__dirname, 'index.html'));
 const etag = '"' + crypto.createHash('sha1').update(html).digest('hex').slice(0, 16) + '"';
 
@@ -22,13 +28,26 @@ const json = (res, code, body) => {
  * ★ ส่วนหัวของ HTTP รับได้แค่อักขระ ASCII รหัสผ่านภาษาไทยจึงต้องเข้ารหัส base64 มา
  *   ไม่งั้นเบราว์เซอร์จะโยนข้อผิดพลาดตั้งแต่ตอนตั้งค่าส่วนหัว
  */
-function passOk(req) {
-  if (!PASSCODE) return true;
-  const raw = String(req.headers['x-passcode'] || '');
-  const got = Buffer.from(raw, 'base64').toString('utf8');
-  const a = crypto.createHash('sha256').update(got).digest();
-  const b = crypto.createHash('sha256').update(PASSCODE).digest();
+function sameSecret(got, want) {
+  const a = crypto.createHash('sha256').update(String(got)).digest();
+  const b = crypto.createHash('sha256').update(String(want)).digest();
   return crypto.timingSafeEqual(a, b);
+}
+/** สิทธิ์ของผู้เรียก: owner (รหัสเจ้าของ) · staff (รหัสร่วม หรือไม่ได้ตั้งรหัสร่วม) · null = รหัสผิด */
+function roleOf(req) {
+  const raw = String(req.headers['x-passcode'] || '');
+  const got = raw ? Buffer.from(raw, 'base64').toString('utf8') : '';
+  if (OWNER_PASSCODE && got && sameSecret(got, OWNER_PASSCODE)) return 'owner';
+  if (!PASSCODE) return 'staff';
+  return got && sameSecret(got, PASSCODE) ? 'staff' : null;
+}
+const passOk = (req) => roleOf(req) !== null;
+/** กุญแจของระบบที่ส่งข้อมูลเข้า — Authorization: Bearer <กุญแจ> หรือ x-api-key */
+function ingestOk(req) {
+  if (!INGEST_KEY) return false;
+  const h = String(req.headers.authorization || '');
+  const got = /^Bearer\s+/i.test(h) ? h.replace(/^Bearer\s+/i, '') : String(req.headers['x-api-key'] || '');
+  return !!got && sameSecret(got, INGEST_KEY);
 }
 
 function readBody(req, limit) {
@@ -53,6 +72,7 @@ async function api(req, res, url, query) {
     return json(res, 200, {
       storage: store.enabled() ? 'server' : 'browser',
       needsPasscode: Boolean(PASSCODE),
+      ownerLogin: Boolean(OWNER_PASSCODE),
       book: store.DEFAULT_BOOK,
       multiCompany: true,
     });
@@ -61,7 +81,30 @@ async function api(req, res, url, query) {
     return json(res, 404, { error: { code: 'NO_SERVER_STORAGE',
       message: 'บริการนี้ยังไม่ได้ต่อฐานข้อมูล ข้อมูลถูกเก็บในเบราว์เซอร์' } });
   }
-  if (!passOk(req)) {
+  /* ระบบอื่นส่งค่าแอดรายวันเข้ามา — ใช้กุญแจ ไม่ใช้รหัสผ่าน
+     POST /api/ingest/ad-spend { book?, source?, items: [{ date: "YYYY-MM-DD", shop, amount }] } */
+  if (url === '/api/ingest/ad-spend') {
+    if (!INGEST_KEY) {
+      return json(res, 403, { error: { code: 'INGEST_DISABLED', message: 'ยังไม่ได้ตั้งกุญแจ APP_INGEST_KEY ที่เซิร์ฟเวอร์' } });
+    }
+    if (!ingestOk(req)) return json(res, 401, { error: { code: 'BAD_KEY', message: 'กุญแจไม่ถูกต้อง' } });
+    if (req.method !== 'POST') return json(res, 405, { error: { code: 'METHOD_NOT_ALLOWED', message: 'ใช้ POST' } });
+    let body;
+    try { body = await readBody(req, 2 * 1024 * 1024); }
+    catch (e) { return json(res, 400, { error: { code: e.code || 'BAD_BODY', message: e.message } }); }
+    const target = (body && body.book) || query.get('book') || store.DEFAULT_BOOK;
+    if (!store.validBook(target)) return json(res, 400, { error: { code: 'BAD_BOOK', message: 'รหัสสมุดไม่ถูกต้อง' } });
+    try {
+      const r = await store.adsUpsert(target, body && body.items, (body && body.source) || 'ingest', false);
+      return json(res, 200, Object.assign({ ok: true, book: target }, r));
+    } catch (e) {
+      if (e.code) return json(res, 400, { error: { code: e.code, message: e.message } });
+      throw e;
+    }
+  }
+
+  const role = roleOf(req);
+  if (!role) {
     return json(res, 401, { error: { code: 'PASSCODE_REQUIRED', message: 'รหัสผ่านไม่ถูกต้อง' } });
   }
 
@@ -69,6 +112,29 @@ async function api(req, res, url, query) {
   if (!store.validBook(book)) {
     return json(res, 400, { error: { code: 'BAD_BOOK',
       message: 'รหัสสมุดใช้ได้เฉพาะ a-z A-Z 0-9 ขีดกลาง และขีดล่าง' } });
+  }
+
+  if (url === '/api/me' && req.method === 'GET') {
+    return json(res, 200, { role, ownerLogin: Boolean(OWNER_PASSCODE), ingest: Boolean(INGEST_KEY) });
+  }
+  /* ค่าแอดรายวัน — เฉพาะรหัสเจ้าของ (รหัสร่วมได้ 403 ข้อมูลไม่ออกจากเซิร์ฟเวอร์) */
+  if (url === '/api/ads') {
+    if (role !== 'owner') return json(res, 403, { error: { code: 'OWNER_ONLY', message: 'หน้านี้สำหรับเจ้าของเท่านั้น' } });
+    if (req.method === 'GET') {
+      const day = (k) => { const v = query.get(k); return v && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null; };
+      return json(res, 200, { book, items: await store.adsList(book, day('from'), day('to')) });
+    }
+    if (req.method === 'PUT') {
+      let body;
+      try { body = await readBody(req, 2 * 1024 * 1024); }
+      catch (e) { return json(res, 400, { error: { code: e.code || 'BAD_BODY', message: e.message } }); }
+      try { return json(res, 200, Object.assign({ ok: true }, await store.adsUpsert(book, body && body.items, 'manual', true))); }
+      catch (e) {
+        if (e.code) return json(res, 400, { error: { code: e.code, message: e.message } });
+        throw e;
+      }
+    }
+    return json(res, 405, { error: { code: 'METHOD_NOT_ALLOWED', message: 'วิธีเรียกไม่ถูกต้อง' } });
   }
 
   if (url === '/api/books' && req.method === 'GET') {
@@ -176,7 +242,11 @@ store.init()
     server.listen(PORT, '0.0.0.0', function () {
       console.log('Financii — พอร์ต ' + PORT + ' · เก็บข้อมูล: '
         + (on ? 'ฐานข้อมูลบนเซิร์ฟเวอร์ · รองรับหลายบริษัท' : 'เบราว์เซอร์ของผู้ใช้')
-        + (PASSCODE ? ' · ต้องใส่รหัสผ่าน' : ''));
+        + (PASSCODE ? ' · ต้องใส่รหัสผ่าน' : '') + (OWNER_PASSCODE ? ' · มีรหัสเจ้าของ' : '')
+        + (INGEST_KEY ? ' · รับค่าแอดจากระบบอื่นได้' : ''));
+      if (process.env.APP_OWNER_PASSCODE && !OWNER_PASSCODE) {
+        console.warn('★ APP_OWNER_PASSCODE ซ้ำกับ APP_PASSCODE — ปิดสิทธิ์เจ้าของไว้ ตั้งรหัสเจ้าของให้ต่างจากรหัสร่วม');
+      }
       if (on && !PASSCODE) {
         console.warn('★ ยังไม่ได้ตั้ง APP_PASSCODE — ใครที่รู้ URL จะอ่านและแก้ข้อมูลบัญชีได้ทั้งหมด');
       }

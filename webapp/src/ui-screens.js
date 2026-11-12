@@ -2240,7 +2240,8 @@ function scSettings() {
     /* เลขที่เอกสาร และค่าเริ่มต้นของเอกสารใหม่ — ui-master.js */
     + numberingCard()
     + docDefaultsCard()
-    + inventoryMethodCard();
+    + inventoryMethodCard()
+    + accessCard();
 }
 
 const SCREENS = {

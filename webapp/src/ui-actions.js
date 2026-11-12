@@ -3164,6 +3164,7 @@ async function boot() {
     }
     const r = await syncPull();
     if (r === 'locked') { render(); return; }
+    await syncMe();
     if (r === 'empty') { buildSeed(); render(); await syncPush(); await syncBooks(); }
     else if (r === 'error') {
       /* ต่อเซิร์ฟเวอร์ไม่ได้ อย่าให้หน้าจอว่างเปล่า — ใช้ของในเครื่องไปก่อนแล้วบอกให้รู้ */
