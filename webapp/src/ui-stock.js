@@ -20,12 +20,14 @@ function stockGapNote() {
 /* ---------- วิธีบันทึกสินค้าคงเหลือ (ต่อเนื่อง / สิ้นงวด) ---------- */
 function inventoryMethodCard() {
   const periodic = invPeriodic();
-  const buy = stockBuyAcc();
+  /* ผังบัญชีที่ยกมาจากระบบเดิมของกิจการบริการอาจไม่มีบัญชีสินค้าคงเหลือ — หน้าตั้งค่าต้องเปิดได้เสมอ */
+  let buy = '';
+  try { buy = stockBuyAcc(); } catch (e) { buy = ''; }
   return card({
     title:'วิธีบันทึกสินค้าคงเหลือ', sub: INV_METHODS[periodic ? 'periodic' : 'perpetual'],
     actions: btn('invmethod:' + (periodic ? 'perpetual' : 'periodic'), 'เปลี่ยนเป็น' + INV_METHODS[periodic ? 'perpetual' : 'periodic']),
     body:'<div class="kv">'
-      + [['ซื้อ / รับสินค้าเข้าคลัง', 'Dr ' + buy + ' ' + acc(buy).name],
+      + [['ซื้อ / รับสินค้าเข้าคลัง', buy ? 'Dr ' + buy + ' ' + acc(buy).name : 'ยังไม่มีบัญชีสินค้าคงเหลือในผังบัญชี'],
          ['ขายสินค้า', periodic ? 'ไม่ลงต้นทุนทีละใบ (ทะเบียนสินค้าตัดจำนวนให้)' : 'Dr ต้นทุนขาย / Cr สินค้าคงเหลือ ทุกใบ'],
          ['สิ้นเดือน', periodic ? 'ปรับปรุงสินค้าคงเหลือให้เท่าทะเบียนสินค้า ส่วนต่างเข้าต้นทุนขาย' : 'ไม่ต้องปรับ บัญชีเท่าทะเบียนสินค้าตลอด']]
         .map((x) => '<div><span>' + esc(x[0]) + '</span><b>' + esc(x[1]) + '</b></div>').join('') + '</div>',
