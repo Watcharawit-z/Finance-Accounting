@@ -845,9 +845,11 @@ const overflowInfo = (page) => page.evaluate(() => {
   await page.waitForTimeout(150);
   const shortNav = await page.evaluate(() => ({
     links: document.querySelectorAll('#nav .nav-i').length,
+    /* กลุ่มภาพรวม: แดชบอร์ด ปิดงวด + หน้ายอดขาย กำไร ค่าแอด เมื่อเป็นเจ้าของ (เปิดแบบเก็บในเบราว์เซอร์ = เจ้าของ) */
+    want: ownerVisible() ? 3 : 2,
     groups: document.querySelectorAll('#nav .nav-gh').length }));
   ok('★ เมนูสั้น: ยุบเหลือหัวกลุ่ม กางเฉพาะกลุ่มของหน้าที่เปิดอยู่',
-    shortNav.links === 2 && shortNav.groups === 12, shortNav.groups + ' กลุ่ม · ' + shortNav.links + ' ลิงก์ที่เห็น');
+    shortNav.links === shortNav.want && shortNav.groups === 12, shortNav.groups + ' กลุ่ม · ' + shortNav.links + ' ลิงก์ที่เห็น');
   await page.click('#nav [data-act="navg:เอกสารขาย"]');
   await page.waitForTimeout(120);
   ok('กดหัวกลุ่มแล้วกางรายการข้างใน',
