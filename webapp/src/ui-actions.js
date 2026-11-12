@@ -2137,10 +2137,24 @@ function modalPayBatch(no) {
 const JV_ROWS = 6;
 /* จำนวนบรรทัดของใบสำคัญที่เปิดอยู่ — เริ่ม 6 บรรทัด กดเพิ่มได้ไม่จำกัด (ใบปรับปรุงสิ้นปีมักมีหลายสิบบรรทัด) */
 const jvCount = () => Number(val('jcount')) || JV_ROWS;
-let JV_ACCS = [];
+/* ตัวเลือกบัญชีของใบสำคัญ (สร้างครั้งเดียวต่อฟอร์ม) — ทุกบัญชีในผัง จัดกลุ่มตามหมวด ค้นหาได้ด้วยกล่องค้นหา (ui-picker.js)
+   บัญชีคุมแสดงให้เห็นแต่เลือกไม่ได้ บอกว่าต้องลงจากเอกสารไหน */
+let JV_OPTS = '';
+const JV_TYPE_TH = { asset:'สินทรัพย์', liability:'หนี้สิน', equity:'ส่วนของผู้ถือหุ้น', revenue:'รายได้', expense:'ค่าใช้จ่าย' };
+function jvAccOptions(book) {
+  const open = (a) => !CONTROL_SUBS[a.subType] || (book === 'payment' && WHT_SUB_FORM_OF[a.subType]);
+  return '<option value="">— เลือกหรือพิมพ์ค้นหา —</option>'
+    + Object.keys(JV_TYPE_TH).map(function (t) {
+      const list = DB.accounts.filter((a) => a.postable && a.type === t).sort((x, y) => (x.code < y.code ? -1 : 1));
+      if (!list.length) return '';
+      return '<optgroup label="' + esc(JV_TYPE_TH[t]) + '">' + list.map((a) => '<option value="' + esc(a.code) + '"'
+        + (open(a) ? '' : ' disabled') + '>' + esc(a.code + ' ' + a.name + (open(a) ? '' : ' — บัญชีคุม ลงจากเอกสาร')) + '</option>').join('')
+        + '</optgroup>';
+    }).join('');
+}
 function jvRowHtml(i, presetAcc) {
-  return '<tr><td><select name="j' + i + '_acc">'
-    + JV_ACCS.map((o) => '<option value="' + esc(o[0]) + '"' + (presetAcc === o[0] ? ' selected' : '') + '>' + esc(o[1]) + '</option>').join('')
+  const opts = presetAcc ? JV_OPTS.replace('<option value="' + esc(presetAcc) + '">', '<option value="' + esc(presetAcc) + '" selected>') : JV_OPTS;
+  return '<tr><td><select name="j' + i + '_acc" aria-label="บัญชีบรรทัดที่ ' + (i + 1) + '">' + opts
     + '</select></td><td><input name="j' + i + '_memo"></td>'
     + '<td><input name="j' + i + '_dr" class="r jvamt"></td><td><input name="j' + i + '_cr" class="r jvamt"></td></tr>';
 }
@@ -2171,9 +2185,7 @@ function modalJournalVoucher(book) {
   const cfg = JOURNAL_BOOKS[book];
   if (!cfg) return;
   /* บัญชีคุมเลือกไม่ได้ ยกเว้นภาษีหัก ณ ที่จ่ายค้างนำส่งในเล่มจ่าย — ใช้นำส่งยอดที่ยกมาจากระบบเดิม (ระบบตรวจยอดให้) */
-  JV_ACCS = [['', '— เลือกบัญชี —']].concat(DB.accounts
-    .filter((a) => a.postable && (!CONTROL_SUBS[a.subType] || (book === 'payment' && WHT_SUB_FORM_OF[a.subType])))
-    .map((a) => [a.code, a.code + ' ' + a.name]));
+  JV_OPTS = jvAccOptions(book);
   let bank = '';
   try { bank = accBySub('bank'); } catch (e) { bank = ''; }
   /* เติมบัญชีธนาคารให้ในบรรทัดที่เล่มนั้นต้องมี — รับ: เดบิตธนาคาร · จ่าย: เครดิตธนาคาร */
@@ -2199,8 +2211,8 @@ function modalJournalVoucher(book) {
       + '<input type="hidden" name="jcount" value="' + JV_ROWS + '">'
       + '<div class="jv-tot" id="jvTot"></div><div>' + btn('jvrows', '+ เพิ่มบรรทัด') + '</div>',
     submitLabel:'ลงบัญชีและออกเลขที่',
-    note: book === 'payment' ? 'บัญชีคุมไม่อยู่ในรายการให้เลือก ยกเว้นภาษีหัก ณ ที่จ่ายค้างนำส่งที่ยกมาจากระบบเดิม'
-      : 'บัญชีคุมไม่อยู่ในรายการให้เลือก เพราะต้องเกิดจากเอกสารเท่านั้น',
+    note: 'ช่องบัญชีพิมพ์รหัสหรือชื่อค้นหาได้ · บัญชีคุม (ลูกหนี้ เจ้าหนี้ ภาษีซื้อ ภาษีขาย สินค้า) ต้องเกิดจากเอกสารเท่านั้น'
+      + (book === 'payment' ? ' ยกเว้นภาษีหัก ณ ที่จ่ายค้างนำส่งที่ยกมาจากระบบเดิม' : ''),
     onSubmit: function () {
       submitAction(function () {
         const lines = [];

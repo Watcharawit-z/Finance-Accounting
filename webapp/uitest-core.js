@@ -96,6 +96,42 @@ const os = require('os');
   const je = await page.evaluate(() => DB.entries.filter((e) => e.type === 'general').slice(-1)[0]);
   ok('ลงใบสำคัญ 9 บรรทัดได้ ยอดสมดุล', je && je.lines.length === 9 && je.total === 8000000, je && je.lines.length + ' บรรทัด');
 
+  console.log('\n[4.1] ค้นหาบัญชีในใบสำคัญทุกเล่ม');
+  const books = ['general', 'purchase', 'sales', 'payment', 'receipt'];
+  const found = [];
+  for (const b of books) {
+    await page.evaluate((b) => modalJournalVoucher(b), b);
+    await page.waitForSelector('#modal.show');
+    await page.click('#modal [name="j2_acc"]');
+    await page.waitForSelector('#selPick.show');
+    await page.keyboard.type('ค่าเช่า');
+    const items = await page.$$eval('#selPick .sp-i', (els) => els.map((e) => e.textContent));
+    await page.keyboard.press('Enter');
+    const r = await page.evaluate(() => ({ v: val('j2_acc'), modal: document.getElementById('modal').classList.contains('show'),
+      pick: document.getElementById('selPick').classList.contains('show'), name: acc(val('j2_acc')).name }));
+    found.push({ b, n: items.length, ok: r.modal && !r.pick && /ค่าเช่า/.test(r.name) && items.every((t) => /ค่าเช่า/.test(t)) });
+    await page.click('#modal [data-act="modal:close"]');
+    await T.closed(page);
+  }
+  ok('★ ทุกเล่ม (ทั่วไป ซื้อ ขาย จ่าย รับ) พิมพ์ "ค่าเช่า" ในช่องบัญชีแล้วเหลือเฉพาะบัญชีค่าเช่า กด Enter เลือกได้ ฟอร์มไม่ถูกบันทึก',
+    found.every((x) => x.ok && x.n > 0), JSON.stringify(found));
+  await page.evaluate(() => modalJournalVoucher('general'));
+  await page.waitForSelector('#modal.show');
+  await page.focus('#modal [name="j0_acc"]');
+  await page.keyboard.type('1111');
+  const kb = await page.$$eval('#selPick .sp-i', (els) => els.map((e) => e.textContent));
+  await page.keyboard.press('Escape');
+  const esc1 = await page.evaluate(() => ({ modal: document.getElementById('modal').classList.contains('show'), pick: document.getElementById('selPick').classList.contains('show') }));
+  ok('กด Tab มาที่ช่องบัญชีแล้วพิมพ์รหัสได้เลย · Esc ปิดเฉพาะกล่องค้นหา ฟอร์มยังอยู่', /^1111 /.test(kb[0] || '') && esc1.modal && !esc1.pick, kb.slice(0, 2).join(' | '));
+  await page.click('#modal [name="j1_acc"]');
+  await page.keyboard.type('ลูกหนี้การค้า');
+  const ctl = await page.$$eval('#selPick .sp-i', (els) => els.map((e) => ({ off: e.classList.contains('off'), t: e.textContent })));
+  await page.keyboard.press('Enter');
+  ok('บัญชีคุม (ลูกหนี้การค้า) เห็นในรายการพร้อมเหตุผล แต่เลือกไม่ได้', ctl.length > 0 && ctl.every((x) => x.off && /บัญชีคุม/.test(x.t))
+    && await page.evaluate(() => val('j1_acc') === ''), JSON.stringify(ctl[0]));
+  await page.click('#modal [data-act="modal:close"]');
+  await T.closed(page);
+
   console.log('\n[5] ภ.พ.30 ขอคืนเป็นเงินสด และพิมพ์รายงานมีชื่อบริษัท');
   await page.evaluate(() => {
     const v = savePartner({ kind: 'vendor', name: 'บริษัท ผู้ขาย จำกัด', taxId: '0105536000003', address: 'กทม.' }).partner;

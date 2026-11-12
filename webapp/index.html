@@ -80,7 +80,7 @@
   --dur-micro: 120ms; --dur-short: 220ms; --dur-long: 320ms;
 
   --z-raised: 10; --z-sticky: 200; --z-drawer: 300; --z-dropdown: 350;
-  --z-modal: 400; --z-palette: 450; --z-print: 480; --z-toast: 500; --z-tooltip: 600;
+  --z-modal: 400; --z-picker: 420; --z-palette: 450; --z-print: 480; --z-toast: 500; --z-tooltip: 600;
 
   --side-w: 264px; --top-h: 58px;
 
@@ -836,6 +836,23 @@ button.st-btn .caret{width:0; height:0; margin-left:6px; border-left:4px solid t
   border-top:5px solid var(--color-muted); display:inline-block; vertical-align:middle}
 button.st-btn:focus-visible{outline:2px solid var(--color-focus); outline-offset:1px}
 #pop{position:fixed; z-index:var(--z-dropdown); display:none}
+/* กล่องค้นหาของช่องเลือกที่ยาว (ui-picker.js) — อยู่เหนือหน้าต่างฟอร์ม */
+#selPick{position:fixed; z-index:var(--z-picker); display:none; flex-direction:column; background:var(--color-paper);
+  border:1px solid var(--color-rule); border-radius:var(--radius-panel); box-shadow:var(--shadow-float); overflow:hidden}
+#selPick.show{display:flex}
+#selPick .sp-h{display:flex; align-items:center; gap:var(--space-xs); padding:8px; border-bottom:1px solid var(--color-rule)}
+#selPick .sp-h input{flex:1; min-width:0; height:36px; padding:0 10px; font:inherit; font-size:14px; color:var(--color-ink);
+  background:var(--color-paper); border:1px solid var(--color-rule-2); border-radius:var(--radius-ctl)}
+#selPick .sp-h input:focus{outline:2px solid var(--color-focus); outline-offset:0; border-color:transparent}
+#selPick .sp-n{flex:none; font-size:var(--text-xs); color:var(--color-muted); white-space:nowrap}
+#selPick .sp-list{overflow-y:auto; padding:4px; overscroll-behavior:contain}
+#selPick .sp-g{padding:8px 10px 4px; font-size:var(--text-xs); color:var(--color-muted); font-weight:600}
+#selPick .sp-i{padding:7px 10px; border-radius:var(--radius-ctl); cursor:pointer; font-size:14px; color:var(--color-ink);
+  overflow-wrap:anywhere}
+#selPick .sp-i.cur{font-weight:600}
+#selPick .sp-i.off{color:var(--color-muted); cursor:default; background:none}
+#selPick .sp-i.on,#selPick .sp-i:hover{background:var(--color-accent-soft)}
+#selPick .sp-none{padding:14px 10px; font-size:14px; color:var(--color-muted)}
 #pop.show{display:block}
 .pop-box{background:var(--color-paper); border:1px solid var(--color-rule); border-radius:var(--radius-panel); box-shadow:var(--shadow-float);
   padding:10px; display:grid; grid-template-columns:minmax(0,1fr); gap:4px 10px; width:min(820px,94vw); max-height:80dvh; overflow-y:auto}
@@ -10888,6 +10905,8 @@ function buildSeed() {
      ปุ่ม "ล้างข้อมูลตัวอย่างแล้วสร้างใหม่" เรียกตัวนี้ทับของเดิม ถ้าไม่ล้างก่อน
      เอกสารจะซ้ำทั้งชุดแล้วโยน DUPLICATE_VENDOR_INVOICE ตั้งแต่เดือนแรก */
   const fresh = blankState();
+  /* ตัวสุ่มเริ่มค่าเดิมทุกครั้ง — สร้างซ้ำในหน้าเดิมต้องได้ชุดเดียวกัน ไม่งั้นวันที่สุ่มอาจชนกติกา (วางบิลก่อนวันที่ใบกำกับ) แล้วสร้างไม่สำเร็จ */
+  _seed = 20260731;
   Object.keys(DB).forEach((k) => { if (!(k in fresh)) delete DB[k]; });
   Object.keys(fresh).forEach((k) => { DB[k] = fresh[k]; });
 
@@ -12150,6 +12169,174 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
   });
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { fitNums(); });
 }
+
+
+/* ===== ui-picker.js ===== */
+/* ===================================================================
+   ช่องเลือกที่ค้นหาได้ — รายการยาว (ผังบัญชี ผู้ติดต่อ สินค้า) ไม่ต้องเลื่อนหา
+   ช่องเลือกที่มีตัวเลือกตั้งแต่ PICK_MIN รายการขึ้นไป กดแล้วเปิดกล่องค้นหาแทนรายการของเบราว์เซอร์
+   พิมพ์รหัสหรือชื่อบางส่วนได้ (หลายคำ = ต้องเจอทุกคำ) · ลูกศรขึ้นลงเลือก · Enter ตกลง · Esc ปิด
+   ค่าที่เลือกเขียนกลับไปที่ช่องเลือกเดิมแล้วส่ง change — โค้ดฟอร์มทุกที่อ่านค่าแบบเดิมได้เลย
+   ไม่ต้องการให้ค้นหา ใส่ data-nosearch ที่ช่องนั้น
+   =================================================================== */
+const PICK_MIN = 15;
+let PICK = null;          // { sel, items, shown, at }
+
+const pickable = (sel) => !!sel && sel.tagName === 'SELECT' && !sel.disabled && !sel.multiple
+  && !sel.hasAttribute('data-nosearch') && sel.options.length >= PICK_MIN;
+/** ข้อความที่ใช้ค้น — ตัวพิมพ์เล็ก ช่องว่างเดียว */
+const pickNorm = (s) => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim();
+
+function pickItems(sel) {
+  const out = [];
+  Array.from(sel.options).forEach(function (o) {
+    const g = o.parentElement && o.parentElement.tagName === 'OPTGROUP' ? o.parentElement.label : '';
+    out.push({ value: o.value, text: o.textContent, group: g, disabled: o.disabled, key: pickNorm(g + ' ' + o.textContent) });
+  });
+  return out;
+}
+/** ตัวเลือกที่ปิดไว้ (เช่น บัญชีคุม) ยังแสดงให้เห็นพร้อมเหตุผล แต่เลือกไม่ได้ */
+function pickFilter(q) {
+  const words = pickNorm(q).split(' ').filter(Boolean);
+  return PICK.items.filter((it) => words.every((w) => it.key.indexOf(w) >= 0));
+}
+/** ขยับไปตัวเลือกถัดไปที่เลือกได้ */
+function pickStep(from, dir) {
+  const n = PICK.shown.length;
+  for (let k = 1; k <= n; k++) {
+    const i = (from + dir * k + n * k) % n;
+    if (!PICK.shown[i].disabled) return i;
+  }
+  return -1;
+}
+function pickRender() {
+  const box = document.getElementById('selPick');
+  const list = box.querySelector('.sp-list');
+  const q = box.querySelector('input').value;
+  PICK.shown = pickFilter(q);
+  if (!PICK.shown[PICK.at] || PICK.shown[PICK.at].disabled) PICK.at = pickStep(-1, 1);
+  let g = null, h = '';
+  PICK.shown.forEach(function (it, i) {
+    if (it.group && it.group !== g) { g = it.group; h += '<div class="sp-g">' + esc(g) + '</div>'; }
+    h += '<div class="sp-i' + (i === PICK.at ? ' on' : '') + (it.value === PICK.sel.value ? ' cur' : '') + (it.disabled ? ' off' : '')
+      + '" role="option" aria-selected="' + (i === PICK.at) + '"' + (it.disabled ? ' aria-disabled="true"' : '')
+      + ' data-i="' + i + '">' + esc(it.text) + '</div>';
+  });
+  list.innerHTML = h || '<div class="sp-none">ไม่พบ "' + esc(q) + '" — ลองพิมพ์รหัสหรือบางส่วนของชื่อ</div>';
+  const on = list.querySelector('.sp-i.on');
+  if (on) on.scrollIntoView({ block: 'nearest' });
+  const real = (x) => x.value !== '';
+  box.querySelector('.sp-n').textContent = PICK.shown.filter(real).length + ' จาก ' + PICK.items.filter(real).length;
+}
+function pickPlace() {
+  const box = document.getElementById('selPick');
+  const r = PICK.sel.getBoundingClientRect();
+  const w = Math.min(Math.max(r.width, 320), window.innerWidth - 16);
+  const left = Math.max(8, Math.min(r.left, window.innerWidth - w - 8));
+  const below = window.innerHeight - r.bottom - 8, above = r.top - 8;
+  const up = below < 260 && above > below;
+  box.style.width = w + 'px';
+  box.style.left = left + 'px';
+  box.style.maxHeight = Math.max(180, Math.min(420, up ? above : below)) + 'px';
+  if (up) { box.style.top = ''; box.style.bottom = (window.innerHeight - r.top + 4) + 'px'; }
+  else { box.style.bottom = ''; box.style.top = (r.bottom + 4) + 'px'; }
+}
+function openPicker(sel, q) {
+  let box = document.getElementById('selPick');
+  if (!box) {
+    box = document.createElement('div');
+    box.id = 'selPick';
+    box.setAttribute('role', 'dialog');
+    box.innerHTML = '<div class="sp-h"><input type="search" autocomplete="off" spellcheck="false" aria-label="ค้นหา"'
+      + ' placeholder="พิมพ์รหัสหรือชื่อเพื่อค้นหา"><span class="sp-n"></span></div><div class="sp-list" role="listbox"></div>';
+    document.body.appendChild(box);
+    const input = box.querySelector('input');
+    input.addEventListener('input', function () { PICK.at = 0; pickRender(); });
+    input.addEventListener('keydown', pickKey);
+    /* mousedown ไม่ให้ช่องค้นหาเสียโฟกัสก่อนคลิกเลือก */
+    box.addEventListener('mousedown', function (ev) { if (ev.target.tagName !== 'INPUT') ev.preventDefault(); });
+    box.addEventListener('click', function (ev) {
+      const it = ev.target.closest('.sp-i');
+      if (it) pickChoose(Number(it.getAttribute('data-i')));
+    });
+  }
+  const items = pickItems(sel);
+  PICK = { sel, items, shown: [], at: 0 };
+  const cur = items.findIndex((x) => x.value === sel.value && x.value !== '' && !x.disabled);
+  const input = box.querySelector('input');
+  input.value = q || '';
+  box.classList.add('show');
+  pickPlace();
+  pickRender();
+  /* ยังไม่พิมพ์อะไร — ชี้ที่ค่าที่เลือกอยู่ */
+  if (!q && cur >= 0) { PICK.at = cur; pickRender(); }
+  input.focus();
+}
+function closePicker(refocus) {
+  const box = document.getElementById('selPick');
+  if (!box || !box.classList.contains('show')) return false;
+  box.classList.remove('show');
+  const sel = PICK && PICK.sel;
+  PICK = null;
+  if (refocus && sel && document.body.contains(sel)) sel.focus();
+  return true;
+}
+function pickChoose(i) {
+  const it = PICK && PICK.shown[i];
+  if (!it || it.disabled) return;
+  const sel = PICK.sel;
+  const changed = sel.value !== it.value;
+  sel.value = it.value;
+  closePicker(true);
+  if (changed) {
+    sel.dispatchEvent(new Event('input', { bubbles: true }));
+    sel.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+}
+function pickKey(ev) {
+  /* Enter และ Esc ในกล่องค้นหาไม่ไปถึงฟอร์ม — ไม่งั้น Enter บันทึกฟอร์มทั้งใบ Esc ปิดฟอร์ม */
+  if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
+    ev.preventDefault();
+    const i = PICK.shown.length ? pickStep(PICK.at < 0 ? -1 : PICK.at, ev.key === 'ArrowDown' ? 1 : -1) : -1;
+    if (i >= 0) { PICK.at = i; pickRender(); }
+  } else if (ev.key === 'Enter') {
+    ev.preventDefault(); ev.stopPropagation();
+    pickChoose(PICK.at);
+  } else if (ev.key === 'Escape') {
+    ev.preventDefault(); ev.stopPropagation();
+    closePicker(true);
+  } else if (ev.key === 'Tab') {
+    closePicker(false);
+  }
+}
+
+/* คลิกช่องเลือกที่ยาว → เปิดกล่องค้นหาแทนรายการของเบราว์เซอร์ */
+document.addEventListener('mousedown', function (ev) {
+  const box = document.getElementById('selPick');
+  if (box && box.classList.contains('show') && !box.contains(ev.target)) {
+    const same = PICK && ev.target === PICK.sel;
+    closePicker(false);
+    if (same) { ev.preventDefault(); return; }
+  }
+  const sel = ev.target.closest && ev.target.closest('select');
+  if (ev.button === 0 && pickable(sel)) { ev.preventDefault(); sel.focus(); openPicker(sel, ''); }
+});
+/* โฟกัสอยู่ที่ช่องเลือก (กด Tab มา) แล้วพิมพ์ตัวอักษร Enter Space หรือลูกศรลง → เปิดกล่องค้นหา ตัวที่พิมพ์เป็นคำค้น */
+document.addEventListener('keydown', function (ev) {
+  const sel = ev.target;
+  if (!pickable(sel) || ev.ctrlKey || ev.metaKey || ev.altKey) return;
+  const ch = ev.key.length === 1 && ev.key !== ' ' ? ev.key : '';
+  if (ch || ev.key === 'Enter' || ev.key === ' ' || ev.key === 'ArrowDown') {
+    ev.preventDefault(); ev.stopPropagation();
+    openPicker(sel, ch);
+  }
+}, true);
+/* เลื่อนหน้าหรือย่อขยายหน้าต่าง — ปิดกล่อง (ตำแหน่งจะไม่ตรงกับช่องแล้ว) ยกเว้นเลื่อนรายการในกล่องเอง */
+document.addEventListener('scroll', function (ev) {
+  const box = document.getElementById('selPick');
+  if (box && box.classList.contains('show') && !box.contains(ev.target)) closePicker(false);
+}, true);
+window.addEventListener('resize', function () { closePicker(false); });
 
 
 /* ===== ui-docform.js ===== */
@@ -26080,10 +26267,24 @@ function modalPayBatch(no) {
 const JV_ROWS = 6;
 /* จำนวนบรรทัดของใบสำคัญที่เปิดอยู่ — เริ่ม 6 บรรทัด กดเพิ่มได้ไม่จำกัด (ใบปรับปรุงสิ้นปีมักมีหลายสิบบรรทัด) */
 const jvCount = () => Number(val('jcount')) || JV_ROWS;
-let JV_ACCS = [];
+/* ตัวเลือกบัญชีของใบสำคัญ (สร้างครั้งเดียวต่อฟอร์ม) — ทุกบัญชีในผัง จัดกลุ่มตามหมวด ค้นหาได้ด้วยกล่องค้นหา (ui-picker.js)
+   บัญชีคุมแสดงให้เห็นแต่เลือกไม่ได้ บอกว่าต้องลงจากเอกสารไหน */
+let JV_OPTS = '';
+const JV_TYPE_TH = { asset:'สินทรัพย์', liability:'หนี้สิน', equity:'ส่วนของผู้ถือหุ้น', revenue:'รายได้', expense:'ค่าใช้จ่าย' };
+function jvAccOptions(book) {
+  const open = (a) => !CONTROL_SUBS[a.subType] || (book === 'payment' && WHT_SUB_FORM_OF[a.subType]);
+  return '<option value="">— เลือกหรือพิมพ์ค้นหา —</option>'
+    + Object.keys(JV_TYPE_TH).map(function (t) {
+      const list = DB.accounts.filter((a) => a.postable && a.type === t).sort((x, y) => (x.code < y.code ? -1 : 1));
+      if (!list.length) return '';
+      return '<optgroup label="' + esc(JV_TYPE_TH[t]) + '">' + list.map((a) => '<option value="' + esc(a.code) + '"'
+        + (open(a) ? '' : ' disabled') + '>' + esc(a.code + ' ' + a.name + (open(a) ? '' : ' — บัญชีคุม ลงจากเอกสาร')) + '</option>').join('')
+        + '</optgroup>';
+    }).join('');
+}
 function jvRowHtml(i, presetAcc) {
-  return '<tr><td><select name="j' + i + '_acc">'
-    + JV_ACCS.map((o) => '<option value="' + esc(o[0]) + '"' + (presetAcc === o[0] ? ' selected' : '') + '>' + esc(o[1]) + '</option>').join('')
+  const opts = presetAcc ? JV_OPTS.replace('<option value="' + esc(presetAcc) + '">', '<option value="' + esc(presetAcc) + '" selected>') : JV_OPTS;
+  return '<tr><td><select name="j' + i + '_acc" aria-label="บัญชีบรรทัดที่ ' + (i + 1) + '">' + opts
     + '</select></td><td><input name="j' + i + '_memo"></td>'
     + '<td><input name="j' + i + '_dr" class="r jvamt"></td><td><input name="j' + i + '_cr" class="r jvamt"></td></tr>';
 }
@@ -26114,9 +26315,7 @@ function modalJournalVoucher(book) {
   const cfg = JOURNAL_BOOKS[book];
   if (!cfg) return;
   /* บัญชีคุมเลือกไม่ได้ ยกเว้นภาษีหัก ณ ที่จ่ายค้างนำส่งในเล่มจ่าย — ใช้นำส่งยอดที่ยกมาจากระบบเดิม (ระบบตรวจยอดให้) */
-  JV_ACCS = [['', '— เลือกบัญชี —']].concat(DB.accounts
-    .filter((a) => a.postable && (!CONTROL_SUBS[a.subType] || (book === 'payment' && WHT_SUB_FORM_OF[a.subType])))
-    .map((a) => [a.code, a.code + ' ' + a.name]));
+  JV_OPTS = jvAccOptions(book);
   let bank = '';
   try { bank = accBySub('bank'); } catch (e) { bank = ''; }
   /* เติมบัญชีธนาคารให้ในบรรทัดที่เล่มนั้นต้องมี — รับ: เดบิตธนาคาร · จ่าย: เครดิตธนาคาร */
@@ -26142,8 +26341,8 @@ function modalJournalVoucher(book) {
       + '<input type="hidden" name="jcount" value="' + JV_ROWS + '">'
       + '<div class="jv-tot" id="jvTot"></div><div>' + btn('jvrows', '+ เพิ่มบรรทัด') + '</div>',
     submitLabel:'ลงบัญชีและออกเลขที่',
-    note: book === 'payment' ? 'บัญชีคุมไม่อยู่ในรายการให้เลือก ยกเว้นภาษีหัก ณ ที่จ่ายค้างนำส่งที่ยกมาจากระบบเดิม'
-      : 'บัญชีคุมไม่อยู่ในรายการให้เลือก เพราะต้องเกิดจากเอกสารเท่านั้น',
+    note: 'ช่องบัญชีพิมพ์รหัสหรือชื่อค้นหาได้ · บัญชีคุม (ลูกหนี้ เจ้าหนี้ ภาษีซื้อ ภาษีขาย สินค้า) ต้องเกิดจากเอกสารเท่านั้น'
+      + (book === 'payment' ? ' ยกเว้นภาษีหัก ณ ที่จ่ายค้างนำส่งที่ยกมาจากระบบเดิม' : ''),
     onSubmit: function () {
       submitAction(function () {
         const lines = [];
