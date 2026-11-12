@@ -650,7 +650,8 @@ function recordVendorCreditNote(input) {
     desc: 'ใบลดหนี้จากผู้ขาย ' + bill.partnerName + ' เลขที่ ' + cnNo + ' อ้าง ' + bill.vendorNo + ' (' + no + ')',
     src: 'vendorCreditNote', srcId: no,
     lines: [{ acc: accBySub('trade_payable'), dr: total, partner: bill.partnerCode }]
-      .concat(cost ? [{ acc: accBySub('inventory'), cr: cost, memo: 'ส่งคืนสินค้าตามต้นทุนเฉลี่ย' }] : [])
+      /* วิธีสิ้นงวด: ของที่คืนไม่ตัดบัญชีสินค้า ลงส่งคืนสินค้า (ทะเบียนสินค้าตัดออกแล้ว ปลายงวดปรับให้) */
+      .concat(cost ? [{ acc: invPeriodic() ? prAcc : accBySub('inventory'), cr: cost, memo: 'ส่งคืนสินค้าตามต้นทุนเฉลี่ย' }] : [])
       .concat(costDiff > 0 ? [{ acc: prAcc, cr: costDiff, memo: 'มูลค่าลดหนี้สูงกว่าต้นทุนของที่คืน' }] : [])
       .concat(costDiff < 0 ? [{ acc: prAcc, dr: -costDiff, memo: 'มูลค่าลดหนี้ต่ำกว่าต้นทุนของที่คืน' }] : [])
       .concat(rest ? [{ acc: accCode, cr: rest, memo: CN_REASONS[reason] }] : [])

@@ -59,13 +59,13 @@ function lineAccOptions(mode) {
   return null;
 }
 /** บัญชีปริยายของบรรทัด — ขาย: บริการ → รายได้ค่าบริการ สินค้า → รายได้จากการขาย
-    ซื้อ: สินค้านับสต๊อก → สินค้าคงเหลือ · อื่น ๆ → บัญชีค่าใช้จ่ายในทะเบียนสินค้า (แบบเดียวกับ billLineAccount) หรือค่าใช้จ่ายเบ็ดเตล็ด
+    ซื้อ: สินค้านับสต๊อก → สินค้าคงเหลือ (วิธีสิ้นงวด: ซื้อสินค้า) · อื่น ๆ → บัญชีค่าใช้จ่ายในทะเบียนสินค้า (แบบเดียวกับ billLineAccount) หรือค่าใช้จ่ายเบ็ดเตล็ด
     ค่าใช้จ่าย: บัญชีค่าใช้จ่ายที่ตั้งไว้ในทะเบียนสินค้า ไม่มี = ให้ผู้ใช้เลือกเอง */
 function lineDefaultAcc(mode, itemCode) {
   const it = itemCode ? DB.items.find((x) => x.code === itemCode) : null;
   if (mode === 'sale') return defaultRevenueAccount(it ? it.code : null, null);
   if (mode === 'purchase') {
-    if (it && it.type === 'stock') return accBySub('inventory');
+    if (it && it.type === 'stock') return stockBuyAcc();
     return it && it.expenseAcc && billAccounts().some((a) => a.code === it.expenseAcc) ? it.expenseAcc : defaultAccountFor('admin_expense');
   }
   if (mode === 'expense') return it && it.expenseAcc && expenseAccounts().some((a) => a.code === it.expenseAcc) ? it.expenseAcc : '';
@@ -1144,7 +1144,7 @@ function modalConvertTradeDoc(kind, no, to) {
     ? '<div class="sub-h">บัญชีของแต่ละรายการ</div><div class="scroll"><table class="lines"><thead><tr><th>รายการ</th>'
       + '<th class="r">จำนวนเงิน</th><th>บันทึกเข้าบัญชี</th></tr></thead><tbody>'
       + d.lines.map((l, i) => '<tr><td>' + esc(l.desc) + '</td><td class="num">' + fmt(l.amount) + '</td><td>'
-        + (isStock(l) ? '<span class="dim">' + esc(accBySub('inventory') + ' ' + acc(accBySub('inventory')).name) + ' (สินค้าคงคลัง)</span>'
+        + (isStock(l) ? '<span class="dim">' + esc(stockBuyAcc() + ' ' + acc(stockBuyAcc()).name) + ' (สินค้าคงคลัง)</span>'
           : '<select name="ca' + i + '">' + optBillAccounts().map((o) => '<option value="' + esc(o[0]) + '"'
             + (o[0] === (l.acc || defaultAccountFor(l.expenseSub || 'admin_expense')) ? ' selected' : '') + '>' + esc(o[1]) + '</option>').join('')
             + '</select>')
@@ -1235,8 +1235,12 @@ EXTRA_DISPATCH.push(function (head, rest) {
    → เงินมัดจำที่หักได้ → หมายเหตุ/โน้ตภายใน · ใบกำกับหนึ่งใบบันทึกเป็นรายการเดียว ระบบกันเลขที่ใบกำกับซ้ำของผู้ขายรายเดียวกัน */
 /** บัญชีที่รายการซื้อลงได้ แบ่งกลุ่มให้อ่านง่าย */
 function optBillAccounts() {
-  const grp = (a) => a.subType === 'inventory' ? 'สินค้า' : a.type === 'asset' ? 'สินทรัพย์' : 'ค่าใช้จ่าย';
-  return billAccounts().map((a) => [a.code, grp(a) + ' · ' + a.code + ' ' + a.name]);
+  const grp = (a) => a.subType === 'inventory' || a.subType === 'purchases' ? 'สินค้า' : a.type === 'asset' ? 'สินทรัพย์' : 'ค่าใช้จ่าย';
+  /* วิธีสิ้นงวด: สินค้านับสต๊อกลงซื้อสินค้า — ใส่ไว้ในรายการให้ช่องบัญชีแสดงได้ (บัญชีสินค้าคงเหลือไม่รับซื้อตรงแล้ว) */
+  const list = invPeriodic()
+    ? [acc(stockBuyAcc())].concat(billAccounts().filter((a) => a.subType !== 'inventory'))
+    : billAccounts();
+  return list.map((a) => [a.code, grp(a) + ' · ' + a.code + ' ' + a.name]);
 }
 const CLAIM_OPTS = [['yes', 'ขอคืนได้'], ['no', 'ภาษีซื้อต้องห้าม ตามมาตรา 82/5']];
 const PAY_OPTS = Object.keys(PAYMENT_METHODS).map((k) => [k, PAYMENT_METHODS[k]]);
@@ -1268,7 +1272,7 @@ const purCarryHead = (d, ref) => ({ partnerCode: d.partnerCode, creditType: d.cr
 /** บรรทัดของใบสั่งซื้อสำหรับฟอร์มตั้งหนี้ — สินค้านับสต๊อกเข้าบัญชีสินค้าเสมอ ไม่ได้เลือกบัญชีไว้ = บัญชีปริยายของบรรทัด */
 const poLinesForBill = (po) => po.lines.map(function (l) {
   const it = l.itemCode ? DB.items.find((x) => x.code === l.itemCode) : null;
-  return { ...l, acc: it && it.type === 'stock' ? accBySub('inventory') : (l.acc || lineDefaultAcc('purchase', l.itemCode)) };
+  return { ...l, acc: it && it.type === 'stock' ? stockBuyAcc() : (l.acc || lineDefaultAcc('purchase', l.itemCode)) };
 });
 /** หัก ณ ที่จ่ายโดยประมาณของรายการตั้งหนี้ (หักจริงตอนจ่าย) และยอดหลังหักเงินมัดจำ — สูตรเดียวกับ recordBill / billWhtFor */
 LINE_WHT_CALC.bill = function (r, lines, date) {
@@ -2667,6 +2671,11 @@ function dispatch(act) {
       toast('ทำเงินเดือน ' + r.count + ' คนแล้ว', 'ok', 'จ่ายสุทธิ ' + fmt(r.net) + ' บาท');
     });
     if (arg === 'pp30') return void modalFileVat();
+    if (arg === 'invadjust') return void runAction(function () {
+      const je = adjustStockPeriodEnd(STATE.period);
+      if (je) toast('ปรับปรุงสินค้าคงเหลือปลายงวด ' + thPeriod(STATE.period) + ' แล้ว', 'ok', je.no + ' · ' + fmt(je.total) + ' บาท');
+      else toast('บัญชีสินค้าคงเหลือเท่าทะเบียนสินค้าแล้ว ไม่มีส่วนต่างต้องปรับ', 'ok');
+    });
     if (rest[0] === 'pnd') return void modalFileWht(rest[1]);
     return;
   }

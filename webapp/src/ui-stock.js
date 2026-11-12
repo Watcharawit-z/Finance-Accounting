@@ -17,6 +17,59 @@ function stockGapNote() {
     : '<b>มูลค่าสินค้ารายตัวสูงกว่าบัญชีสินค้าคงเหลือ ' + fmt(-free) + ' บาท</b> — ตรวจรายการที่ลงบัญชีสินค้าโดยตรง') + '</div>';
 }
 
+/* ---------- วิธีบันทึกสินค้าคงเหลือ (ต่อเนื่อง / สิ้นงวด) ---------- */
+function inventoryMethodCard() {
+  const periodic = invPeriodic();
+  const buy = stockBuyAcc();
+  return card({
+    title:'วิธีบันทึกสินค้าคงเหลือ', sub: INV_METHODS[periodic ? 'periodic' : 'perpetual'],
+    actions: btn('invmethod:' + (periodic ? 'perpetual' : 'periodic'), 'เปลี่ยนเป็น' + INV_METHODS[periodic ? 'perpetual' : 'periodic']),
+    body:'<div class="kv">'
+      + [['ซื้อ / รับสินค้าเข้าคลัง', 'Dr ' + buy + ' ' + acc(buy).name],
+         ['ขายสินค้า', periodic ? 'ไม่ลงต้นทุนทีละใบ (ทะเบียนสินค้าตัดจำนวนให้)' : 'Dr ต้นทุนขาย / Cr สินค้าคงเหลือ ทุกใบ'],
+         ['สิ้นเดือน', periodic ? 'ปรับปรุงสินค้าคงเหลือให้เท่าทะเบียนสินค้า ส่วนต่างเข้าต้นทุนขาย' : 'ไม่ต้องปรับ บัญชีเท่าทะเบียนสินค้าตลอด']]
+        .map((x) => '<div><span>' + esc(x[0]) + '</span><b>' + esc(x[1]) + '</b></div>').join('') + '</div>',
+    foot: periodic
+      ? 'ต้นทุนขาย = สินค้าต้นงวด + ซื้อ − ส่งคืน − สินค้าปลายงวด · ปิดงวดแต่ละเดือนกด "ปรับปรุงสินค้าปลายงวด" ในหน้าปิดงวด (ปิดบัญชีสิ้นปีระบบปรับให้เอง)'
+      : 'ขายแต่ละใบตัดต้นทุนเฉลี่ยทันที บัญชีสินค้าคงเหลือเท่าทะเบียนสินค้าตลอดเวลา',
+  });
+}
+function modalInventoryMethod(method) {
+  const pv = inventoryMethodPreview(method);
+  const toPeriodic = method === 'periodic';
+  const what = toPeriodic
+    ? [pv.receive && 'ใบรับสินค้า ' + pv.receive + ' ใบ ลงใหม่เข้า "ซื้อสินค้า"',
+       pv.bill && 'ตั้งหนี้ที่มีสินค้า ' + pv.bill + ' ใบ ลงใหม่เข้า "ซื้อสินค้า"',
+       pv.returns && 'ใบลดหนี้คืนสินค้าให้ผู้ขาย ' + pv.returns + ' ใบ ลงใหม่เข้า "ส่งคืนสินค้า"',
+       pv.cogs && 'ต้นทุนขายรายใบ ' + pv.cogs + ' ใบ กลับรายการ (ไปคิดตอนปรับปรุงสินค้าปลายงวด)'].filter(Boolean)
+    : pv.adjust.map((a) => 'ปรับปรุงสินค้าปลายงวด ' + thPeriod(a.period) + ' ' + fmt(a.diff) + ' บาท');
+  modal({
+    title:'เปลี่ยนเป็น' + INV_METHODS[method],
+    sub: toPeriodic ? 'ซื้อสินค้าลงบัญชีซื้อสินค้า ขายไม่ลงต้นทุนทีละใบ สิ้นเดือนปรับสินค้าคงเหลือให้เท่าทะเบียนสินค้า'
+      : 'ซื้อสินค้าลงสินค้าคงเหลือ ขายแต่ละใบตัดต้นทุนขายทันที',
+    body:'<div class="note">มีผลกับงวดที่ยังเปิดอยู่ ' + pv.periods + ' งวด (ตั้งแต่ ' + (pv.from ? thDate(pv.from) : '—') + ') งวดที่ปิดแล้วไม่เปลี่ยน'
+      + ' · ทะเบียนสินค้ารายตัว จำนวน ต้นทุนเฉลี่ย และสต๊อกการ์ดเหมือนเดิมทุกอย่าง</div>'
+      + '<div class="sub-h">สิ่งที่ระบบจะทำ</div>'
+      + (what.length ? '<ul class="plain">' + what.map((t) => '<li>' + esc(t) + '</li>').join('') + '</ul>'
+        : '<div class="dim">ไม่มีใบสำคัญที่ต้องลงใหม่ — มีผลกับเอกสารที่ออกหลังจากนี้</div>')
+      + (toPeriodic && what.length ? '<div class="fld-hint">ใบเดิมกลับรายการวันเดียวกันแล้วลงใบใหม่ เลขที่เอกสารไม่เปลี่ยน ตรวจย้อนได้ในสมุดรายวัน</div>' : ''),
+    submitLabel:'เปลี่ยนวิธีบันทึกสินค้า',
+    onSubmit: function () {
+      submitAction(function () {
+        const r = setInventoryMethod(method);
+        toast('เปลี่ยนเป็น' + INV_METHODS[method] + 'แล้ว', 'ok',
+          r.converted ? 'ลงใหม่ ' + r.converted + ' ใบสำคัญ' : r.adjusted ? 'ปรับปรุงสินค้าปลายงวด ' + r.adjusted + ' งวด' : 'มีผลกับเอกสารที่ออกหลังจากนี้');
+        return r;
+      });
+    },
+  });
+}
+EXTRA_DISPATCH.push(function (head, rest, arg) {
+  if (head !== 'invmethod') return false;
+  modalInventoryMethod(arg);
+  return true;
+});
+
 /* ---------- ใบปรับปรุงสินค้า ---------- */
 function stockAdjDetail(no) {
   const d = DB.docs.stockAdj.find((x) => x.no === no);

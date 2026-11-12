@@ -248,6 +248,7 @@ function scDashboard() {
     bank: ['go:bank', 'ไปกระทบยอด'],
     openitems: ['go:openitems', 'ตั้งยอดยกมารายใบ'],
     stockadj: ['go:stockadj', 'ตั้งยอดสินค้ายกมา'],
+    invadjust: ['run:invadjust', 'ปรับปรุงสินค้าปลายงวด'],
   };
 
   const AGE = [
@@ -392,6 +393,7 @@ function scClose() {
     yearend: ['yearend:close', 'ปิดบัญชีสิ้นปีเดี๋ยวนี้'],
     openitems: ['go:openitems', 'ตั้งลูกหนี้/เจ้าหนี้ยกมารายใบ'],
     stockadj: ['go:stockadj', 'ตั้งยอดสินค้ายกมา'],
+    invadjust: ['run:invadjust', 'ปรับปรุงสินค้าปลายงวดเดี๋ยวนี้'],
   };
   const rows = chk.items.map(function (i) {
     const a = i.action && actMap[i.action];
@@ -1507,6 +1509,8 @@ function scItems() {
       + '<div><span>ยอดบัญชีสินค้าคงเหลือในงบทดลอง</span><b>' + fmt(glInv) + '</b></div>'
       + '<div class="gt"><span>ผลต่าง</span><b>' + fmt(value - glInv) + '</b></div></div>',
     foot: (value === glInv ? 'ทะเบียนสินค้าตรงกับบัญชีคุมพอดี'
+      : invPeriodic() && stockUnallocated(pEnd()) <= 0
+      ? 'วิธีสิ้นงวด: ระหว่างเดือนบัญชีสินค้าคงเหลือยังไม่เปลี่ยน ปรับให้เท่าทะเบียนตอนกด "ปรับปรุงสินค้าปลายงวด" ในหน้าปิดงวด'
       : 'ยังไม่ตรงกัน — ตั้งยอดยกมาส่วนที่ยังไม่แยกรายตัว ระบบไม่ให้ปิดงวดจนกว่าจะตรง')
       + ' · กดที่แถวเพื่อแก้ไข · ราคาขาย/ซื้อเป็นราคาตามชนิดภาษีที่ตั้งไว้ · จำนวนคงเหลือเปลี่ยนด้วยเอกสารซื้อขาย หรือใบปรับปรุงสินค้า (ยอดยกมา ตรวจนับ ตัดจำหน่าย เบิกใช้)',
   });
@@ -2235,7 +2239,8 @@ function scSettings() {
     })
     /* เลขที่เอกสาร และค่าเริ่มต้นของเอกสารใหม่ — ui-master.js */
     + numberingCard()
-    + docDefaultsCard();
+    + docDefaultsCard()
+    + inventoryMethodCard();
 }
 
 const SCREENS = {

@@ -121,7 +121,7 @@ OTHER              เหตุอื่น (ต้องกรอกคำอ�
 
 ```
 function resolveWhtRate(payment):
-    1. ถ้า payment.amount < 1000 บาท และไม่ใช่สัญญาต่อเนื่อง → ไม่ต้องหัก
+    1. ไม่มียอดขั้นต่ำ — เลือกประเภทเงินได้ไว้ก็หักทุกยอด (กฎหมายไม่บังคับหักบางประเภทเมื่อต่ำกว่า 1,000 บาท แต่หักได้ ผู้ใช้เลือก "ไม่หัก" เอง)
     2. หา tax_code จาก payment.income_type
     3. lookup tax_rate WHERE tax_code_id = ?
                          AND payment.date BETWEEN effective_from AND COALESCE(effective_to, '9999-12-31')

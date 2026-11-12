@@ -822,10 +822,8 @@ function projectActuals(code, asOf) {
   const dns = DB.docs.debitNote.filter((d) => invNos.has(d.invoiceNo) && live(d));
   const bills = DB.docs.bill.filter((d) => d.project === code && live(d));
   const exps = DB.docs.expense.filter((d) => d.project === code && live(d));
-  const cogsOf = (inv) => {
-    const e = inv.cogsEntryNo ? DB.entries.find((x) => x.no === inv.cogsEntryNo) : null;
-    return e ? e.total : 0;
-  };
+  /* ต้นทุนของที่ขายตามทะเบียนสินค้า — ได้ค่าเดียวกันทั้งวิธีต่อเนื่องและวิธีสิ้นงวด (วิธีสิ้นงวดไม่มีใบต้นทุนขายรายใบ) */
+  const cogsOf = (inv) => DB.docs.stockMove.filter((m) => m.src === inv.no && m.dir === 'out').reduce((s, m) => s + m.cost, 0);
   const revenue = invs.reduce((s, d) => s + d.base, 0) + dns.reduce((s, d) => s + (d.base || 0), 0)
     - cns.reduce((s, d) => s + (d.base || 0), 0);
   const cogs = invs.reduce((s, d) => s + cogsOf(d), 0);

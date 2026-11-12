@@ -43,9 +43,137 @@ function moveOut(it, qty, date, src) {
   return c;
 }
 
-/** ยอดสินค้าคงเหลือในบัญชีที่ยังไม่มีรายตัวสินค้ารองรับ — มักมาจากงบทดลองที่นำเข้า */
+/** ยอดสินค้าคงเหลือในบัญชีที่ยังไม่มีรายตัวสินค้ารองรับ — มักมาจากงบทดลองที่นำเข้า
+    วิธีสิ้นงวด: บัญชีสินค้าระหว่างงวดยังไม่ได้ปรับ จึงดูเฉพาะยอดยกมา (ใบยอดยกมา/นำเข้า เทียบกับใบตั้งยอดสินค้ายกมา) */
 function stockUnallocated(asOf) {
-  return balBySub(['inventory'], asOf) - stockValueAsOf(asOf);
+  if (!invPeriodic()) return balBySub(['inventory'], asOf) - stockValueAsOf(asOf);
+  const gl = balBySub(['inventory'], asOf, undefined, (e) => isOpeningEntry(e) || isImportEntry(e));
+  const items = DB.docs.stockAdj.filter((d) => d.kind === 'opening' && d.status !== 'void' && d.date <= asOf)
+    .reduce((s, d) => s + d.valueIn, 0);
+  return gl - items;
+}
+
+/* ===================================================================
+   วิธีบันทึกสินค้าคงเหลือ
+   ต่อเนื่อง (perpetual) ซื้อ/รับของ Dr สินค้าคงเหลือ · ขายแต่ละใบ Dr ต้นทุนขาย / Cr สินค้าคงเหลือ
+   สิ้นงวด (periodic)    ซื้อ/รับของ Dr ซื้อสินค้า · ส่งคืนผู้ขาย Cr ส่งคืนสินค้า · ขายไม่ลงต้นทุนทีละใบ
+                         สิ้นเดือนปรับบัญชีสินค้าคงเหลือให้เท่ามูลค่าในทะเบียนสินค้า ส่วนต่างลงต้นทุนขาย
+                         ต้นทุนขายทั้งงวด = สินค้าต้นงวด + ซื้อ − ส่งคืน − สินค้าปลายงวด
+   ทะเบียนสินค้ารายตัว (จำนวน ต้นทุนเฉลี่ย สต๊อกการ์ด) นับเหมือนกันทั้งสองวิธี
+   ใบปรับปรุงสินค้า (ยอดยกมา ตรวจนับ ตัดจำหน่าย เบิกใช้) ลงบัญชีสินค้าคงเหลือตรงทั้งสองวิธี — ปรับปลายงวดลงเฉพาะส่วนต่างที่เหลือ
+   =================================================================== */
+const INV_METHODS = { perpetual: 'แบบต่อเนื่อง (Perpetual)', periodic: 'แบบสิ้นงวด (Periodic)' };
+const invPeriodic = () => !!DB.settings && DB.settings.inventoryMethod === 'periodic';
+/** บัญชีตามประเภท — ผังรุ่นเก่าที่ยังไม่มี ระบบสร้างให้ */
+const subAcc = (sub, code, name) => (DB.accounts.some((a) => a.postable && a.subType === sub) ? accBySub(sub) : ensureAccount(sub, code, name, 'expense'));
+/** บัญชีที่ลงเมื่อซื้อหรือรับสินค้าเข้าคลัง */
+function stockBuyAcc() {
+  return invPeriodic() ? subAcc('purchases', '5111', 'ซื้อสินค้า') : accBySub('inventory');
+}
+const stockReturnAcc = () => subAcc('purchase_return', '5112', 'ส่งคืนสินค้าและส่วนลดรับ');
+
+/** ส่วนต่างที่ต้องปรับบัญชีสินค้าคงเหลือ ณ สิ้นงวด (วิธีสิ้นงวด)
+    ยอดยกมาที่ยังไม่แยกรายตัวคงไว้ในบัญชี — ไม่โยนเข้าต้นทุนขาย ตัวตรวจยอดคุมจะเตือนให้ตั้งยอดรายตัวแทน */
+function stockPeriodEndGap(period) {
+  const end = endOfMonth(period + '-01');
+  return stockValueAsOf(end) + Math.max(0, stockUnallocated(end)) - balBySub(['inventory'], end);
+}
+/** ปรับปรุงสินค้าคงเหลือปลายงวด — ลงเฉพาะส่วนต่าง กดซ้ำได้ (มีรายการเพิ่มหลังปรับ ลงส่วนที่เพิ่ม) ไม่มีส่วนต่างไม่ลงอะไร */
+function adjustStockPeriodEnd(period) {
+  const p = DB.periods.find((x) => x.code === period);
+  if (!p) throw new DomainError('PERIOD_NOT_FOUND', 'ไม่พบงวด ' + period);
+  if (p.status !== 'open') throw new DomainError('PERIOD_CLOSED', 'งวด ' + thPeriod(period) + ' ปิดแล้ว ปรับปรุงสินค้าไม่ได้');
+  const end = endOfMonth(period + '-01');
+  const diff = stockPeriodEndGap(period);
+  if (!diff) return null;
+  const inv = accBySub('inventory');
+  const cogs = subAcc('cogs', '5110', 'ต้นทุนขายสินค้า');
+  const je = post({
+    type: 'inventory', date: end,
+    desc: 'ปรับปรุงสินค้าคงเหลือปลายงวด ' + thPeriod(period) + ' (วิธีสิ้นงวด) — มูลค่าตามทะเบียนสินค้า ' + fmt(stockValueAsOf(end)) + ' บาท',
+    src: 'stockPeriodEnd', srcId: period,
+    lines: diff > 0 ? [{ acc: inv, dr: diff }, { acc: cogs, cr: diff }] : [{ acc: cogs, dr: -diff }, { acc: inv, cr: -diff }],
+  });
+  audit('inventory', period, 'period_end_adjust', null, { diff: fmt(diff), entry: je.no });
+  return je;
+}
+
+/** เปลี่ยนวิธีบันทึกสินค้า — มีผลกับงวดที่ยังเปิดอยู่ทั้งหมด งวดที่ปิดแล้วคงเดิม
+    เป็นแบบสิ้นงวด: ใบรับสินค้า ตั้งหนี้ ใบลดหนี้จากผู้ขาย ที่ลงสินค้าคงเหลือไว้ ลงใหม่เข้าซื้อสินค้า/ส่งคืนสินค้า
+                   ต้นทุนขายรายใบกลับรายการ (ไปคิดตอนปรับปรุงสินค้าปลายงวด)
+    เป็นแบบต่อเนื่อง: ปรับบัญชีสินค้าทุกงวดที่เปิดให้เท่าทะเบียนสินค้าก่อน แล้วเอกสารใหม่ลงสินค้าคงเหลือตรง */
+function setInventoryMethod(method) {
+  if (!INV_METHODS[method]) throw new DomainError('INV_METHOD_INVALID', 'วิธีบันทึกสินค้าต้องเป็นแบบต่อเนื่องหรือแบบสิ้นงวด');
+  const cur = invPeriodic() ? 'periodic' : 'perpetual';
+  if (method === cur) return { method, converted: 0, adjusted: 0 };
+  const open = DB.periods.filter((p) => p.status === 'open').sort((a, b) => (a.start < b.start ? -1 : 1));
+  if (!open.length) throw new DomainError('PERIOD_CLOSED', 'ไม่มีงวดที่เปิดอยู่ เปลี่ยนวิธีบันทึกสินค้าไม่ได้', 'เปิดงวดใหม่ในหน้าปิดงวดก่อน');
+  return atomically(function () {
+    let converted = 0, adjusted = 0;
+    if (method === 'periodic') {
+      DB.settings.inventoryMethod = 'periodic';
+      converted = convertToPeriodic(open[0].start);
+    } else {
+      open.forEach(function (p) { if (adjustStockPeriodEnd(p.code)) adjusted++; });
+      DB.settings.inventoryMethod = 'perpetual';
+    }
+    audit('settings', 'inventoryMethod', 'update', { method: INV_METHODS[cur] }, { method: INV_METHODS[method], converted, adjusted });
+    return { method, converted, adjusted, from: open[0].start };
+  });
+}
+/** สิ่งที่จะเกิดเมื่อเปลี่ยนวิธี (ยังไม่แตะข้อมูล) — นับใบสำคัญในงวดที่เปิดที่ต้องลงใหม่ */
+function inventoryMethodPreview(method) {
+  const open = DB.periods.filter((p) => p.status === 'open').sort((a, b) => (a.start < b.start ? -1 : 1));
+  const out = { from: open.length ? open[0].start : null, periods: open.length, receive: 0, bill: 0, returns: 0, cogs: 0, adjust: [] };
+  if (!open.length) return out;
+  if (method === 'perpetual') {
+    open.forEach(function (p) { const g = stockPeriodEndGap(p.code); if (g) out.adjust.push({ period: p.code, diff: g }); });
+    return out;
+  }
+  const inv = new Set(DB.accounts.filter((a) => a.subType === 'inventory').map((a) => a.code));
+  DB.entries.filter((e) => e.status === 'posted' && e.date >= out.from).forEach(function (e) {
+    const coll = DB.docs[e.src];
+    const d = Array.isArray(coll) ? coll.find((x) => x.no === e.srcId) : null;
+    if (!d) return;
+    if (d.cogsEntryNo === e.no) { out.cogs++; return; }
+    if (d.entryNo !== e.no || !e.lines.some((l) => inv.has(l.acc))) return;
+    if (e.src === 'goodsReceipt') out.receive++;
+    else if (e.src === 'bill') out.bill++;
+    else if (e.src === 'vendorCreditNote') out.returns++;
+  });
+  return out;
+}
+/** ลงใหม่ตามวิธีสิ้นงวด ทุกใบสำคัญในงวดที่เปิด — ใบเดิมกลับรายการวันเดียวกัน เอกสารชี้ไปใบใหม่ */
+function convertToPeriodic(from) {
+  const reason = 'เปลี่ยนวิธีบันทึกสินค้าเป็นแบบสิ้นงวด';
+  const inv = new Set(DB.accounts.filter((a) => a.subType === 'inventory').map((a) => a.code));
+  const buy = stockBuyAcc(), ret = stockReturnAcc();
+  let n = 0;
+  /* slice — ใบใหม่และใบกลับรายการต่อท้าย DB.entries ระหว่างวน */
+  DB.entries.filter((e) => e.status === 'posted' && e.date >= from).slice().forEach(function (e) {
+    const coll = DB.docs[e.src];
+    const d = Array.isArray(coll) ? coll.find((x) => x.no === e.srcId) : null;
+    if (!d) return;
+    if (d.cogsEntryNo === e.no) {
+      reverse(e.no, reason + ' — ต้นทุนขายคิดตอนปรับปรุงสินค้าปลายงวด', e.date, { fromSource: true });
+      d.cogsEntryNo = null;
+      d.cogsReversed = e.no;
+      n++;
+      return;
+    }
+    if (d.entryNo !== e.no || ['goodsReceipt', 'bill', 'vendorCreditNote'].indexOf(e.src) < 0) return;
+    if (!e.lines.some((l) => inv.has(l.acc))) return;
+    const ne = post({
+      type: e.type, date: e.date, desc: e.desc, src: e.src, srcId: e.srcId,
+      lines: e.lines.map((l) => Object.assign({}, l, inv.has(l.acc) ? { acc: l.dr ? buy : ret } : {})),
+    });
+    reverse(e.no, reason + ' — ลงใหม่เป็น ' + ne.no, e.date, { fromSource: true });
+    d.entryNo = ne.no;
+    DB.taxTx.forEach((t) => { if (t.entryNo === e.no) t.entryNo = ne.no; });
+    (d.lines || []).forEach((l) => { if (inv.has(l.acc)) l.acc = buy; });
+    n++;
+  });
+  return n;
 }
 
 /* ---------- ตรวจข้อมูลก่อนแตะอะไรทั้งหมด ---------- */
@@ -311,5 +439,6 @@ function importOpeningStock(rows, date, fileName) {
 }
 
 saveStockAdj = transactional(saveStockAdj);
+adjustStockPeriodEnd = transactional(adjustStockPeriodEnd);
 importOpeningStock = transactional(importOpeningStock);
 voidStockAdj = transactional(voidStockAdj);

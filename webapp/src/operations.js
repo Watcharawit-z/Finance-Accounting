@@ -609,7 +609,8 @@ function issueInvoice(input) {
     DB.docs.stockMove.push({ date: input.date, item: it.code, dir: 'out', qty: q, cost: c, src: no, balance: it.qty });
   });
   let cogsJe = null;
-  if (cogs > 0) {
+  /* วิธีสิ้นงวดไม่ลงต้นทุนขายทีละใบ — ทะเบียนสินค้าตัดออกแล้ว ต้นทุนขายเข้าบัญชีตอนปรับปรุงสินค้าปลายงวด */
+  if (cogs > 0 && !invPeriodic()) {
     cogsJe = post({
       type: 'inventory', date: input.date, desc: 'ตัดต้นทุนขาย ' + no,
       src: 'invoice', srcId: no,
@@ -930,7 +931,8 @@ function issueCreditNote(input) {
   let cogsJe = null;
   const back = returns.reduce((t, r) => t + r.cost, 0);
   if (back > 0) {
-    cogsJe = post({
+    /* วิธีสิ้นงวดไม่ลงบัญชี ของกลับเข้าทะเบียนสินค้าอย่างเดียว */
+    if (!invPeriodic()) cogsJe = post({
       type: 'inventory', date: input.date, desc: 'รับคืนสินค้าตามใบลดหนี้ ' + no,
       src: 'creditNote', srcId: no,
       lines: [{ acc: accBySub('inventory'), dr: back }, { acc: accBySub('cogs'), cr: back }],
@@ -1267,7 +1269,7 @@ function convertTradeDoc(kind, no, input) {
       lines: carry.map(function (l, i) {
         const it = l.itemCode ? DB.items.find((x) => x.code === l.itemCode) : null;
         const stock = it && it.type === 'stock';
-        return { ...l, acc: stock ? accBySub('inventory') : (pick[i] || l.acc || opts.acc || null),
+        return { ...l, acc: stock ? stockBuyAcc() : (pick[i] || l.acc || opts.acc || null),
           expenseSub: l.expenseSub || opts.expenseSub || 'admin_expense' };
       }),
       /* ภาษีหัก ณ ที่จ่ายตามที่เลือกตอนแปลง ไม่เลือก = ตามใบสั่งซื้อ ใบสั่งซื้อไม่ได้ระบุ = ตามประเภทของผู้ขาย */
@@ -1438,7 +1440,7 @@ function issueCashSale(input) {
     it.value -= c;
     DB.docs.stockMove.push({ date: input.date, item: it.code, dir: 'out', qty: q, cost: c, src: no, balance: it.qty });
   });
-  const cogsJe = cogs > 0 ? post({
+  const cogsJe = cogs > 0 && !invPeriodic() ? post({
     type: 'inventory', date: input.date, desc: 'ตัดต้นทุนขาย ' + no,
     src: 'cashSale', srcId: no,
     lines: [{ acc: accBySub('cogs'), dr: cogs }, { acc: accBySub('inventory'), cr: cogs }],
@@ -1937,8 +1939,8 @@ function closeChecklist(period) {
   rec.checks.forEach((c) => items.push({
     label: c.label, ok: c.ok,
     detail: c.ok ? 'ตรงกัน' : 'ต่างกัน ' + fmt(c.control - c.sub) + ' บาท' + (c.why ? ' — ' + c.why : ''), blocking: true,
-    action: c.ok ? undefined : c.code === 'AR_SUBLEDGER' || c.code === 'AP_SUBLEDGER' ? 'openitems'
-      : c.code === 'INVENTORY_SUBLEDGER' ? 'stockadj' : undefined,
+    action: c.ok ? undefined : c.action || (c.code === 'AR_SUBLEDGER' || c.code === 'AP_SUBLEDGER' ? 'openitems'
+      : c.code === 'INVENTORY_SUBLEDGER' ? 'stockadj' : undefined),
   }));
   /* ค่าเสื่อมบังคับเฉพาะงวดที่มีทรัพย์สินในทะเบียนต้องคิดจริง — บริษัทที่ไม่มีทรัพย์สินต้องปิดงวดได้
      ส่วนทรัพย์สินที่ยกยอดมาแต่ยังไม่ลงทะเบียน ระบบคิดค่าเสื่อมให้ไม่ได้ ให้บันทึกเองด้วยใบสำคัญทั่วไป */
@@ -2559,7 +2561,7 @@ function docStatusText(inv) {
 
 /* ===================================================================
    ใบรับสินค้า — ของเข้าคลังก่อนใบกำกับจากผู้ขายจะมาถึง
-   Dr สินค้าคงเหลือ / Cr พักรับสินค้า แล้วล้างพักรับสินค้าตอนตั้งหนี้
+   Dr สินค้าคงเหลือ (วิธีสิ้นงวด: ซื้อสินค้า) / Cr พักรับสินค้า แล้วล้างพักรับสินค้าตอนตั้งหนี้
    =================================================================== */
 /** ตรวจงวดก่อนจองเลขที่เอกสาร — ถ้าปล่อยไปล้มที่ post() เลขที่ถูกจองไปแล้วจะเกิดช่องว่างในทะเบียน */
 function assertPostingOpen(date) {
@@ -2612,7 +2614,7 @@ function issueGoodsReceipt(input) {
     type: 'purchase', date: input.date,
     desc: 'รับสินค้าจาก ' + p.name + ' (' + no + (doNo ? ' · ใบส่งของ ' + doNo : '') + ')',
     src: 'goodsReceipt', srcId: no,
-    lines: [{ acc: accBySub('inventory'), dr: total }, { acc: accBySub('grni'), cr: total }],
+    lines: [{ acc: stockBuyAcc(), dr: total }, { acc: accBySub('grni'), cr: total }],
   });
   rows.forEach(function (r) {
     const it = DB.items.find((x) => x.code === r.itemCode);
@@ -2971,7 +2973,7 @@ function billPurchaseOrder(poNo, input) {
   const head = overHeader(carryHeader(po, {}), opts);
   const lines = (opts.lines || poCarryLines(po)).map(function (l) {
     const it = l.itemCode ? DB.items.find((x) => x.code === l.itemCode) : null;
-    return it && it.type === 'stock' ? { ...l, acc: accBySub('inventory') } : l;
+    return it && it.type === 'stock' ? { ...l, acc: stockBuyAcc() } : l;
   });
   const bill = recordBill({
     ...head, partnerCode: po.partnerCode, date: opts.date || TODAY, lines,
@@ -3386,7 +3388,7 @@ function voidPreview(kind, no) {
   if (tax.some((t) => t.kind !== 'wht')) out.push('ทะเบียนภาษี' + (tax.some((t) => t.kind === 'vat_input') ? 'ซื้อ' : 'ขาย') + 'แสดงว่า "ยกเลิก" ยอดเป็นศูนย์');
   if (tax.some((t) => t.kind === 'wht')) out.push('ตัดรายการออกจากแบบ ภ.ง.ด. ของงวด');
   if (d.certNo) out.push('ยกเลิกหนังสือรับรอง 50 ทวิ เลขที่ ' + d.certNo);
-  if ((kind === 'invoice' || kind === 'cashSale') && d.cogsEntryNo) out.push('คืนสินค้าเข้าคลังตามที่ตัดออกไป');
+  if ((kind === 'invoice' || kind === 'cashSale') && DB.docs.stockMove.some((m) => m.src === d.no && m.dir === 'out')) out.push('คืนสินค้าเข้าคลังตามที่ตัดออกไป');
   if (kind === 'invoice' && d.soNo) out.push('ใบสั่งขาย ' + d.soNo + ' กลับมาค้างออกใบกำกับส่วนนี้');
   if ((kind === 'invoice' || kind === 'cashSale') && d.fromDoc && !d.soNo) {
     const src = (DB.docs[d.fromKind === 'billingNote' ? 'billingNote' : 'quotation'] || []).find((x) => x.no === d.fromDoc && x.convertedTo === d.no);
@@ -3773,6 +3775,8 @@ function closeFiscalYear(date, reason) {
   if (!fy.complete) {
     throw new DomainError('FISCAL_YEAR_INCOMPLETE', 'ปีบัญชีนี้มีงวดไม่ครบ 12 งวด ยังปิดบัญชีสิ้นปีไม่ได้');
   }
+  /* วิธีสิ้นงวด: ปรับปรุงสินค้าปลายปีก่อนโอนกำไรขาดทุน — ไม่งั้นต้นทุนขายของเดือนสุดท้ายไม่เข้ากำไรของปี */
+  if (invPeriodic()) adjustStockPeriodEnd(fy.periods[11].code);
   const old = yearEndOf(fy);
   if (old) reverse(old.no, reason || 'ปิดบัญชีสิ้นปีใหม่ — มีรายการลงเพิ่มหลังปิดบัญชีครั้งก่อน', fy.end, { fromSource: true });
   const lines = [];
@@ -3829,6 +3833,12 @@ function defaultAccountFor(sub) {
   return pick ? pick.code : accBySub(sub);
 }
 function billLineAccount(l, i) {
+  /* วิธีสิ้นงวด: สินค้านับสต๊อกลงซื้อสินค้า — ฟอร์มหรือเอกสารต้นทางที่ส่งบัญชีสินค้าคงเหลือมา ระบบเปลี่ยนให้ตามวิธีที่ตั้งไว้ */
+  const st = l.itemCode ? DB.items.find((x) => x.code === l.itemCode) : null;
+  const sa = l.acc ? DB.accounts.find((a) => a.code === l.acc) : null;
+  if (invPeriodic() && st && st.type === 'stock' && (!sa || sa.subType === 'inventory' || sa.subType === 'purchases')) {
+    return sa && sa.subType === 'purchases' && sa.postable ? sa.code : stockBuyAcc();
+  }
   if (l.acc) {
     const ok = billAccounts().some((a) => a.code === l.acc);
     if (!ok) {
@@ -3854,7 +3864,7 @@ function billLineAccount(l, i) {
   }
   /* ไม่ได้เลือกบัญชีแต่เป็นสินค้านับสต๊อก — ต้องเข้าบัญชีสินค้าคงเหลือ เดิมตกไปค่าใช้จ่ายทั้งที่ของเข้าคลัง ยอดคุมสินค้าจึงไม่ตรง */
   const it = l.itemCode ? DB.items.find((x) => x.code === l.itemCode) : null;
-  if (it && it.type === 'stock') return accBySub('inventory');
+  if (it && it.type === 'stock') return stockBuyAcc();
   if (it && it.expenseAcc && !l.expenseSub && billAccounts().some((a) => a.code === it.expenseAcc)) return it.expenseAcc;
   return defaultAccountFor(l.expenseSub || 'admin_expense');
 }

@@ -436,6 +436,7 @@ tr.is-void td.num{text-decoration:line-through; text-decoration-color:var(--colo
 .void-banner span{color:var(--color-ink-2)}
 .void-prev{margin:0 0 14px; padding:12px 14px; border-radius:var(--radius-ctl); background:var(--color-paper-2); border:1px solid var(--color-rule); font-size:var(--text-sm)}
 .void-prev ul{margin:8px 0 0; padding-left:20px} .void-prev li{margin:3px 0}
+ul.plain{margin:8px 0; padding-left:20px} ul.plain li{margin:3px 0}
 
 /* ---------- แถบตัวเลขสรุป — ช่องคั่นด้วยเส้นบาง ไม่มีไอคอนประดับ ---------- */
 .kpis{
@@ -1762,6 +1763,7 @@ const ENTRY_FROM = {
   import:['การนำเข้าข้อมูล', 'ยกเลิกที่หน้านำเข้าข้อมูลจากระบบเดิม'],
   yearEnd:['การปิดบัญชีสิ้นปี', 'ไปที่หน้าปิดงวดของเดือนสุดท้ายของปีแล้วกดยกเลิกการปิดบัญชีสิ้นปี'],
   stockAdj:['ใบปรับปรุงสินค้า', 'เปิดใบปรับปรุงสินค้าที่หน้าสินค้า → ยอดยกมา ตรวจนับ ตัดจำหน่าย แล้วกดยกเลิก'],
+  stockPeriodEnd:['การปรับปรุงสินค้าคงเหลือปลายงวด', 'กดปรับปรุงสินค้าปลายงวดอีกครั้ง ระบบลงเฉพาะส่วนต่างให้เท่าทะเบียนสินค้า'],
   reversal:['การกลับรายการ', 'กลับรายการซ้อนไม่ได้ ให้บันทึกใบสำคัญใหม่แทน'],
   assetDisposal:['การขาย/ตัดจำหน่ายทรัพย์สิน', 'เปิดเอกสารขาย/ตัดจำหน่ายที่หน้าทะเบียนทรัพย์สิน แล้วกดยกเลิกเอกสาร (หรือยกเลิกการรับชำระ) ระบบจะคืนทรัพย์สินเข้าทะเบียนให้ด้วย'],
   customerDeposit:['ใบรับเงินมัดจำ', 'เปิดใบรับเงินมัดจำแล้วกดยกเลิกเอกสาร'],
@@ -2184,12 +2186,20 @@ function reconciliationChecks(asOf) {
   checks.push({ code:'GRNI_SUBLEDGER', label:'ใบรับสินค้าที่รอตั้งหนี้ = บัญชีพักรับสินค้า',
     control:grniControl, sub:grniSub, ok:grniControl === grniSub });
 
-  /* สินค้ารายตัวรวมกันต้องเท่าบัญชีสินค้าคงเหลือ — ไม่งั้นต้นทุนขายและกำไรผิดตั้งแต่ใบกำกับใบแรก */
+  /* สินค้ารายตัวรวมกันต้องเท่าบัญชีสินค้าคงเหลือ — ไม่งั้นต้นทุนขายและกำไรผิดตั้งแต่ใบกำกับใบแรก
+     วิธีสิ้นงวด: บัญชีสินค้าเท่าทะเบียนเมื่อปรับปรุงสินค้าปลายงวดแล้ว — ยังไม่ปรับให้กดปรับปรุง (ยอดยกมาที่ยังไม่แยกรายตัวต้องตั้งยอดก่อน) */
   const invControl = balBySub(['inventory'], asOf);
   const invSub = stockValueAsOf(asOf);
-  checks.push({ code:'INVENTORY_SUBLEDGER', label:'มูลค่าสินค้ารายตัวรวม = บัญชีสินค้าคงเหลือ',
+  const periodic = invPeriodic();
+  const invFree = periodic ? stockUnallocated(asOf) : 0;
+  checks.push({ code:'INVENTORY_SUBLEDGER',
+    label: periodic ? 'ปรับปรุงสินค้าคงเหลือปลายงวดแล้ว — บัญชีสินค้าคงเหลือ = ทะเบียนสินค้า' : 'มูลค่าสินค้ารายตัวรวม = บัญชีสินค้าคงเหลือ',
     control:invControl, sub:invSub, ok:invControl === invSub,
-    why: (invControl !== invSub && invSub === 0 && invControl !== 0)
+    action: periodic && invFree <= 0 && invControl !== invSub ? 'invadjust' : undefined,
+    why: periodic && invControl !== invSub
+      ? (invFree > 0 ? 'ยกยอดสินค้าคงเหลือรวมมาแล้ว แต่ยังไม่ได้ตั้งยอดสินค้ายกมาเป็นรายตัว ' + fmt(invFree) + ' บาท'
+        : 'วิธีสิ้นงวด: ยังไม่ได้ปรับปรุงสินค้าปลายงวด — กดปรับปรุงสินค้าปลายงวด ระบบลงส่วนต่างเข้าต้นทุนขายให้')
+      : (invControl !== invSub && invSub === 0 && invControl !== 0)
       ? 'ยกยอดสินค้าคงเหลือรวมมาแล้ว แต่ยังไม่ได้ตั้งยอดสินค้ายกมาเป็นรายตัว'
       : (invControl > invSub ? 'ยอดในบัญชีสูงกว่าสินค้ารายตัว ' + fmt(invControl - invSub) + ' บาท — ตั้งยอดยกมาส่วนที่เหลือ หรือหารายการที่ลงบัญชีสินค้าโดยไม่ผ่านเอกสาร' : null) });
 
@@ -2840,7 +2850,8 @@ function issueInvoice(input) {
     DB.docs.stockMove.push({ date: input.date, item: it.code, dir: 'out', qty: q, cost: c, src: no, balance: it.qty });
   });
   let cogsJe = null;
-  if (cogs > 0) {
+  /* วิธีสิ้นงวดไม่ลงต้นทุนขายทีละใบ — ทะเบียนสินค้าตัดออกแล้ว ต้นทุนขายเข้าบัญชีตอนปรับปรุงสินค้าปลายงวด */
+  if (cogs > 0 && !invPeriodic()) {
     cogsJe = post({
       type: 'inventory', date: input.date, desc: 'ตัดต้นทุนขาย ' + no,
       src: 'invoice', srcId: no,
@@ -3161,7 +3172,8 @@ function issueCreditNote(input) {
   let cogsJe = null;
   const back = returns.reduce((t, r) => t + r.cost, 0);
   if (back > 0) {
-    cogsJe = post({
+    /* วิธีสิ้นงวดไม่ลงบัญชี ของกลับเข้าทะเบียนสินค้าอย่างเดียว */
+    if (!invPeriodic()) cogsJe = post({
       type: 'inventory', date: input.date, desc: 'รับคืนสินค้าตามใบลดหนี้ ' + no,
       src: 'creditNote', srcId: no,
       lines: [{ acc: accBySub('inventory'), dr: back }, { acc: accBySub('cogs'), cr: back }],
@@ -3498,7 +3510,7 @@ function convertTradeDoc(kind, no, input) {
       lines: carry.map(function (l, i) {
         const it = l.itemCode ? DB.items.find((x) => x.code === l.itemCode) : null;
         const stock = it && it.type === 'stock';
-        return { ...l, acc: stock ? accBySub('inventory') : (pick[i] || l.acc || opts.acc || null),
+        return { ...l, acc: stock ? stockBuyAcc() : (pick[i] || l.acc || opts.acc || null),
           expenseSub: l.expenseSub || opts.expenseSub || 'admin_expense' };
       }),
       /* ภาษีหัก ณ ที่จ่ายตามที่เลือกตอนแปลง ไม่เลือก = ตามใบสั่งซื้อ ใบสั่งซื้อไม่ได้ระบุ = ตามประเภทของผู้ขาย */
@@ -3669,7 +3681,7 @@ function issueCashSale(input) {
     it.value -= c;
     DB.docs.stockMove.push({ date: input.date, item: it.code, dir: 'out', qty: q, cost: c, src: no, balance: it.qty });
   });
-  const cogsJe = cogs > 0 ? post({
+  const cogsJe = cogs > 0 && !invPeriodic() ? post({
     type: 'inventory', date: input.date, desc: 'ตัดต้นทุนขาย ' + no,
     src: 'cashSale', srcId: no,
     lines: [{ acc: accBySub('cogs'), dr: cogs }, { acc: accBySub('inventory'), cr: cogs }],
@@ -4168,8 +4180,8 @@ function closeChecklist(period) {
   rec.checks.forEach((c) => items.push({
     label: c.label, ok: c.ok,
     detail: c.ok ? 'ตรงกัน' : 'ต่างกัน ' + fmt(c.control - c.sub) + ' บาท' + (c.why ? ' — ' + c.why : ''), blocking: true,
-    action: c.ok ? undefined : c.code === 'AR_SUBLEDGER' || c.code === 'AP_SUBLEDGER' ? 'openitems'
-      : c.code === 'INVENTORY_SUBLEDGER' ? 'stockadj' : undefined,
+    action: c.ok ? undefined : c.action || (c.code === 'AR_SUBLEDGER' || c.code === 'AP_SUBLEDGER' ? 'openitems'
+      : c.code === 'INVENTORY_SUBLEDGER' ? 'stockadj' : undefined),
   }));
   /* ค่าเสื่อมบังคับเฉพาะงวดที่มีทรัพย์สินในทะเบียนต้องคิดจริง — บริษัทที่ไม่มีทรัพย์สินต้องปิดงวดได้
      ส่วนทรัพย์สินที่ยกยอดมาแต่ยังไม่ลงทะเบียน ระบบคิดค่าเสื่อมให้ไม่ได้ ให้บันทึกเองด้วยใบสำคัญทั่วไป */
@@ -4790,7 +4802,7 @@ function docStatusText(inv) {
 
 /* ===================================================================
    ใบรับสินค้า — ของเข้าคลังก่อนใบกำกับจากผู้ขายจะมาถึง
-   Dr สินค้าคงเหลือ / Cr พักรับสินค้า แล้วล้างพักรับสินค้าตอนตั้งหนี้
+   Dr สินค้าคงเหลือ (วิธีสิ้นงวด: ซื้อสินค้า) / Cr พักรับสินค้า แล้วล้างพักรับสินค้าตอนตั้งหนี้
    =================================================================== */
 /** ตรวจงวดก่อนจองเลขที่เอกสาร — ถ้าปล่อยไปล้มที่ post() เลขที่ถูกจองไปแล้วจะเกิดช่องว่างในทะเบียน */
 function assertPostingOpen(date) {
@@ -4843,7 +4855,7 @@ function issueGoodsReceipt(input) {
     type: 'purchase', date: input.date,
     desc: 'รับสินค้าจาก ' + p.name + ' (' + no + (doNo ? ' · ใบส่งของ ' + doNo : '') + ')',
     src: 'goodsReceipt', srcId: no,
-    lines: [{ acc: accBySub('inventory'), dr: total }, { acc: accBySub('grni'), cr: total }],
+    lines: [{ acc: stockBuyAcc(), dr: total }, { acc: accBySub('grni'), cr: total }],
   });
   rows.forEach(function (r) {
     const it = DB.items.find((x) => x.code === r.itemCode);
@@ -5202,7 +5214,7 @@ function billPurchaseOrder(poNo, input) {
   const head = overHeader(carryHeader(po, {}), opts);
   const lines = (opts.lines || poCarryLines(po)).map(function (l) {
     const it = l.itemCode ? DB.items.find((x) => x.code === l.itemCode) : null;
-    return it && it.type === 'stock' ? { ...l, acc: accBySub('inventory') } : l;
+    return it && it.type === 'stock' ? { ...l, acc: stockBuyAcc() } : l;
   });
   const bill = recordBill({
     ...head, partnerCode: po.partnerCode, date: opts.date || TODAY, lines,
@@ -5617,7 +5629,7 @@ function voidPreview(kind, no) {
   if (tax.some((t) => t.kind !== 'wht')) out.push('ทะเบียนภาษี' + (tax.some((t) => t.kind === 'vat_input') ? 'ซื้อ' : 'ขาย') + 'แสดงว่า "ยกเลิก" ยอดเป็นศูนย์');
   if (tax.some((t) => t.kind === 'wht')) out.push('ตัดรายการออกจากแบบ ภ.ง.ด. ของงวด');
   if (d.certNo) out.push('ยกเลิกหนังสือรับรอง 50 ทวิ เลขที่ ' + d.certNo);
-  if ((kind === 'invoice' || kind === 'cashSale') && d.cogsEntryNo) out.push('คืนสินค้าเข้าคลังตามที่ตัดออกไป');
+  if ((kind === 'invoice' || kind === 'cashSale') && DB.docs.stockMove.some((m) => m.src === d.no && m.dir === 'out')) out.push('คืนสินค้าเข้าคลังตามที่ตัดออกไป');
   if (kind === 'invoice' && d.soNo) out.push('ใบสั่งขาย ' + d.soNo + ' กลับมาค้างออกใบกำกับส่วนนี้');
   if ((kind === 'invoice' || kind === 'cashSale') && d.fromDoc && !d.soNo) {
     const src = (DB.docs[d.fromKind === 'billingNote' ? 'billingNote' : 'quotation'] || []).find((x) => x.no === d.fromDoc && x.convertedTo === d.no);
@@ -6004,6 +6016,8 @@ function closeFiscalYear(date, reason) {
   if (!fy.complete) {
     throw new DomainError('FISCAL_YEAR_INCOMPLETE', 'ปีบัญชีนี้มีงวดไม่ครบ 12 งวด ยังปิดบัญชีสิ้นปีไม่ได้');
   }
+  /* วิธีสิ้นงวด: ปรับปรุงสินค้าปลายปีก่อนโอนกำไรขาดทุน — ไม่งั้นต้นทุนขายของเดือนสุดท้ายไม่เข้ากำไรของปี */
+  if (invPeriodic()) adjustStockPeriodEnd(fy.periods[11].code);
   const old = yearEndOf(fy);
   if (old) reverse(old.no, reason || 'ปิดบัญชีสิ้นปีใหม่ — มีรายการลงเพิ่มหลังปิดบัญชีครั้งก่อน', fy.end, { fromSource: true });
   const lines = [];
@@ -6060,6 +6074,12 @@ function defaultAccountFor(sub) {
   return pick ? pick.code : accBySub(sub);
 }
 function billLineAccount(l, i) {
+  /* วิธีสิ้นงวด: สินค้านับสต๊อกลงซื้อสินค้า — ฟอร์มหรือเอกสารต้นทางที่ส่งบัญชีสินค้าคงเหลือมา ระบบเปลี่ยนให้ตามวิธีที่ตั้งไว้ */
+  const st = l.itemCode ? DB.items.find((x) => x.code === l.itemCode) : null;
+  const sa = l.acc ? DB.accounts.find((a) => a.code === l.acc) : null;
+  if (invPeriodic() && st && st.type === 'stock' && (!sa || sa.subType === 'inventory' || sa.subType === 'purchases')) {
+    return sa && sa.subType === 'purchases' && sa.postable ? sa.code : stockBuyAcc();
+  }
   if (l.acc) {
     const ok = billAccounts().some((a) => a.code === l.acc);
     if (!ok) {
@@ -6085,7 +6105,7 @@ function billLineAccount(l, i) {
   }
   /* ไม่ได้เลือกบัญชีแต่เป็นสินค้านับสต๊อก — ต้องเข้าบัญชีสินค้าคงเหลือ เดิมตกไปค่าใช้จ่ายทั้งที่ของเข้าคลัง ยอดคุมสินค้าจึงไม่ตรง */
   const it = l.itemCode ? DB.items.find((x) => x.code === l.itemCode) : null;
-  if (it && it.type === 'stock') return accBySub('inventory');
+  if (it && it.type === 'stock') return stockBuyAcc();
   if (it && it.expenseAcc && !l.expenseSub && billAccounts().some((a) => a.code === it.expenseAcc)) return it.expenseAcc;
   return defaultAccountFor(l.expenseSub || 'admin_expense');
 }
@@ -6199,9 +6219,137 @@ function moveOut(it, qty, date, src) {
   return c;
 }
 
-/** ยอดสินค้าคงเหลือในบัญชีที่ยังไม่มีรายตัวสินค้ารองรับ — มักมาจากงบทดลองที่นำเข้า */
+/** ยอดสินค้าคงเหลือในบัญชีที่ยังไม่มีรายตัวสินค้ารองรับ — มักมาจากงบทดลองที่นำเข้า
+    วิธีสิ้นงวด: บัญชีสินค้าระหว่างงวดยังไม่ได้ปรับ จึงดูเฉพาะยอดยกมา (ใบยอดยกมา/นำเข้า เทียบกับใบตั้งยอดสินค้ายกมา) */
 function stockUnallocated(asOf) {
-  return balBySub(['inventory'], asOf) - stockValueAsOf(asOf);
+  if (!invPeriodic()) return balBySub(['inventory'], asOf) - stockValueAsOf(asOf);
+  const gl = balBySub(['inventory'], asOf, undefined, (e) => isOpeningEntry(e) || isImportEntry(e));
+  const items = DB.docs.stockAdj.filter((d) => d.kind === 'opening' && d.status !== 'void' && d.date <= asOf)
+    .reduce((s, d) => s + d.valueIn, 0);
+  return gl - items;
+}
+
+/* ===================================================================
+   วิธีบันทึกสินค้าคงเหลือ
+   ต่อเนื่อง (perpetual) ซื้อ/รับของ Dr สินค้าคงเหลือ · ขายแต่ละใบ Dr ต้นทุนขาย / Cr สินค้าคงเหลือ
+   สิ้นงวด (periodic)    ซื้อ/รับของ Dr ซื้อสินค้า · ส่งคืนผู้ขาย Cr ส่งคืนสินค้า · ขายไม่ลงต้นทุนทีละใบ
+                         สิ้นเดือนปรับบัญชีสินค้าคงเหลือให้เท่ามูลค่าในทะเบียนสินค้า ส่วนต่างลงต้นทุนขาย
+                         ต้นทุนขายทั้งงวด = สินค้าต้นงวด + ซื้อ − ส่งคืน − สินค้าปลายงวด
+   ทะเบียนสินค้ารายตัว (จำนวน ต้นทุนเฉลี่ย สต๊อกการ์ด) นับเหมือนกันทั้งสองวิธี
+   ใบปรับปรุงสินค้า (ยอดยกมา ตรวจนับ ตัดจำหน่าย เบิกใช้) ลงบัญชีสินค้าคงเหลือตรงทั้งสองวิธี — ปรับปลายงวดลงเฉพาะส่วนต่างที่เหลือ
+   =================================================================== */
+const INV_METHODS = { perpetual: 'แบบต่อเนื่อง (Perpetual)', periodic: 'แบบสิ้นงวด (Periodic)' };
+const invPeriodic = () => !!DB.settings && DB.settings.inventoryMethod === 'periodic';
+/** บัญชีตามประเภท — ผังรุ่นเก่าที่ยังไม่มี ระบบสร้างให้ */
+const subAcc = (sub, code, name) => (DB.accounts.some((a) => a.postable && a.subType === sub) ? accBySub(sub) : ensureAccount(sub, code, name, 'expense'));
+/** บัญชีที่ลงเมื่อซื้อหรือรับสินค้าเข้าคลัง */
+function stockBuyAcc() {
+  return invPeriodic() ? subAcc('purchases', '5111', 'ซื้อสินค้า') : accBySub('inventory');
+}
+const stockReturnAcc = () => subAcc('purchase_return', '5112', 'ส่งคืนสินค้าและส่วนลดรับ');
+
+/** ส่วนต่างที่ต้องปรับบัญชีสินค้าคงเหลือ ณ สิ้นงวด (วิธีสิ้นงวด)
+    ยอดยกมาที่ยังไม่แยกรายตัวคงไว้ในบัญชี — ไม่โยนเข้าต้นทุนขาย ตัวตรวจยอดคุมจะเตือนให้ตั้งยอดรายตัวแทน */
+function stockPeriodEndGap(period) {
+  const end = endOfMonth(period + '-01');
+  return stockValueAsOf(end) + Math.max(0, stockUnallocated(end)) - balBySub(['inventory'], end);
+}
+/** ปรับปรุงสินค้าคงเหลือปลายงวด — ลงเฉพาะส่วนต่าง กดซ้ำได้ (มีรายการเพิ่มหลังปรับ ลงส่วนที่เพิ่ม) ไม่มีส่วนต่างไม่ลงอะไร */
+function adjustStockPeriodEnd(period) {
+  const p = DB.periods.find((x) => x.code === period);
+  if (!p) throw new DomainError('PERIOD_NOT_FOUND', 'ไม่พบงวด ' + period);
+  if (p.status !== 'open') throw new DomainError('PERIOD_CLOSED', 'งวด ' + thPeriod(period) + ' ปิดแล้ว ปรับปรุงสินค้าไม่ได้');
+  const end = endOfMonth(period + '-01');
+  const diff = stockPeriodEndGap(period);
+  if (!diff) return null;
+  const inv = accBySub('inventory');
+  const cogs = subAcc('cogs', '5110', 'ต้นทุนขายสินค้า');
+  const je = post({
+    type: 'inventory', date: end,
+    desc: 'ปรับปรุงสินค้าคงเหลือปลายงวด ' + thPeriod(period) + ' (วิธีสิ้นงวด) — มูลค่าตามทะเบียนสินค้า ' + fmt(stockValueAsOf(end)) + ' บาท',
+    src: 'stockPeriodEnd', srcId: period,
+    lines: diff > 0 ? [{ acc: inv, dr: diff }, { acc: cogs, cr: diff }] : [{ acc: cogs, dr: -diff }, { acc: inv, cr: -diff }],
+  });
+  audit('inventory', period, 'period_end_adjust', null, { diff: fmt(diff), entry: je.no });
+  return je;
+}
+
+/** เปลี่ยนวิธีบันทึกสินค้า — มีผลกับงวดที่ยังเปิดอยู่ทั้งหมด งวดที่ปิดแล้วคงเดิม
+    เป็นแบบสิ้นงวด: ใบรับสินค้า ตั้งหนี้ ใบลดหนี้จากผู้ขาย ที่ลงสินค้าคงเหลือไว้ ลงใหม่เข้าซื้อสินค้า/ส่งคืนสินค้า
+                   ต้นทุนขายรายใบกลับรายการ (ไปคิดตอนปรับปรุงสินค้าปลายงวด)
+    เป็นแบบต่อเนื่อง: ปรับบัญชีสินค้าทุกงวดที่เปิดให้เท่าทะเบียนสินค้าก่อน แล้วเอกสารใหม่ลงสินค้าคงเหลือตรง */
+function setInventoryMethod(method) {
+  if (!INV_METHODS[method]) throw new DomainError('INV_METHOD_INVALID', 'วิธีบันทึกสินค้าต้องเป็นแบบต่อเนื่องหรือแบบสิ้นงวด');
+  const cur = invPeriodic() ? 'periodic' : 'perpetual';
+  if (method === cur) return { method, converted: 0, adjusted: 0 };
+  const open = DB.periods.filter((p) => p.status === 'open').sort((a, b) => (a.start < b.start ? -1 : 1));
+  if (!open.length) throw new DomainError('PERIOD_CLOSED', 'ไม่มีงวดที่เปิดอยู่ เปลี่ยนวิธีบันทึกสินค้าไม่ได้', 'เปิดงวดใหม่ในหน้าปิดงวดก่อน');
+  return atomically(function () {
+    let converted = 0, adjusted = 0;
+    if (method === 'periodic') {
+      DB.settings.inventoryMethod = 'periodic';
+      converted = convertToPeriodic(open[0].start);
+    } else {
+      open.forEach(function (p) { if (adjustStockPeriodEnd(p.code)) adjusted++; });
+      DB.settings.inventoryMethod = 'perpetual';
+    }
+    audit('settings', 'inventoryMethod', 'update', { method: INV_METHODS[cur] }, { method: INV_METHODS[method], converted, adjusted });
+    return { method, converted, adjusted, from: open[0].start };
+  });
+}
+/** สิ่งที่จะเกิดเมื่อเปลี่ยนวิธี (ยังไม่แตะข้อมูล) — นับใบสำคัญในงวดที่เปิดที่ต้องลงใหม่ */
+function inventoryMethodPreview(method) {
+  const open = DB.periods.filter((p) => p.status === 'open').sort((a, b) => (a.start < b.start ? -1 : 1));
+  const out = { from: open.length ? open[0].start : null, periods: open.length, receive: 0, bill: 0, returns: 0, cogs: 0, adjust: [] };
+  if (!open.length) return out;
+  if (method === 'perpetual') {
+    open.forEach(function (p) { const g = stockPeriodEndGap(p.code); if (g) out.adjust.push({ period: p.code, diff: g }); });
+    return out;
+  }
+  const inv = new Set(DB.accounts.filter((a) => a.subType === 'inventory').map((a) => a.code));
+  DB.entries.filter((e) => e.status === 'posted' && e.date >= out.from).forEach(function (e) {
+    const coll = DB.docs[e.src];
+    const d = Array.isArray(coll) ? coll.find((x) => x.no === e.srcId) : null;
+    if (!d) return;
+    if (d.cogsEntryNo === e.no) { out.cogs++; return; }
+    if (d.entryNo !== e.no || !e.lines.some((l) => inv.has(l.acc))) return;
+    if (e.src === 'goodsReceipt') out.receive++;
+    else if (e.src === 'bill') out.bill++;
+    else if (e.src === 'vendorCreditNote') out.returns++;
+  });
+  return out;
+}
+/** ลงใหม่ตามวิธีสิ้นงวด ทุกใบสำคัญในงวดที่เปิด — ใบเดิมกลับรายการวันเดียวกัน เอกสารชี้ไปใบใหม่ */
+function convertToPeriodic(from) {
+  const reason = 'เปลี่ยนวิธีบันทึกสินค้าเป็นแบบสิ้นงวด';
+  const inv = new Set(DB.accounts.filter((a) => a.subType === 'inventory').map((a) => a.code));
+  const buy = stockBuyAcc(), ret = stockReturnAcc();
+  let n = 0;
+  /* slice — ใบใหม่และใบกลับรายการต่อท้าย DB.entries ระหว่างวน */
+  DB.entries.filter((e) => e.status === 'posted' && e.date >= from).slice().forEach(function (e) {
+    const coll = DB.docs[e.src];
+    const d = Array.isArray(coll) ? coll.find((x) => x.no === e.srcId) : null;
+    if (!d) return;
+    if (d.cogsEntryNo === e.no) {
+      reverse(e.no, reason + ' — ต้นทุนขายคิดตอนปรับปรุงสินค้าปลายงวด', e.date, { fromSource: true });
+      d.cogsEntryNo = null;
+      d.cogsReversed = e.no;
+      n++;
+      return;
+    }
+    if (d.entryNo !== e.no || ['goodsReceipt', 'bill', 'vendorCreditNote'].indexOf(e.src) < 0) return;
+    if (!e.lines.some((l) => inv.has(l.acc))) return;
+    const ne = post({
+      type: e.type, date: e.date, desc: e.desc, src: e.src, srcId: e.srcId,
+      lines: e.lines.map((l) => Object.assign({}, l, inv.has(l.acc) ? { acc: l.dr ? buy : ret } : {})),
+    });
+    reverse(e.no, reason + ' — ลงใหม่เป็น ' + ne.no, e.date, { fromSource: true });
+    d.entryNo = ne.no;
+    DB.taxTx.forEach((t) => { if (t.entryNo === e.no) t.entryNo = ne.no; });
+    (d.lines || []).forEach((l) => { if (inv.has(l.acc)) l.acc = buy; });
+    n++;
+  });
+  return n;
 }
 
 /* ---------- ตรวจข้อมูลก่อนแตะอะไรทั้งหมด ---------- */
@@ -6467,6 +6615,7 @@ function importOpeningStock(rows, date, fileName) {
 }
 
 saveStockAdj = transactional(saveStockAdj);
+adjustStockPeriodEnd = transactional(adjustStockPeriodEnd);
 importOpeningStock = transactional(importOpeningStock);
 voidStockAdj = transactional(voidStockAdj);
 
@@ -7124,7 +7273,8 @@ function recordVendorCreditNote(input) {
     desc: 'ใบลดหนี้จากผู้ขาย ' + bill.partnerName + ' เลขที่ ' + cnNo + ' อ้าง ' + bill.vendorNo + ' (' + no + ')',
     src: 'vendorCreditNote', srcId: no,
     lines: [{ acc: accBySub('trade_payable'), dr: total, partner: bill.partnerCode }]
-      .concat(cost ? [{ acc: accBySub('inventory'), cr: cost, memo: 'ส่งคืนสินค้าตามต้นทุนเฉลี่ย' }] : [])
+      /* วิธีสิ้นงวด: ของที่คืนไม่ตัดบัญชีสินค้า ลงส่งคืนสินค้า (ทะเบียนสินค้าตัดออกแล้ว ปลายงวดปรับให้) */
+      .concat(cost ? [{ acc: invPeriodic() ? prAcc : accBySub('inventory'), cr: cost, memo: 'ส่งคืนสินค้าตามต้นทุนเฉลี่ย' }] : [])
       .concat(costDiff > 0 ? [{ acc: prAcc, cr: costDiff, memo: 'มูลค่าลดหนี้สูงกว่าต้นทุนของที่คืน' }] : [])
       .concat(costDiff < 0 ? [{ acc: prAcc, dr: -costDiff, memo: 'มูลค่าลดหนี้ต่ำกว่าต้นทุนของที่คืน' }] : [])
       .concat(rest ? [{ acc: accCode, cr: rest, memo: CN_REASONS[reason] }] : [])
@@ -10123,10 +10273,8 @@ function projectActuals(code, asOf) {
   const dns = DB.docs.debitNote.filter((d) => invNos.has(d.invoiceNo) && live(d));
   const bills = DB.docs.bill.filter((d) => d.project === code && live(d));
   const exps = DB.docs.expense.filter((d) => d.project === code && live(d));
-  const cogsOf = (inv) => {
-    const e = inv.cogsEntryNo ? DB.entries.find((x) => x.no === inv.cogsEntryNo) : null;
-    return e ? e.total : 0;
-  };
+  /* ต้นทุนของที่ขายตามทะเบียนสินค้า — ได้ค่าเดียวกันทั้งวิธีต่อเนื่องและวิธีสิ้นงวด (วิธีสิ้นงวดไม่มีใบต้นทุนขายรายใบ) */
+  const cogsOf = (inv) => DB.docs.stockMove.filter((m) => m.src === inv.no && m.dir === 'out').reduce((s, m) => s + m.cost, 0);
   const revenue = invs.reduce((s, d) => s + d.base, 0) + dns.reduce((s, d) => s + (d.base || 0), 0)
     - cns.reduce((s, d) => s + (d.base || 0), 0);
   const cogs = invs.reduce((s, d) => s + cogsOf(d), 0);
@@ -15679,6 +15827,7 @@ function scDashboard() {
     bank: ['go:bank', 'ไปกระทบยอด'],
     openitems: ['go:openitems', 'ตั้งยอดยกมารายใบ'],
     stockadj: ['go:stockadj', 'ตั้งยอดสินค้ายกมา'],
+    invadjust: ['run:invadjust', 'ปรับปรุงสินค้าปลายงวด'],
   };
 
   const AGE = [
@@ -15823,6 +15972,7 @@ function scClose() {
     yearend: ['yearend:close', 'ปิดบัญชีสิ้นปีเดี๋ยวนี้'],
     openitems: ['go:openitems', 'ตั้งลูกหนี้/เจ้าหนี้ยกมารายใบ'],
     stockadj: ['go:stockadj', 'ตั้งยอดสินค้ายกมา'],
+    invadjust: ['run:invadjust', 'ปรับปรุงสินค้าปลายงวดเดี๋ยวนี้'],
   };
   const rows = chk.items.map(function (i) {
     const a = i.action && actMap[i.action];
@@ -16938,6 +17088,8 @@ function scItems() {
       + '<div><span>ยอดบัญชีสินค้าคงเหลือในงบทดลอง</span><b>' + fmt(glInv) + '</b></div>'
       + '<div class="gt"><span>ผลต่าง</span><b>' + fmt(value - glInv) + '</b></div></div>',
     foot: (value === glInv ? 'ทะเบียนสินค้าตรงกับบัญชีคุมพอดี'
+      : invPeriodic() && stockUnallocated(pEnd()) <= 0
+      ? 'วิธีสิ้นงวด: ระหว่างเดือนบัญชีสินค้าคงเหลือยังไม่เปลี่ยน ปรับให้เท่าทะเบียนตอนกด "ปรับปรุงสินค้าปลายงวด" ในหน้าปิดงวด'
       : 'ยังไม่ตรงกัน — ตั้งยอดยกมาส่วนที่ยังไม่แยกรายตัว ระบบไม่ให้ปิดงวดจนกว่าจะตรง')
       + ' · กดที่แถวเพื่อแก้ไข · ราคาขาย/ซื้อเป็นราคาตามชนิดภาษีที่ตั้งไว้ · จำนวนคงเหลือเปลี่ยนด้วยเอกสารซื้อขาย หรือใบปรับปรุงสินค้า (ยอดยกมา ตรวจนับ ตัดจำหน่าย เบิกใช้)',
   });
@@ -17666,7 +17818,8 @@ function scSettings() {
     })
     /* เลขที่เอกสาร และค่าเริ่มต้นของเอกสารใหม่ — ui-master.js */
     + numberingCard()
-    + docDefaultsCard();
+    + docDefaultsCard()
+    + inventoryMethodCard();
 }
 
 const SCREENS = {
@@ -18199,6 +18352,59 @@ function stockGapNote() {
       + 'ยอดรวมรายตัวต้องเท่ายอดนี้ ระบบไม่ลงบัญชีซ้ำ'
     : '<b>มูลค่าสินค้ารายตัวสูงกว่าบัญชีสินค้าคงเหลือ ' + fmt(-free) + ' บาท</b> — ตรวจรายการที่ลงบัญชีสินค้าโดยตรง') + '</div>';
 }
+
+/* ---------- วิธีบันทึกสินค้าคงเหลือ (ต่อเนื่อง / สิ้นงวด) ---------- */
+function inventoryMethodCard() {
+  const periodic = invPeriodic();
+  const buy = stockBuyAcc();
+  return card({
+    title:'วิธีบันทึกสินค้าคงเหลือ', sub: INV_METHODS[periodic ? 'periodic' : 'perpetual'],
+    actions: btn('invmethod:' + (periodic ? 'perpetual' : 'periodic'), 'เปลี่ยนเป็น' + INV_METHODS[periodic ? 'perpetual' : 'periodic']),
+    body:'<div class="kv">'
+      + [['ซื้อ / รับสินค้าเข้าคลัง', 'Dr ' + buy + ' ' + acc(buy).name],
+         ['ขายสินค้า', periodic ? 'ไม่ลงต้นทุนทีละใบ (ทะเบียนสินค้าตัดจำนวนให้)' : 'Dr ต้นทุนขาย / Cr สินค้าคงเหลือ ทุกใบ'],
+         ['สิ้นเดือน', periodic ? 'ปรับปรุงสินค้าคงเหลือให้เท่าทะเบียนสินค้า ส่วนต่างเข้าต้นทุนขาย' : 'ไม่ต้องปรับ บัญชีเท่าทะเบียนสินค้าตลอด']]
+        .map((x) => '<div><span>' + esc(x[0]) + '</span><b>' + esc(x[1]) + '</b></div>').join('') + '</div>',
+    foot: periodic
+      ? 'ต้นทุนขาย = สินค้าต้นงวด + ซื้อ − ส่งคืน − สินค้าปลายงวด · ปิดงวดแต่ละเดือนกด "ปรับปรุงสินค้าปลายงวด" ในหน้าปิดงวด (ปิดบัญชีสิ้นปีระบบปรับให้เอง)'
+      : 'ขายแต่ละใบตัดต้นทุนเฉลี่ยทันที บัญชีสินค้าคงเหลือเท่าทะเบียนสินค้าตลอดเวลา',
+  });
+}
+function modalInventoryMethod(method) {
+  const pv = inventoryMethodPreview(method);
+  const toPeriodic = method === 'periodic';
+  const what = toPeriodic
+    ? [pv.receive && 'ใบรับสินค้า ' + pv.receive + ' ใบ ลงใหม่เข้า "ซื้อสินค้า"',
+       pv.bill && 'ตั้งหนี้ที่มีสินค้า ' + pv.bill + ' ใบ ลงใหม่เข้า "ซื้อสินค้า"',
+       pv.returns && 'ใบลดหนี้คืนสินค้าให้ผู้ขาย ' + pv.returns + ' ใบ ลงใหม่เข้า "ส่งคืนสินค้า"',
+       pv.cogs && 'ต้นทุนขายรายใบ ' + pv.cogs + ' ใบ กลับรายการ (ไปคิดตอนปรับปรุงสินค้าปลายงวด)'].filter(Boolean)
+    : pv.adjust.map((a) => 'ปรับปรุงสินค้าปลายงวด ' + thPeriod(a.period) + ' ' + fmt(a.diff) + ' บาท');
+  modal({
+    title:'เปลี่ยนเป็น' + INV_METHODS[method],
+    sub: toPeriodic ? 'ซื้อสินค้าลงบัญชีซื้อสินค้า ขายไม่ลงต้นทุนทีละใบ สิ้นเดือนปรับสินค้าคงเหลือให้เท่าทะเบียนสินค้า'
+      : 'ซื้อสินค้าลงสินค้าคงเหลือ ขายแต่ละใบตัดต้นทุนขายทันที',
+    body:'<div class="note">มีผลกับงวดที่ยังเปิดอยู่ ' + pv.periods + ' งวด (ตั้งแต่ ' + (pv.from ? thDate(pv.from) : '—') + ') งวดที่ปิดแล้วไม่เปลี่ยน'
+      + ' · ทะเบียนสินค้ารายตัว จำนวน ต้นทุนเฉลี่ย และสต๊อกการ์ดเหมือนเดิมทุกอย่าง</div>'
+      + '<div class="sub-h">สิ่งที่ระบบจะทำ</div>'
+      + (what.length ? '<ul class="plain">' + what.map((t) => '<li>' + esc(t) + '</li>').join('') + '</ul>'
+        : '<div class="dim">ไม่มีใบสำคัญที่ต้องลงใหม่ — มีผลกับเอกสารที่ออกหลังจากนี้</div>')
+      + (toPeriodic && what.length ? '<div class="fld-hint">ใบเดิมกลับรายการวันเดียวกันแล้วลงใบใหม่ เลขที่เอกสารไม่เปลี่ยน ตรวจย้อนได้ในสมุดรายวัน</div>' : ''),
+    submitLabel:'เปลี่ยนวิธีบันทึกสินค้า',
+    onSubmit: function () {
+      submitAction(function () {
+        const r = setInventoryMethod(method);
+        toast('เปลี่ยนเป็น' + INV_METHODS[method] + 'แล้ว', 'ok',
+          r.converted ? 'ลงใหม่ ' + r.converted + ' ใบสำคัญ' : r.adjusted ? 'ปรับปรุงสินค้าปลายงวด ' + r.adjusted + ' งวด' : 'มีผลกับเอกสารที่ออกหลังจากนี้');
+        return r;
+      });
+    },
+  });
+}
+EXTRA_DISPATCH.push(function (head, rest, arg) {
+  if (head !== 'invmethod') return false;
+  modalInventoryMethod(arg);
+  return true;
+});
 
 /* ---------- ใบปรับปรุงสินค้า ---------- */
 function stockAdjDetail(no) {
@@ -23406,8 +23612,9 @@ function projectDetail(code) {
     .concat(a.invoices.map((d) => ['invoice', 'ใบกำกับภาษี', d, d.base, 0]))
     .concat(a.debitNotes.map((d) => [null, 'ใบเพิ่มหนี้ (อ้าง ' + d.invoiceNo + ')', d, d.base || 0, 0]))
     .concat(a.creditNotes.map((d) => [null, 'ใบลดหนี้ (อ้าง ' + d.invoiceNo + ')', d, -(d.base || 0), 0]))
-    .concat(a.invoices.filter((d) => d.cogsEntryNo).map((d) => [null, 'ต้นทุนขายสินค้า (' + d.no + ')',
-      { no: d.cogsEntryNo, date: d.date, partnerName: d.partnerName }, 0, (DB.entries.find((e) => e.no === d.cogsEntryNo) || {}).total || 0]))
+    .concat(a.invoices.map((d) => [d, DB.docs.stockMove.filter((m) => m.src === d.no && m.dir === 'out').reduce((s, m) => s + m.cost, 0)])
+      .filter((x) => x[1]).map((x) => [null, 'ต้นทุนขายสินค้า (' + x[0].no + ')',
+        { no: x[0].cogsEntryNo || x[0].no, date: x[0].date, partnerName: x[0].partnerName }, 0, x[1]]))
     .concat(a.bills.map((d) => ['bill', 'ตั้งหนี้', d, 0, d.base + (d.claimable === false ? d.vat : 0)]))
     .concat(a.expenses.map((d) => ['expense', 'ค่าใช้จ่าย', d, 0, d.base + (d.claimable === false ? d.vat : 0)]));
   const poc = p.percent !== null && p.percent !== undefined && p.contract ? round2(pct(p.contract, String(p.percent))) : null;
@@ -24189,13 +24396,13 @@ function lineAccOptions(mode) {
   return null;
 }
 /** บัญชีปริยายของบรรทัด — ขาย: บริการ → รายได้ค่าบริการ สินค้า → รายได้จากการขาย
-    ซื้อ: สินค้านับสต๊อก → สินค้าคงเหลือ · อื่น ๆ → บัญชีค่าใช้จ่ายในทะเบียนสินค้า (แบบเดียวกับ billLineAccount) หรือค่าใช้จ่ายเบ็ดเตล็ด
+    ซื้อ: สินค้านับสต๊อก → สินค้าคงเหลือ (วิธีสิ้นงวด: ซื้อสินค้า) · อื่น ๆ → บัญชีค่าใช้จ่ายในทะเบียนสินค้า (แบบเดียวกับ billLineAccount) หรือค่าใช้จ่ายเบ็ดเตล็ด
     ค่าใช้จ่าย: บัญชีค่าใช้จ่ายที่ตั้งไว้ในทะเบียนสินค้า ไม่มี = ให้ผู้ใช้เลือกเอง */
 function lineDefaultAcc(mode, itemCode) {
   const it = itemCode ? DB.items.find((x) => x.code === itemCode) : null;
   if (mode === 'sale') return defaultRevenueAccount(it ? it.code : null, null);
   if (mode === 'purchase') {
-    if (it && it.type === 'stock') return accBySub('inventory');
+    if (it && it.type === 'stock') return stockBuyAcc();
     return it && it.expenseAcc && billAccounts().some((a) => a.code === it.expenseAcc) ? it.expenseAcc : defaultAccountFor('admin_expense');
   }
   if (mode === 'expense') return it && it.expenseAcc && expenseAccounts().some((a) => a.code === it.expenseAcc) ? it.expenseAcc : '';
@@ -25274,7 +25481,7 @@ function modalConvertTradeDoc(kind, no, to) {
     ? '<div class="sub-h">บัญชีของแต่ละรายการ</div><div class="scroll"><table class="lines"><thead><tr><th>รายการ</th>'
       + '<th class="r">จำนวนเงิน</th><th>บันทึกเข้าบัญชี</th></tr></thead><tbody>'
       + d.lines.map((l, i) => '<tr><td>' + esc(l.desc) + '</td><td class="num">' + fmt(l.amount) + '</td><td>'
-        + (isStock(l) ? '<span class="dim">' + esc(accBySub('inventory') + ' ' + acc(accBySub('inventory')).name) + ' (สินค้าคงคลัง)</span>'
+        + (isStock(l) ? '<span class="dim">' + esc(stockBuyAcc() + ' ' + acc(stockBuyAcc()).name) + ' (สินค้าคงคลัง)</span>'
           : '<select name="ca' + i + '">' + optBillAccounts().map((o) => '<option value="' + esc(o[0]) + '"'
             + (o[0] === (l.acc || defaultAccountFor(l.expenseSub || 'admin_expense')) ? ' selected' : '') + '>' + esc(o[1]) + '</option>').join('')
             + '</select>')
@@ -25365,8 +25572,12 @@ EXTRA_DISPATCH.push(function (head, rest) {
    → เงินมัดจำที่หักได้ → หมายเหตุ/โน้ตภายใน · ใบกำกับหนึ่งใบบันทึกเป็นรายการเดียว ระบบกันเลขที่ใบกำกับซ้ำของผู้ขายรายเดียวกัน */
 /** บัญชีที่รายการซื้อลงได้ แบ่งกลุ่มให้อ่านง่าย */
 function optBillAccounts() {
-  const grp = (a) => a.subType === 'inventory' ? 'สินค้า' : a.type === 'asset' ? 'สินทรัพย์' : 'ค่าใช้จ่าย';
-  return billAccounts().map((a) => [a.code, grp(a) + ' · ' + a.code + ' ' + a.name]);
+  const grp = (a) => a.subType === 'inventory' || a.subType === 'purchases' ? 'สินค้า' : a.type === 'asset' ? 'สินทรัพย์' : 'ค่าใช้จ่าย';
+  /* วิธีสิ้นงวด: สินค้านับสต๊อกลงซื้อสินค้า — ใส่ไว้ในรายการให้ช่องบัญชีแสดงได้ (บัญชีสินค้าคงเหลือไม่รับซื้อตรงแล้ว) */
+  const list = invPeriodic()
+    ? [acc(stockBuyAcc())].concat(billAccounts().filter((a) => a.subType !== 'inventory'))
+    : billAccounts();
+  return list.map((a) => [a.code, grp(a) + ' · ' + a.code + ' ' + a.name]);
 }
 const CLAIM_OPTS = [['yes', 'ขอคืนได้'], ['no', 'ภาษีซื้อต้องห้าม ตามมาตรา 82/5']];
 const PAY_OPTS = Object.keys(PAYMENT_METHODS).map((k) => [k, PAYMENT_METHODS[k]]);
@@ -25398,7 +25609,7 @@ const purCarryHead = (d, ref) => ({ partnerCode: d.partnerCode, creditType: d.cr
 /** บรรทัดของใบสั่งซื้อสำหรับฟอร์มตั้งหนี้ — สินค้านับสต๊อกเข้าบัญชีสินค้าเสมอ ไม่ได้เลือกบัญชีไว้ = บัญชีปริยายของบรรทัด */
 const poLinesForBill = (po) => po.lines.map(function (l) {
   const it = l.itemCode ? DB.items.find((x) => x.code === l.itemCode) : null;
-  return { ...l, acc: it && it.type === 'stock' ? accBySub('inventory') : (l.acc || lineDefaultAcc('purchase', l.itemCode)) };
+  return { ...l, acc: it && it.type === 'stock' ? stockBuyAcc() : (l.acc || lineDefaultAcc('purchase', l.itemCode)) };
 });
 /** หัก ณ ที่จ่ายโดยประมาณของรายการตั้งหนี้ (หักจริงตอนจ่าย) และยอดหลังหักเงินมัดจำ — สูตรเดียวกับ recordBill / billWhtFor */
 LINE_WHT_CALC.bill = function (r, lines, date) {
@@ -26797,6 +27008,11 @@ function dispatch(act) {
       toast('ทำเงินเดือน ' + r.count + ' คนแล้ว', 'ok', 'จ่ายสุทธิ ' + fmt(r.net) + ' บาท');
     });
     if (arg === 'pp30') return void modalFileVat();
+    if (arg === 'invadjust') return void runAction(function () {
+      const je = adjustStockPeriodEnd(STATE.period);
+      if (je) toast('ปรับปรุงสินค้าคงเหลือปลายงวด ' + thPeriod(STATE.period) + ' แล้ว', 'ok', je.no + ' · ' + fmt(je.total) + ' บาท');
+      else toast('บัญชีสินค้าคงเหลือเท่าทะเบียนสินค้าแล้ว ไม่มีส่วนต่างต้องปรับ', 'ok');
+    });
     if (rest[0] === 'pnd') return void modalFileWht(rest[1]);
     return;
   }

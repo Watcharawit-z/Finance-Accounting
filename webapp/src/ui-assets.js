@@ -596,8 +596,9 @@ function projectDetail(code) {
     .concat(a.invoices.map((d) => ['invoice', 'ใบกำกับภาษี', d, d.base, 0]))
     .concat(a.debitNotes.map((d) => [null, 'ใบเพิ่มหนี้ (อ้าง ' + d.invoiceNo + ')', d, d.base || 0, 0]))
     .concat(a.creditNotes.map((d) => [null, 'ใบลดหนี้ (อ้าง ' + d.invoiceNo + ')', d, -(d.base || 0), 0]))
-    .concat(a.invoices.filter((d) => d.cogsEntryNo).map((d) => [null, 'ต้นทุนขายสินค้า (' + d.no + ')',
-      { no: d.cogsEntryNo, date: d.date, partnerName: d.partnerName }, 0, (DB.entries.find((e) => e.no === d.cogsEntryNo) || {}).total || 0]))
+    .concat(a.invoices.map((d) => [d, DB.docs.stockMove.filter((m) => m.src === d.no && m.dir === 'out').reduce((s, m) => s + m.cost, 0)])
+      .filter((x) => x[1]).map((x) => [null, 'ต้นทุนขายสินค้า (' + x[0].no + ')',
+        { no: x[0].cogsEntryNo || x[0].no, date: x[0].date, partnerName: x[0].partnerName }, 0, x[1]]))
     .concat(a.bills.map((d) => ['bill', 'ตั้งหนี้', d, 0, d.base + (d.claimable === false ? d.vat : 0)]))
     .concat(a.expenses.map((d) => ['expense', 'ค่าใช้จ่าย', d, 0, d.base + (d.claimable === false ? d.vat : 0)]));
   const poc = p.percent !== null && p.percent !== undefined && p.contract ? round2(pct(p.contract, String(p.percent))) : null;
