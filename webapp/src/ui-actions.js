@@ -83,43 +83,59 @@ function lineRow(i, mode, l) {
     + '</select>';
   const accs = lineAccOptions(mode);
   const disc = v.disc === undefined || v.disc === null ? '' : String(v.disc);
+  /* ช่องสินค้ากับคำอธิบายอยู่ในเซลล์เดียวกัน (เลือกสินค้าด้านบน พิมพ์รายละเอียดด้านล่าง)
+     ส่วนลด ภาษี บัญชีรายบรรทัด (ln-adv) ซ่อนไว้ในโหมดปกติ — ภาษีตั้งทีเดียวทั้งใบที่ยอดท้ายเอกสาร
+     ค่าใช้จ่ายเห็นช่องหมวดหมู่เสมอ (ใช้เลือกหมวดค่าใช้จ่ายทุกบรรทัด) */
   return '<tr data-ln="' + i + '">'
-    + '<td>' + sel('l' + i + '_item', items, v.itemCode || '', ' class="itemsel" data-i="' + i + '"' + (cost ? ' data-cost="1"' : '')) + '</td>'
-    + '<td><input name="l' + i + '_desc" placeholder="พิมพ์เองได้" value="' + esc(v.desc || '') + '"></td>'
+    + '<td class="ln-no" aria-hidden="true"></td>'
+    + '<td class="ln-prod">' + sel('l' + i + '_item', items, v.itemCode || '', ' class="itemsel" data-i="' + i + '"' + (cost ? ' data-cost="1"' : ''))
+    + '<input name="l' + i + '_desc" placeholder="' + (cost ? 'รายละเอียด' : 'รายละเอียด (พิมพ์เองได้ ไม่ต้องเลือกสินค้า)') + '" value="' + esc(v.desc || '') + '"></td>'
     + '<td><input name="l' + i + '_qty" class="r" inputmode="decimal" value="' + esc(v.qty !== undefined ? String(v.qty) : (i === 0 ? '1' : '')) + '"></td>'
     + (cost ? '' : '<td><input name="l' + i + '_uom" class="uom" value="' + esc(v.uom || '') + '" placeholder="หน่วย"></td>')
     + '<td><input name="l' + i + '_price" class="r" inputmode="decimal" value="' + esc(v.price !== undefined ? plainNum(v.price) : '') + '"></td>'
-    + (cost ? '' : '<td><input name="l' + i + '_disc" class="r" inputmode="decimal" value="' + esc(disc) + '" placeholder="0"></td>')
-    + '<td>' + sel('l' + i + '_tax', LINE_VAT, v.taxCode || 'VAT7') + '</td>'
-    + (accs ? '<td>' + sel('l' + i + '_acc', accs, v.acc || lineDefaultAcc(mode, v.itemCode)) + '</td>' : '')
+    + (cost ? '' : '<td class="ln-adv"><input name="l' + i + '_disc" class="r" inputmode="decimal" value="' + esc(disc) + '" placeholder="0"></td>')
+    + '<td class="ln-adv">' + sel('l' + i + '_tax', LINE_VAT, v.taxCode || lineDocTax()) + '</td>'
+    + (accs ? '<td class="' + (mode === 'expense' ? 'ln-cat' : 'ln-adv ln-acc') + '">' + sel('l' + i + '_acc', accs, v.acc || lineDefaultAcc(mode, v.itemCode)) + '</td>' : '')
     + (cost ? '' : '<td class="num ln-amt" data-amt="' + i + '"></td>')
     + '<td><button class="icon-btn" data-act="ln:del:' + i + '" aria-label="ลบบรรทัดที่ ' + (i + 1) + '" title="ลบบรรทัดนี้">✕</button></td>'
     + '</tr>';
 }
+/* โหมดตารางรายการ: ปกติ (ภาษีทั้งใบ ส่วนลดท้ายบิล) หรือรายบรรทัด — จำไว้ในเบราว์เซอร์นี้ */
+const LN_DETAIL_KEY = 'financii.lineDetail';
+let LN_DOC_TAX = 'VAT7';
+/** อัตราภาษีของบรรทัดใหม่ — ตามช่องภาษีทั้งใบ (ถ้ามี) */
+const lineDocTax = () => (document.querySelector('#modal [name="docTax"]') || {}).value || LN_DOC_TAX;
 /* ตารางรายการ + แถบตั้งค่าราคา (รวม/ไม่รวมภาษี · ส่วนลดรายการเป็น % หรือบาท) + ยอดท้ายเอกสารแบบเอกสารธุรกิจ
    pricing = ตั้งค่าราคาเดิมของเอกสาร (ตอนแก้ไข) · ไม่ส่ง = ค่าเริ่มต้นของกิจการ */
-function lineEditor(n, mode, init, pricing, footLeft) {
+/* o.acc = เห็นช่องบัญชีเสมอแม้โหมดปกติ (ฟอร์มตั้งหนี้ — ฝ่ายบัญชีต้องเลือกบัญชีค่าใช้จ่ายทุกครั้ง) */
+function lineEditor(n, mode, init, pricing, footLeft, o) {
   const m = mode || 'sale';
   const cost = m === 'cost';
   const rows = init || [];
   const count = Math.max(n || 1, rows.length);
   const P = normPricing(pricing);
   const opt = (o, cur) => o.map((x) => '<option value="' + x[0] + '"' + (x[0] === cur ? ' selected' : '') + '>' + esc(x[1]) + '</option>').join('');
+  /* แสดงส่วนลด/ภาษี/บัญชีรายบรรทัด: ผู้ใช้เปิดไว้ หรือเอกสารเดิมมีส่วนลดรายบรรทัดหรือภาษีหลายอัตรา (ซ่อนแล้วจะมองไม่เห็นค่าที่ต่างกัน) */
+  const mixed = rows.some((l) => l && l.disc && Number(String(l.disc).replace('%', '')) !== 0)
+    || new Set(rows.filter((l) => l && l.taxCode).map((l) => l.taxCode)).size > 1;
+  const detail = !cost && (lsGet(LN_DETAIL_KEY) === '1' || mixed);
+  LN_DOC_TAX = (rows.find((l) => l && l.taxCode) || {}).taxCode || 'VAT7';
   let h = '<div class="sub-h">' + (cost ? 'สินค้าที่รับเข้าคลัง' : m === 'expense' ? 'รายการค่าใช้จ่าย' : 'รายการสินค้าหรือบริการ')
     + (cost ? '' : '<span class="grow"></span><span class="ln-opts">'
-      + '<label>ราคา <select name="priceMode" aria-label="ราคาสินค้า">' + opt([['exclusive', 'ไม่รวมภาษี'], ['inclusive', 'รวมภาษีแล้ว']], P.mode) + '</select></label>'
-      + '<label>ส่วนลดรายการเป็น <select name="discKind" aria-label="หน่วยส่วนลดรายการ">' + opt([['percent', '%'], ['amount', 'บาท']], P.lineDisc) + '</select></label>'
+      + '<label>ราคาสินค้า <select name="priceMode" aria-label="ราคาสินค้า">' + opt([['exclusive', 'ราคาไม่รวมภาษี'], ['inclusive', 'ราคารวมภาษี']], P.mode) + '</select></label>'
+      + '<label class="ln-adv-opt"' + (detail ? '' : ' hidden') + '>ส่วนลดรายการเป็น <select name="discKind" aria-label="หน่วยส่วนลดรายการ">' + opt([['percent', '%'], ['amount', 'บาท']], P.lineDisc) + '</select></label>'
+      + '<button class="ghost ln-toggle" data-act="ln:detail" aria-pressed="' + detail + '">' + (detail ? 'ซ่อนส่วนลด/ภาษี/บัญชีรายบรรทัด' : 'ส่วนลด/ภาษี/บัญชีรายบรรทัด') + '</button>'
       + '</span>')
-    + '</div><div class="scroll"><table class="lines" id="lnTable" data-mode="' + m + '" data-next="' + count + '"><thead><tr>'
-    + '<th>' + (cost ? 'สินค้า' : 'สินค้า/บริการ') + '</th><th>' + (m === 'sale' ? 'คำอธิบายบนใบกำกับ' : 'คำอธิบาย')
-    + '</th><th class="r" style="width:74px">จำนวน</th>'
-    + (cost ? '' : '<th style="width:76px">หน่วย</th>')
-    + '<th class="r" style="width:112px">' + (cost ? 'ต้นทุนต่อหน่วย (ก่อนภาษี)' : 'ราคาต่อหน่วย') + '</th>'
-    + (cost ? '' : '<th class="r" style="width:84px">ส่วนลด</th>')
-    + '<th style="width:104px">ภาษี</th>'
-    + (m === 'sale' ? '<th style="width:200px">บันทึกรายได้เข้าบัญชี</th>' : m === 'purchase' ? '<th style="width:200px">บันทึกเข้าบัญชี (ตอนตั้งหนี้)</th>'
-      : m === 'expense' ? '<th style="width:200px">หมวดค่าใช้จ่าย</th>' : '')
-    + (cost ? '' : '<th class="r" style="width:118px">จำนวนเงิน</th>')
+    + '</div><div class="scroll"><table class="lines' + (detail ? ' ln-detail' : '') + (o && o.acc ? ' ln-showacc' : '') + '" id="lnTable" data-mode="' + m + '" data-next="' + count + '"><thead><tr>'
+    + '<th class="ln-no">ลำดับ</th>'
+    + '<th>' + (cost ? 'สินค้า / รายละเอียด' : 'ชื่อสินค้า / รายละเอียด') + '</th><th class="r" style="width:84px">จำนวน</th>'
+    + (cost ? '' : '<th style="width:80px">หน่วย</th>')
+    + '<th class="r" style="width:120px">' + (cost ? 'ต้นทุนต่อหน่วย (ก่อนภาษี)' : 'ราคาต่อหน่วย') + '</th>'
+    + (cost ? '' : '<th class="r ln-adv" style="width:84px">ส่วนลด</th>')
+    + '<th class="ln-adv" style="width:104px">ภาษี</th>'
+    + (m === 'sale' ? '<th class="ln-adv ln-acc" style="width:200px">บันทึกรายได้เข้าบัญชี</th>' : m === 'purchase' ? '<th class="ln-adv ln-acc" style="width:200px">บันทึกเข้าบัญชี (ตอนตั้งหนี้)</th>'
+      : m === 'expense' ? '<th class="ln-cat" style="width:210px">หมวดหมู่</th>' : '')
+    + (cost ? '' : '<th class="r" style="width:118px">ราคารวม</th>')
     + '<th style="width:44px"></th></tr></thead><tbody>';
   for (let i = 0; i < count; i++) h += lineRow(i, m, rows[i]);
   h += '</tbody></table></div>';
@@ -140,7 +156,10 @@ function lineEditor(n, mode, init, pricing, footLeft) {
     + row('ราคาหลังหักส่วนลด', 'tAfter')
     + row('ยอดที่ไม่มีภาษี (0% / ยกเว้น)', 'tExempt', ' data-opt="exempt"')
     + row('มูลค่าที่คำนวณภาษี', 'tVatable')
-    + row('ภาษีมูลค่าเพิ่ม', 'tVat')
+    /* ภาษีทั้งใบ (โหมดปกติ) — เปลี่ยนแล้วทุกบรรทัดเปลี่ยนตาม · โหมดรายบรรทัดเลือกที่บรรทัด */
+    + '<tr><th><label class="doc-tax"><span>ภาษีมูลค่าเพิ่ม</span><select name="docTax" aria-label="ภาษีทั้งใบ"' + (detail ? ' hidden' : '') + '>'
+    + opt([['VAT7', '7%'], ['VAT0', '0% (ส่งออก)'], ['EXEMPT', 'ไม่มี / ยกเว้น']], LN_DOC_TAX) + '</select></label></th>'
+    + '<td class="num" id="tVat">—</td></tr>'
     + row('<b>จำนวนเงินรวมทั้งสิ้น</b>', 'tTotal', ' class="grand"')
     + row('หักภาษี ณ ที่จ่าย', 'tWht', ' data-opt="wht"')
     + row('<b>ยอดชำระ</b>', 'tNet', ' data-opt="wht" class="grand"')
@@ -228,6 +247,7 @@ function refreshLineSum() {
     set('tVatable', fmt(t.vatable));
     set('tVat', fmt(t.vat) + (r.v.rate !== '0' ? ' (' + r.v.rate + '%)' : ''));
     set('tTotal', fmt(t.total));
+    set('tGrandTop', fmt(t.total));
     const code = val('docWht');
     let w = null;
     const calcEl = document.querySelector('#modal [data-wht-calc]');
@@ -262,6 +282,28 @@ EXTRA_DISPATCH.push(function (head, rest) {
     const f = body.querySelector('[name="l' + i + '_item"]');
     if (f) f.focus();
   }
+  /* สลับแสดงส่วนลด/ภาษี/บัญชีรายบรรทัด — ซ่อนกลับได้เฉพาะเมื่อทุกบรรทัดภาษีเดียวกันและไม่มีส่วนลดรายบรรทัด */
+  if (rest[0] === 'detail') {
+    const on = !t.classList.contains('ln-detail');
+    if (!on) {
+      const taxes = new Set(Array.from(t.querySelectorAll('select[name$="_tax"]')).map((e) => e.value));
+      const disc = Array.from(t.querySelectorAll('input[name$="_disc"]')).some((e) => M(e.value.replace('%', '') || '0') !== 0);
+      if (taxes.size > 1 || disc) {
+        toast('ซ่อนไม่ได้ — มีส่วนลดหรือภาษีต่างกันรายบรรทัด', 'err', 'ล้างส่วนลดรายบรรทัดและตั้งภาษีให้เท่ากันก่อน');
+        return true;
+      }
+      const dt = document.querySelector('#modal [name="docTax"]');
+      if (dt && taxes.size === 1) dt.value = Array.from(taxes)[0];
+    }
+    t.classList.toggle('ln-detail', on);
+    lsSet(LN_DETAIL_KEY, on ? '1' : '0');
+    document.querySelectorAll('#modal .ln-adv-opt').forEach((e) => { e.hidden = !on; });
+    const dt = document.querySelector('#modal [name="docTax"]');
+    if (dt) dt.hidden = on;
+    const b = document.querySelector('#modal [data-act="ln:detail"]');
+    if (b) { b.textContent = on ? 'ซ่อนส่วนลด/ภาษี/บัญชีรายบรรทัด' : 'ส่วนลด/ภาษี/บัญชีรายบรรทัด'; b.setAttribute('aria-pressed', String(on)); }
+    return true;
+  }
   if (rest[0] === 'del') {
     const tr = body.querySelector('tr[data-ln="' + rest[1] + '"]');
     if (tr) tr.remove();
@@ -279,6 +321,12 @@ EXTRA_INPUT.push(function (t) {
 });
 EXTRA_CHANGE.push(function (t) {
   if (t.name === 'docWht') { refreshLineSum(); return false; }
+  /* ภาษีทั้งใบ → ทุกบรรทัด */
+  if (t.name === 'docTax') {
+    document.querySelectorAll('#lnTable select[name$="_tax"]').forEach((e) => { e.value = t.value; });
+    refreshLineSum();
+    return true;
+  }
   if (t.name === 'partner' && document.querySelector('#modal [name="docWht"]') && !document.querySelector('#modal [data-wht-edit]')) {
     document.querySelector('#modal [name="docWht"]').value = partnerWht(t.value);
     refreshLineSum();
@@ -1322,7 +1370,7 @@ function modalBill(o) {
       + lineEditor(3, 'purchase', po ? poLinesForBill(po) : null, po ? po.pricing : null,
           field({ name:'claim', label:'สิทธิภาษีซื้อ', type:'select', value:'yes', options: CLAIM_OPTS })
           + purWhtField({ label:'หัก ณ ที่จ่ายตอนจ่ายเงิน', value: po ? (po.whtCode || '') : (p.whtCode || ''), options: optWht(),
-              partner: code, hint:'เติมจากทะเบียนผู้ขาย · ค่าสินค้าล้วนเลือก "ไม่หัก"' }))
+              partner: code, hint:'เติมจากทะเบียนผู้ขาย · ค่าสินค้าล้วนเลือก "ไม่หัก"' }), { acc: true })
       + '<div id="billDeps">' + depositPicker('ap', code) + '</div>'
       + docNotes(po, 'พิมพ์บนใบตั้งหนี้ เช่น เงื่อนไขที่ตกลงกับผู้ขาย')
       + '</div>',
@@ -2464,14 +2512,15 @@ function dispatch(act) {
   if (head === 'printdoc') { printDoc(rest[0], rest.slice(1).join(':')); return; }
   if (head === 'printgo') { printNow(); return; }
   if (head === 'printclose') { closePrint(); return; }
-  if (head === 'navg') {
+  /* กดไอคอนหมวดบนแถบซ้าย — เปิดหน้าล่าสุดที่ใช้ในหมวดนั้น (ยังไม่เคยเปิด = หน้าแรกของหมวด) */
+  if (head === 'pagehelp') { lsSet(HELP_KEY, pageHelpOn() ? '0' : '1'); render(); return; }
+  if (head === 'navm') {
     const g = navGroups().find((x) => x.g === arg);
-    if (g) { STATE.navGroupOpen[arg] = !navGroupIsOpen(g); renderNav(); }
-    return;
-  }
-  if (head === 'nav') {
-    const cur = STATE.navOpen[arg] === undefined ? arg === navSubOf(STATE.screen) : STATE.navOpen[arg];
-    STATE.navOpen[arg] = !cur;
+    if (!g) return;
+    const first = g.subs[0].items[0][0];
+    STATE.navModule = g.g;
+    STATE.screen = NAV_LAST[g.g] || first;
+    STATE.sel = null; STATE.filter = '';
     render();
     return;
   }

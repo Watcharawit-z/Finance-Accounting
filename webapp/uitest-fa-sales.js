@@ -77,7 +77,7 @@ const M = (s) => Math.round(Number(s) * 10000);
   ok('เลือกบริการในเอกสารราคารวมภาษี ราคาแปลงเป็นรวมภาษีให้ (1,605)', (await page.$eval('[name="l1_price"]', (e) => e.value)) === '1605');
   await page.selectOption('[name="billDiscKind"]', 'amount');
   await page.fill('[name="billDisc"]', '100');
-  await page.click('#contactBox > summary');
+  /* ที่อยู่ เลขผู้เสียภาษี สาขา บนเอกสาร แสดงอยู่แล้วใต้ชื่อคู่ค้า แก้ได้เลย */
   await page.fill('[name="cBranch"]', '00002');
   await page.fill('[name="cAddress"]', '77 ถนนบางนา-ตราด สมุทรปราการ 10540');
   await page.fill('[name="note"]', 'ส่งของภายใน 7 วันหลังได้รับใบสั่งซื้อ');

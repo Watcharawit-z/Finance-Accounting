@@ -27,23 +27,48 @@ function docHead(o) {
   const type = d.creditType || 'credit';
   const days = type === 'cash' ? 0 : d.creditDays !== undefined && d.creditDays !== null ? d.creditDays : p ? p.termDays || 0 : 0;
   const due = d.due && d.date === date ? d.due : addDays(date, days);
-  const who = o.side === 'vendor' ? 'ผู้ขาย' : 'ลูกค้า';
-  return '<div class="flds doc-head">'
-    + field({ name:'partner', label: who, type:'select', value: code,
+  const who = o.side === 'vendor' ? 'ผู้จำหน่าย' : 'ลูกค้า';
+  /* วางแบบเอกสารธุรกิจที่นักบัญชีคุ้นมือ: ซ้าย = คู่ค้าและที่อยู่บนเอกสาร · ขวา = ยอดรวมทั้งสิ้นตัวใหญ่ วันที่ เครดิต ครบกำหนด
+     ใต้สองคอลัมน์ = โปรเจกต์ เลขที่อ้างอิง */
+  return '<div class="doc-head">'
+    + '<div class="dh-l flds">'
+    + field({ name:'partner', label: 'ชื่อ' + who, type:'select', value: code, wide:true,
         options: parties.length ? parties : [['', '— ยังไม่มี' + who + 'ในทะเบียน เพิ่มที่เมนูผู้ติดต่อ —']], hint: o.partnerHint })
-    + field({ name:'date', label:'วันที่เอกสาร', type:'date', value: date })
-    + (o.extra || '')
+    + contactFields(p, d.snap && d.snap.edited ? d.snap : null, who)
+    + '</div>'
+    + '<div class="dh-r">'
+    + '<div class="dh-total"><span>จำนวนเงินรวมทั้งสิ้น</span><b id="tGrandTop">0.00</b></div>'
+    + '<div class="flds dh-meta">'
+    + field({ name:'date', label:'วันที่', type:'date', value: date })
     + (o.credit === false ? ''
       : field({ name:'creditType', label:'เงื่อนไขชำระ', type:'select', value: type, options: CREDIT_OPTS })
-        + '<div class="fld-w credit-pair"' + (type === 'cash' ? ' hidden' : '') + '><label for="f_creditDays">เครดิต (วัน) / วันครบกำหนด</label>'
+        + '<div class="fld-w credit-pair"' + (type === 'cash' ? ' hidden' : '') + '><label for="f_creditDays">เครดิต (วัน) / ครบกำหนด</label>'
         + '<span class="pair"><input id="f_creditDays" name="creditDays" type="number" min="0" step="1" inputmode="numeric" value="' + days + '">'
-        + '<input id="f_dueDate" name="dueDate" type="date" value="' + due + '" aria-label="วันครบกำหนด"></span>'
-        + '<div class="fld-hint">แก้จำนวนวันหรือวันครบกำหนดช่องใดก็ได้ อีกช่องคำนวณให้</div></div>')
-    + field({ name:'project', label:'โปรเจกต์', value: d.project || '', placeholder:'ไม่บังคับ' })
+        + '<input id="f_dueDate" name="dueDate" type="date" value="' + due + '" aria-label="วันครบกำหนด"></span></div>')
     + field({ name:'salesName', label: o.side === 'vendor' ? 'ผู้จัดทำ' : 'พนักงานขาย', value: d.salesName || lsGet(LS_SALES_NAME) || '', placeholder:'ไม่บังคับ' })
+    + (o.extra || '')
+    + '</div></div></div>'
+    + '<div class="flds dh-row">'
+    + field({ name:'project', label:'ชื่อโปรเจกต์', value: d.project || '', placeholder:'ไม่บังคับ' })
     + field({ name:'reference', label:'เลขที่อ้างอิง', value: d.reference || '', placeholder: o.side === 'vendor' ? 'เช่น เลขใบเสนอราคาของผู้ขาย' : 'เช่น เลขใบสั่งซื้อของลูกค้า' })
-    + contactBox(p, d.snap && d.snap.edited ? d.snap : null, who)
     + '</div>';
+}
+
+/** ข้อมูลคู่ค้าบนเอกสารใบนี้ — ที่อยู่ เลขผู้เสียภาษี สาขา แสดงให้เห็นและแก้ได้เลย (ทะเบียนไม่เปลี่ยน)
+    ชื่อบนเอกสาร ผู้ติดต่อ โทร อีเมล อยู่ในส่วน "เพิ่มเติม" */
+function contactFields(p, snap, who) {
+  const s = snap || (p ? snapshotPartner(p) : {});
+  return '<div class="fld-w wide dh-addr"><label for="f_cAddress">ที่อยู่บนเอกสาร</label>'
+    + '<textarea id="f_cAddress" name="cAddress" rows="3" placeholder="ที่อยู่' + who + '">' + esc(s.address || '') + '</textarea></div>'
+    + field({ name:'cTaxId', label:'เลขประจำตัวผู้เสียภาษี', value: s.taxId || '', cls:'mono' })
+    + field({ name:'cBranch', label:'สำนักงาน/สาขาเลขที่ (00000 = สำนักงานใหญ่)', value: s.branch || '', cls:'mono' })
+    + '<details class="fld-w wide dh-more"' + (snap ? ' open' : '') + '><summary>ชื่อบนเอกสาร ผู้ติดต่อ โทรศัพท์ อีเมล</summary><div class="flds">'
+    + field({ name:'cName', label:'ชื่อที่พิมพ์บนเอกสาร', value: s.name || '' })
+    + field({ name:'cPerson', label:'ผู้ติดต่อ', value: s.contactPerson || '' })
+    + field({ name:'cPhone', label:'โทรศัพท์', value: s.phone || '' })
+    + field({ name:'cEmail', label:'อีเมล', value: s.email || '' })
+    + '</div></details>'
+    + '<div class="fld-hint wide">แก้ที่อยู่หรือสาขาตรงนี้ = เฉพาะเอกสารใบนี้ ทะเบียนผู้ติดต่อไม่เปลี่ยน</div>';
 }
 
 /** ข้อมูลคู่ค้าบนเอกสารใบนี้ — ปิดไว้ก่อน เปิดแก้ได้เมื่อออกให้สาขาอื่นหรือที่อยู่ใหม่ (ทะเบียนไม่เปลี่ยน) */

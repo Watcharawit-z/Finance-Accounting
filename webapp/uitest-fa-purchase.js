@@ -118,7 +118,7 @@ const tid = (p12) => { let sum = 0; for (let i = 0; i < 12; i++) sum += Number(p
   await page.fill('[name="project"]', 'คลังสาขา 2');
   await page.fill('[name="internalNote"]', 'ตรวจนับแล้ว ห้ามพิมพ์');
   await page.fill('[name="note"]', 'ชำระภายในกำหนด');
-  await page.click('#contactBox summary');
+  /* ที่อยู่ เลขผู้เสียภาษี สาขา บนเอกสาร แสดงอยู่แล้วใต้ชื่อคู่ค้า แก้ได้เลย */
   await page.fill('[name="cBranch"]', '00002');
   await submit();
   const bill = await page.evaluate(() => { const b = DB.docs.bill[0]; const tx = DB.taxTx.find((t) => t.entryNo === b.entryNo);

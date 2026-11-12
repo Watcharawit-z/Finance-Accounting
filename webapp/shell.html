@@ -82,7 +82,7 @@
   --z-raised: 10; --z-sticky: 200; --z-drawer: 300; --z-dropdown: 350;
   --z-modal: 400; --z-picker: 420; --z-palette: 450; --z-print: 480; --z-toast: 500; --z-tooltip: 600;
 
-  --side-w: 264px; --top-h: 58px;
+  --rail-w: 72px; --side-w: 316px; --top-h: 58px;
 
   /* ชื่อเดิม — โค้ดหน้าจอและกราฟยังอ้างอยู่ ชี้ไปโทเค็นใหม่ทั้งหมด */
   --paper: var(--color-paper-2); --panel: var(--color-paper); --sunken: var(--color-paper-3); --hover: var(--color-paper-2);
@@ -167,8 +167,8 @@ kbd{font-family:var(--font-mono); font-size:11px; padding:0 5px; border:1px soli
    =================================================================== */
 .app{display:grid; grid-template-columns:minmax(0,1fr); min-height:100dvh}
 .side{
-  position:fixed; top:0; left:0; bottom:0; width:min(296px, 86vw); z-index:var(--z-drawer);
-  display:flex; flex-direction:column; background:var(--color-paper-2); color:var(--color-ink-2);
+  position:fixed; top:0; left:0; bottom:0; width:min(var(--side-w), 92vw); z-index:var(--z-drawer);
+  display:grid; grid-template-columns:var(--rail-w) minmax(0,1fr); background:var(--color-paper-2); color:var(--color-ink-2);
   border-right:1px solid var(--color-rule); transform:translateX(-100%);
   transition:transform var(--dur-short) var(--ease-out);
 }
@@ -202,6 +202,23 @@ body.nav-open .side{transform:none; box-shadow:var(--shadow-float)}
 }
 .demo-tag{color:var(--color-warn); border-color:var(--color-warn); background:var(--color-warn-soft); font-weight:600}
 
+/* แถบไอคอนหมวดหลัก — สีเข้ม ไอคอนกับชื่อสั้นใต้ไอคอน หมวดที่เลือกพื้นสว่างขึ้น */
+.rail{display:flex; flex-direction:column; justify-content:space-between; gap:var(--space-xs); min-height:0; overflow-y:auto;
+  background:var(--color-graphite); padding:var(--space-xs) 6px; scrollbar-width:none}
+.rail-top,.rail-bot{display:flex; flex-direction:column; gap:2px}
+.rail-i{display:flex; flex-direction:column; align-items:center; gap:3px; width:100%; min-height:52px; padding:7px 2px 6px; position:relative;
+  font:inherit; font-size:11px; line-height:1.2; color:var(--color-on-graphite-2); background:none; border:0; border-radius:var(--radius-ctl);
+  cursor:pointer; text-align:center}
+.rail-i svg.i{width:20px; height:20px}
+.rail-i:hover{color:var(--color-on-graphite); background:var(--color-graphite-2)}
+.rail-i.on{color:var(--color-on-graphite); background:var(--color-graphite-2); font-weight:600}
+.rail-i.on::before{content:""; position:absolute; left:-6px; top:10px; bottom:10px; width:3px; border-radius:0 3px 3px 0; background:var(--color-accent-2)}
+.rail-i:focus-visible{outline:2px solid var(--color-accent-2); outline-offset:-2px}
+.rail-l{overflow-wrap:anywhere}
+.rail-dot{position:absolute; top:7px; right:12px; width:7px; height:7px; border-radius:50%; background:var(--color-warn)}
+.panel{display:flex; flex-direction:column; min-width:0; min-height:0}
+.nav-t{font-family:var(--font-display); font-size:17px; font-weight:700; color:var(--color-ink); padding:var(--space-sm) 10px var(--space-xs)}
+.nav-gap{height:1px; background:var(--color-rule); margin:var(--space-xs) 10px}
 #nav{flex:1; overflow-y:auto; padding:var(--space-xs) var(--space-xs) var(--space-lg); scrollbar-width:thin; scrollbar-color:var(--color-rule-2) transparent}
 .nav-sec{font-size:var(--text-xs); font-weight:600; color:var(--color-muted); padding:var(--space-md) 10px var(--space-2xs)}
 .nav-g{display:none}
@@ -307,7 +324,7 @@ body.nav-open .side{transform:none; box-shadow:var(--shadow-float)}
 .card-acts{display:flex; align-items:center; gap:var(--space-xs); flex-wrap:wrap}
 .card-f{padding:var(--space-sm) var(--space-md); border-top:1px solid var(--color-rule); font-size:var(--text-sm); color:var(--color-muted); line-height:1.6; background:var(--color-paper-2)}
 .filters{display:flex; gap:var(--space-xs); padding:0 var(--space-md) var(--space-sm); flex-wrap:wrap; align-items:center}
-.sub-h{display:flex; align-items:center; gap:10px; padding:var(--space-md) var(--space-md) var(--space-2xs); font-family:var(--font-display); font-size:14px; font-weight:600; color:var(--color-ink)}
+.sub-h{display:flex; flex-wrap:wrap; align-items:center; gap:10px; padding:var(--space-md) var(--space-md) var(--space-2xs); font-family:var(--font-display); font-size:14px; font-weight:600; color:var(--color-ink)}
 .note{margin:var(--space-sm) var(--space-md); padding:10px 12px; border-radius:var(--radius-ctl); font-size:var(--text-sm); color:var(--color-ink-2);
   background:var(--color-paper-2); border:1px solid var(--color-rule)}
 .note.warn{border-color:var(--color-warn); background:var(--color-warn-soft); color:var(--color-ink)}
@@ -444,6 +461,8 @@ ul.plain{margin:8px 0; padding-left:20px} ul.plain li{margin:3px 0}
 #userBtn svg.i{width:16px; height:16px}
 /* .top-btn ตั้ง display เอง ทำให้แอตทริบิวต์ hidden ไม่มีผล — ต้องสั่งซ่อนตรง ๆ ไม่งั้นเห็นปุ่มเปล่า */
 #userBtn[hidden]{display:none}
+#helpBtn{font-weight:700; font-size:15px}
+#helpBtn.on{background:var(--color-accent-soft); color:var(--color-accent); border-color:var(--color-accent)}
 /* ตัวอย่างข้อมูลสำหรับเชื่อมระบบอื่น (หน้าเจ้าของ) — เลื่อนข้างในกรอบของตัวเอง ไม่ดันหน้าให้ล้น */
 pre.code-sample{margin:8px var(--space-md) var(--space-md); padding:10px 12px; background:var(--color-paper-2); border:1px solid var(--color-rule);
   border-radius:var(--radius-ctl); font-family:var(--font-mono); font-size:12.5px; line-height:1.5; color:var(--color-ink); overflow-x:auto; white-space:pre; max-width:100%}
@@ -593,6 +612,45 @@ details.adv .flds{margin-bottom:10px}
 /* ---------- เอกสารธุรกิจ: หัวเอกสาร รายการ ยอดท้ายเอกสาร ---------- */
 .doc-head{padding-bottom:var(--space-sm)}
 .credit-pair .pair{display:grid; grid-template-columns:minmax(0,5.5rem) minmax(0,1fr); gap:var(--space-xs)}
+/* ตารางรายการแบบปกติ: ลำดับ · สินค้า/รายละเอียด · จำนวน · หน่วย · ราคาต่อหน่วย · ราคารวม
+   ส่วนลด ภาษี บัญชีรายบรรทัด (ln-adv) โผล่เมื่อเปิดโหมดรายบรรทัด */
+#lnTable:not(.ln-detail) .ln-adv:not(.ln-acc), #lnTable:not(.ln-detail):not(.ln-showacc) .ln-acc{display:none}
+/* รายการเอกสาร: ชื่อเต็มไม่ตัดบรรทัดกลางคำ · หมวดหมู่ค่าใช้จ่ายเป็นป้าย */
+.dl-name{font-weight:500; color:var(--color-ink)}
+.cat-pill{display:inline-block; padding:1px 8px; border-radius:999px; font-size:var(--text-xs); color:var(--color-accent);
+  background:var(--color-accent-soft); white-space:nowrap; max-width:220px; overflow:hidden; text-overflow:ellipsis; vertical-align:middle}
+#lnTable tbody{counter-reset:ln}
+#lnTable tbody tr{counter-increment:ln}
+#lnTable td.ln-no::before{content:counter(ln)}
+#lnTable .ln-no{width:44px; text-align:center; color:var(--color-muted); font-variant-numeric:tabular-nums}
+#lnTable td.ln-prod{min-width:240px}
+#lnTable td.ln-prod select{margin-bottom:4px; width:100%}
+.ghost.ln-toggle{display:inline-flex; align-items:center; width:auto; height:32px; padding:0 10px; font-size:var(--text-sm); color:var(--color-accent); white-space:nowrap; border-color:var(--color-rule-2)}
+.ghost.ln-toggle:hover{background:var(--color-accent-soft)}
+.ghost.ln-toggle[aria-pressed="true"]{background:var(--color-accent-soft); border-color:var(--color-accent)}
+.doc-tax{display:inline-flex; align-items:center; gap:8px}
+.doc-tax select{height:30px; padding:0 6px; font:inherit; font-size:var(--text-sm); color:var(--color-ink); background:var(--color-paper);
+  border:1px solid var(--color-rule-2); border-radius:var(--radius-ctl)}
+/* หัวเอกสาร: ซ้าย คู่ค้า + ที่อยู่บนเอกสาร · ขวา ยอดรวมทั้งสิ้นตัวใหญ่ + วันที่ เครดิต ครบกำหนด */
+.doc-head{display:grid; grid-template-columns:minmax(0,1fr); gap:var(--space-md); padding:var(--space-md) var(--space-md) var(--space-xs)}
+.doc-head .flds{padding:0; gap:var(--space-sm) var(--space-md)}
+.dh-l{grid-template-columns:repeat(auto-fit,minmax(min(200px,100%),1fr))}
+.dh-r{display:grid; gap:var(--space-sm); align-content:start}
+.dh-total{display:flex; flex-direction:column; align-items:flex-end; gap:0; padding-bottom:var(--space-2xs); border-bottom:1px solid var(--color-rule)}
+.dh-total span{font-size:var(--text-sm); color:var(--color-ink-2)}
+.dh-total b{font-family:var(--font-display); font-size:30px; line-height:1.15; font-weight:700; color:var(--color-accent); font-variant-numeric:tabular-nums}
+.dh-meta{grid-template-columns:repeat(auto-fit,minmax(min(170px,100%),1fr))}
+.dh-addr textarea{min-height:72px}
+.dh-more > summary{cursor:pointer; color:var(--color-accent); font-size:var(--text-sm); font-weight:500; padding:2px 0; list-style:none}
+.dh-more > summary::-webkit-details-marker{display:none}
+.dh-more > summary::before{content:"+ "}
+.dh-more[open] > summary::before{content:"− "}
+.dh-more > .flds{margin-top:var(--space-xs)}
+.dh-row{border-top:1px solid var(--color-rule); margin:var(--space-sm) var(--space-md) 0; padding:var(--space-sm) 0 0 !important}
+@media (min-width: 48rem){
+  .doc-head{grid-template-columns:minmax(0,1.3fr) minmax(0,1fr); gap:var(--space-xl); padding:var(--space-md) var(--space-lg) var(--space-xs)}
+  .dh-row{margin:var(--space-sm) var(--space-lg) 0}
+}
 .contact-box{border:1px solid var(--color-rule); border-radius:var(--radius-ctl); background:var(--color-paper-2)}
 .contact-box > summary{display:flex; flex-wrap:wrap; align-items:baseline; gap:4px 10px; padding:10px 12px; cursor:pointer; list-style:none;
   font-size:var(--text-sm); color:var(--color-ink-2)}
@@ -602,8 +660,9 @@ details.adv .flds{margin-bottom:10px}
 .contact-box .cb-edit{margin-left:auto; color:var(--color-accent); font-weight:500; white-space:nowrap}
 .contact-box[open] > summary{border-bottom:1px solid var(--color-rule)}
 .contact-box .flds{padding:var(--space-sm) 12px var(--space-md)}
-.ln-opts{display:flex; flex-wrap:wrap; gap:6px 14px; font-family:var(--font-body); font-weight:400; font-size:var(--text-sm); color:var(--color-muted)}
+.ln-opts{display:flex; flex:1 1 auto; min-width:0; flex-wrap:wrap; align-items:center; justify-content:flex-end; gap:6px 14px; font-family:var(--font-body); font-weight:400; font-size:var(--text-sm); color:var(--color-muted)}
 .ln-opts label{display:inline-flex; align-items:center; gap:6px; white-space:nowrap}
+.ln-opts label[hidden]{display:none}
 .ln-opts select{height:32px; padding:0 8px; font:inherit; font-size:var(--text-sm); color:var(--color-ink); background:var(--color-paper);
   border:1px solid var(--color-rule-2); border-radius:var(--radius-ctl)}
 .lines input.uom{min-width:56px}
@@ -779,6 +838,24 @@ table.nb-tbl{width:100%; border-collapse:collapse; font-size:14px}
 #modal.show .modal-box{animation:rise var(--dur-long) var(--ease-out)}
 @keyframes fade{from{opacity:0}}
 @keyframes rise{from{opacity:0; transform:scale(.97)}}
+/* เอกสารเปิดเป็นหน้าเต็ม (ฟอร์มที่มีตารางรายการ) — ทับพื้นที่ทำงาน เมนูซ้ายยังอยู่ ไม่มีพื้นมืด */
+#modal.as-page{background:var(--color-paper-2); padding:0; align-items:stretch; justify-content:stretch}
+#modal.as-page.show .modal-box{animation:fade var(--dur-short) var(--ease-out)}
+#modal.as-page .modal-box{width:100%; max-width:none; min-height:100%; border:0; border-radius:0; box-shadow:none; background:transparent; overflow:visible}
+#modal.as-page .modal-h{position:sticky; top:0; z-index:3; align-items:center; flex-wrap:wrap; gap:var(--space-xs) var(--space-sm);
+  background:var(--color-paper); padding:var(--space-sm) var(--space-md); border-bottom:1px solid var(--color-rule)}
+#modal.as-page .pg-tt{min-width:0; flex:1 1 280px}
+#modal.as-page .pg-tt .card-sub{margin-top:2px}
+#modal.as-page .modal-b{max-height:none; overflow:visible; max-width:1240px; margin:var(--space-md) auto var(--space-2xl);
+  background:var(--color-paper); border:1px solid var(--color-rule); border-radius:var(--radius-panel); padding:var(--space-2xs) 0 var(--space-lg)}
+#modal.as-page .modal-f{max-width:1240px; margin:0 auto var(--space-2xl); background:none; border:0; padding:0 var(--space-md)}
+@media (min-width: 56.25rem){
+  #modal.as-page{left:var(--side-w)}
+  #modal.as-page .modal-h{padding:var(--space-sm) var(--space-lg)}
+  #modal.as-page .modal-b{margin:var(--space-lg) var(--space-lg) var(--space-2xl)}
+  #modal.as-page .modal-f{margin:0 var(--space-lg) var(--space-2xl)}
+}
+@media (min-width: 90rem){ #modal.as-page .modal-b,#modal.as-page .modal-f{margin-left:auto; margin-right:auto} }
 .modal-box{background:var(--color-paper); border:1px solid var(--color-rule); border-radius:var(--radius-panel); width:min(820px,100%); box-shadow:var(--shadow-float); overflow:hidden}
 /* ฟอร์มเอกสารธุรกิจ (มีตารางรายการ) กว้างกว่ากล่องทั่วไป — ตารางมีส่วนลด ภาษี บัญชี และจำนวนเงินต่อบรรทัด */
 .modal-box.xl{width:min(1240px,100%)}
@@ -1047,12 +1124,15 @@ button.st-btn:focus-visible{outline:2px solid var(--color-focus); outline-offset
 
 <div class="app">
   <aside class="side" aria-label="แถบเมนู">
-    <div class="side-h">
-      <div class="brand"><span class="brand-mark" aria-hidden="true">F</span><div>Financii<span class="brand-sub">ระบบบัญชีไทย</span></div></div>
-      <div class="co" id="coName"></div>
+    <nav class="rail" id="rail" aria-label="หมวดหลัก"></nav>
+    <div class="panel">
+      <div class="side-h">
+        <div class="brand"><span class="brand-mark" aria-hidden="true">F</span><div>Financii<span class="brand-sub">ระบบบัญชีไทย</span></div></div>
+        <div class="co" id="coName"></div>
+      </div>
+      <nav id="nav" aria-label="หน้าในหมวด"></nav>
+      <div class="side-f"><kbd>Ctrl</kbd><kbd>K</kbd> ค้นหาเอกสารและสั่งงาน</div>
     </div>
-    <nav id="nav" aria-label="เมนูหลัก"></nav>
-    <div class="side-f"><kbd>Ctrl</kbd><kbd>K</kbd> ค้นหาเอกสารและสั่งงาน</div>
   </aside>
   <div class="work">
     <header class="top">
@@ -1064,6 +1144,7 @@ button.st-btn:focus-visible{outline:2px solid var(--color-focus); outline-offset
       <span id="syncTag" class="sync-tag" role="status" aria-live="polite"></span>
       <label class="periodwrap" id="periodWrap"><span class="pw-label">งวดบัญชี</span><select id="periodSel" aria-label="เลือกงวดบัญชี"></select></label>
       <button class="icon-btn" id="densityBtn" data-act="density" aria-label="สลับความหนาแน่นของตาราง"></button>
+      <button class="icon-btn" id="helpBtn" data-act="pagehelp" aria-label="คำอธิบายหน้านี้">?</button>
       <button class="icon-btn" id="themeBtn" data-act="theme" aria-label="สลับโหมดสว่างและมืด"></button>
       <button class="top-btn" id="userBtn" data-act="owner:account" hidden></button>
     </header>

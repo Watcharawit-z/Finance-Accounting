@@ -73,20 +73,19 @@ const overflowInfo = (page) => page.evaluate(() => {
 
   console.log('\n[3] คลิกเมนูจริงทีละอัน');
   await page.evaluate(() => { STATE.screen = 'dashboard'; render(); });
-  await page.evaluate(() => {
-    navGroups().forEach((g) => {
-      STATE.navGroupOpen[g.g] = true;
-      (g.subs || []).forEach((s) => { STATE.navOpen[s.s] = true; });
-    });
-    render();
-  });
-  const links = await page.$$('#nav .nav-i');
-  ok('เมนูครบทุกหน้าเมื่อกางหมวดย่อยหมด', links.length === screens.length,
-    links.length + ' / ' + screens.length + ' รายการ');
-  for (let i = 0; i < links.length; i++) {
-    const l = (await page.$$('#nav .nav-i'))[i];
-    await l.click();
+  /* เมนูแบบแถบไอคอน: กดไอคอนหมวดแล้วคลิกทุกหน้าในคอลัมน์ของหมวดนั้น ครบทุกหมวด */
+  let clicked = 0;
+  const mods = await page.evaluate(() => navGroups().map((g) => g.g));
+  for (const g of mods) {
+    await page.click('#rail [data-act="navm:' + g + '"]');
+    const n = (await page.$$('#nav .nav-i')).length;
+    for (let i = 0; i < n; i++) {
+      const l = (await page.$$('#nav .nav-i'))[i];
+      await l.click();
+      clicked++;
+    }
   }
+  ok('เมนูครบทุกหน้า (ทุกหมวดบนแถบไอคอน)', clicked === screens.length, clicked + ' / ' + screens.length + ' รายการ');
   ok('คลิกครบทุกเมนูโดยไม่พัง', errors.length === 0, errors.slice(0, 2).join(' | '));
 
   console.log('\n[4] ออกใบกำกับภาษีจริง');
@@ -841,46 +840,29 @@ const overflowInfo = (page) => page.evaluate(() => {
 
   console.log('\n[15] เมนูแยกตามหมวดหมู่');
   await page.setViewportSize({ width: 1440, height: 950 });
-  await page.evaluate(() => { STATE.screen = 'dashboard'; STATE.navOpen = {}; STATE.navGroupOpen = {}; render(); });
+  await page.evaluate(() => { STATE.screen = 'dashboard'; render(); });
   await page.waitForTimeout(150);
-  const shortNav = await page.evaluate(() => ({
-    links: document.querySelectorAll('#nav .nav-i').length,
-    /* กลุ่มภาพรวม: แดชบอร์ด ปิดงวด + หน้ายอดขาย กำไร ค่าแอด เมื่อเป็นเจ้าของ (เปิดแบบเก็บในเบราว์เซอร์ = เจ้าของ) */
-    want: ownerVisible() ? 3 : 2,
-    groups: document.querySelectorAll('#nav .nav-gh').length }));
-  ok('★ เมนูสั้น: ยุบเหลือหัวกลุ่ม กางเฉพาะกลุ่มของหน้าที่เปิดอยู่',
-    shortNav.links === shortNav.want && shortNav.groups === 12, shortNav.groups + ' กลุ่ม · ' + shortNav.links + ' ลิงก์ที่เห็น');
-  await page.click('#nav [data-act="navg:เอกสารขาย"]');
+  /* แถบไอคอนซ้าย = หมวดหลัก เรียงแบบโปรแกรมบัญชีที่นักบัญชีคุ้นมือ · คอลัมน์ถัดมา = หน้าในหมวด */
+  const rail = await page.evaluate(() => Array.from(document.querySelectorAll('#rail .rail-i')).map((b) => b.textContent.trim()));
+  ok('★ แถบไอคอนเรียงหมวด ภาพรวม การเงิน ขาย ซื้อ ค่าใช้จ่าย สินค้า ผู้ติดต่อ บัญชี ภาษี รายงาน เงินเดือน · ตั้งค่าอยู่ล่างสุด',
+    rail.slice(0, 11).join(',') === 'ภาพรวม,การเงิน,ขาย,ซื้อ,ค่าใช้จ่าย,สินค้า,ผู้ติดต่อ,บัญชี,ภาษี,รายงาน,เงินเดือน' && rail[11] === 'ตั้งค่า', rail.join(' · '));
+  await page.click('#rail [data-act="navm:ขาย"]');
   await page.waitForTimeout(120);
-  ok('กดหัวกลุ่มแล้วกางรายการข้างใน',
-    (await page.$$('#nav .nav-i.child')).length === 10);
-  await page.click('#nav [data-act="navg:เอกสารขาย"]');
-  await page.evaluate(() => { STATE.navGroupOpen = { 'รายงาน': true }; render(); });
-  await page.waitForTimeout(150);
-  const navShape = await page.evaluate(() => navGroups().map((g) =>
-    g.g + ':' + ((g.items || []).length + (g.subs || []).length)));
-  ok('กลุ่มเมนูเรียงตามงานที่ทำ ไม่ใช่ตามศัพท์บัญชี',
-    navShape[1].startsWith('เอกสารขาย') && navShape[2].startsWith('เอกสารซื้อ'), navShape.slice(1, 4).join(' · '));
-  ok('★ รายงานทุกตัวรวมอยู่กลุ่มเดียว',
-    (await page.evaluate(() => navGroups().find((g) => g.g === 'รายงาน').subs.length)) === 6,
-    'หมวดย่อย ' + (await page.evaluate(() => navGroups().find((g) => g.g === 'รายงาน').subs.map((s) => s.s).join(', '))));
-
-  const collapsed = await page.$$('#nav .nav-s');
-  ok('หมวดย่อยของรายงานยุบไว้ให้กดกาง', collapsed.length === 6, collapsed.length + ' หมวด');
-  const beforeOpen = (await page.$$('#nav .nav-i.sub')).length;
-  await page.click('#nav .nav-s');
-  await page.waitForTimeout(150);
-  const afterOpen = (await page.$$('#nav .nav-i.sub')).length;
-  ok('กดแล้วกางออกมาให้เห็นรายงานข้างใน', afterOpen > beforeOpen, beforeOpen + ' → ' + afterOpen);
-  await page.click('#nav .nav-s.open');
-  await page.waitForTimeout(150);
-  ok('กดอีกทีก็ยุบกลับ', (await page.$$('#nav .nav-i.sub')).length === beforeOpen);
-
-  await page.evaluate(() => { STATE.screen = 'tb'; STATE.navOpen = {}; STATE.navGroupOpen = {}; render(); });
-  await page.waitForTimeout(150);
-  ok('★ เปิดรายงานไหนอยู่ หมวดนั้นกางให้เอง',
-    await page.$eval('#nav .nav-s.open', (e) => e.textContent.indexOf('บัญชี') >= 0));
-  ok('รายการที่เปิดอยู่ถูกไฮไลต์', await page.$('#nav .nav-i.sub.on') !== null);
+  const sale = await page.evaluate(() => ({ t: document.querySelector('#nav .nav-t').textContent, screen: STATE.screen,
+    items: Array.from(document.querySelectorAll('#nav .nav-i span:first-child')).map((e) => e.textContent.trim()) }));
+  ok('★ กดไอคอนขาย: คอลัมน์ "เอกสารขาย" เรียง ใบเสนอราคา → ใบวางบิล/ใบแจ้งหนี้ → ใบกำกับภาษี → ใบเสร็จรับเงิน และเปิดหน้าแรกของหมวด',
+    sale.t === 'เอกสารขาย' && sale.screen === 'quotations' && sale.items.indexOf('ใบกำกับภาษี') > sale.items.indexOf('ใบวางบิล / ใบแจ้งหนี้')
+    && sale.items.indexOf('ใบเสร็จรับเงิน') > sale.items.indexOf('ใบกำกับภาษี') && sale.items.length === 10, sale.items.join(' · '));
+  await page.click('#nav [data-act="go:invoices"]');
+  await page.click('#rail [data-act="navm:รายงาน"]');
+  await page.waitForTimeout(120);
+  ok('รายงานแบ่งหัวข้อ งบการเงิน · บัญชี · ลูกหนี้เจ้าหนี้ · โครงการ', (await page.$$eval('#nav .nav-sec', (e) => e.map((x) => x.textContent))).join(',')
+    === 'งบการเงิน,บัญชี,ลูกหนี้ · เจ้าหนี้,โครงการ');
+  await page.click('#rail [data-act="navm:ขาย"]');
+  await page.waitForTimeout(120);
+  ok('★ กลับมาหมวดขาย เปิดหน้าที่ใช้ล่าสุด (ใบกำกับภาษี) ไม่ใช่หน้าแรก', await page.evaluate(() => STATE.screen === 'invoices'));
+  ok('หน้าที่เปิดอยู่ถูกไฮไลต์ทั้งไอคอนหมวดและรายการ', await page.$('#rail .rail-i.on[data-act="navm:ขาย"]') !== null
+    && await page.$('#nav .nav-i.on[data-act="go:invoices"]') !== null);
 
   console.log('\n[16] เปลี่ยนชื่อเป็น Financii แล้วข้อมูลเดิมต้องตามมาด้วย');
   ok('ชื่อหน้าเว็บเปลี่ยนแล้ว', (await page.title()) === 'Financii', await page.title());
@@ -916,15 +898,15 @@ const overflowInfo = (page) => page.evaluate(() => {
     rebranded.oldKeys <= 1, rebranded.oldKeys + ' คีย์');
 
   console.log('\n[17] วงจรเอกสารครบตั้งแต่ใบเสนอราคาถึงใบเพิ่มหนี้');
-  const salesMenu = await page.evaluate(() =>
-    navGroups().find((g) => g.g === 'เอกสารขาย').items.map((i) => i[1]));
-  const buyMenu = await page.evaluate(() =>
-    navGroups().find((g) => g.g === 'เอกสารซื้อ').items.map((i) => i[1]));
-  ok('★ เมนูเอกสารขายเรียงตามวงจรจริง เสนอราคา → สั่งขาย → ใบกำกับ → วางบิล → ใบเสร็จ',
-    salesMenu.join('|') === 'ใบเสนอราคา|ใบสั่งขาย|ใบกำกับภาษี|ขายเงินสด|ใบวางบิล|ใบเสร็จรับเงิน|เงินมัดจำรับ|ใบลดหนี้|ใบเพิ่มหนี้|หักกลบ · ตัดหนี้สูญ',
+  /* หน้าทั้งหมดในหมวด (รวมทุกกลุ่มย่อยตามลำดับ) */
+  const menuOf = (g) => page.evaluate((g) => [].concat(...navGroups().find((x) => x.g === g).subs.map((s) => s.items.map((i) => i[1]))), g);
+  const salesMenu = await menuOf('ขาย');
+  const buyMenu = await menuOf('ซื้อ');
+  ok('★ เมนูเอกสารขายเรียงตามวงจรจริง เสนอราคา → สั่งขาย → วางบิล/แจ้งหนี้ → ใบกำกับ → ใบเสร็จ · ขายเงินสด · ลดหนี้/เพิ่มหนี้ · มัดจำ',
+    salesMenu.join('|') === 'ใบเสนอราคา|ใบสั่งขาย|ใบวางบิล / ใบแจ้งหนี้|ใบกำกับภาษี|ใบเสร็จรับเงิน|ขายเงินสด|ใบลดหนี้|ใบเพิ่มหนี้|ใบรับเงินมัดจำ|หักกลบ · ตัดหนี้สูญ',
     salesMenu.join(' → '));
   ok('เมนูเอกสารซื้อเรียงตามวงจรจริง สั่งซื้อ → รับสินค้า → ตั้งหนี้ → จ่าย',
-    buyMenu.join('|') === 'ใบสั่งซื้อ|ใบรับสินค้า|ตั้งหนี้ผู้ขาย|ใบสำคัญจ่าย|เงินมัดจำจ่าย|ใบลดหนี้จากผู้ขาย', buyMenu.join(' → '));
+    buyMenu.join('|') === 'ใบสั่งซื้อ|ใบรับสินค้า|บันทึกซื้อ / ตั้งหนี้|ใบสำคัญจ่าย|ใบจ่ายเงินมัดจำ|ใบลดหนี้จากผู้ขาย', buyMenu.join(' → '));
 
   /* ทุกหน้าจอในเมนูต้องเปิดได้จริง ไม่ใช่มีชื่ออยู่ในเมนูเฉย ๆ */
   const screensOk = await page.evaluate(() => {
@@ -1102,13 +1084,13 @@ const overflowInfo = (page) => page.evaluate(() => {
   };
 
   const menus = await page.evaluate(() => {
-    const g = (n) => (navGroups().find((x) => x.g === n) || { items: [] }).items.map((i) => i[1]).join('|');
-    return { exp: g('ค่าใช้จ่าย'), acct: g('บัญชี') };
+    const g = (n) => [].concat(...navGroups().find((x) => x.g === n).subs.map((s) => s.items.map((i) => i[1]))).join('|');
+    return { exp: g('ค่าใช้จ่าย'), acct: g('บัญชี'), fin: g('การเงิน') };
   });
-  ok('★ แถบค่าใช้จ่าย: ค่าใช้จ่าย → หัก ณ ที่จ่าย → เตรียมจ่ายเงิน',
-    menus.exp === 'ค่าใช้จ่าย|หัก ณ ที่จ่าย|เตรียมจ่ายเงิน', menus.exp);
-  ok('★ แถบบัญชีมีสมุดรายวันครบ 5 เล่ม ทั่วไป ซื้อ ขาย จ่าย รับ',
-    menus.acct.indexOf('สมุดรายวันทั่วไป|สมุดรายวันซื้อ|สมุดรายวันขาย|สมุดรายวันจ่าย|สมุดรายวันรับ') === 0, menus.acct);
+  ok('★ หมวดค่าใช้จ่าย: ค่าใช้จ่าย → หัก ณ ที่จ่าย → จัดการสินทรัพย์ · เตรียมจ่ายเงินอยู่หมวดการเงิน',
+    menus.exp === 'ค่าใช้จ่าย|หัก ณ ที่จ่าย|ทะเบียนทรัพย์สิน|ค่าเสื่อมราคา' && menus.fin.indexOf('เตรียมจ่ายเงิน') >= 0, menus.exp + ' / ' + menus.fin);
+  ok('★ หมวดบัญชีมีสมุดรายวันครบ 5 เล่ม ทั่วไป ขาย ซื้อ รับ จ่าย',
+    menus.acct.indexOf('สมุดรายวันทั่วไป|สมุดรายวันขาย|สมุดรายวันซื้อ|สมุดรายวันรับ|สมุดรายวันจ่าย') === 0, menus.acct);
 
   const needBtn = { receipts:'new:receipt', creditnotes:'new:creditnote', debitnotes:'new:debitnote',
     billingnotes:'new:billingnote', goodsreceipts:'new:goodsreceipt', expenses:'new:expense',
@@ -1373,8 +1355,12 @@ const overflowInfo = (page) => page.evaluate(() => {
     && !(await page.evaluate(() => document.getElementById('pop').classList.contains('show'))));
   await page.click('[data-act="modal:close"]');
 
-  /* บริบทของหน้า */
-  await page.evaluate(() => { STATE.screen = 'invoices'; STATE.sel = null; render(); });
+  /* บริบทของหน้า: ปกติซ่อนไว้ให้หน้าโล่ง · กดปุ่ม "คำอธิบาย" แล้วเห็นวงจรเอกสารและผลทางบัญชี (จำไว้ในเครื่อง) */
+  await page.evaluate(() => { try { localStorage.removeItem('financii.pageHelp'); } catch (e) {} STATE.screen = 'invoices'; STATE.sel = null; render(); });
+  ok('★ หน้ารายการโล่ง ไม่มีคำอธิบายวงจร/ผลบัญชีบังตาราง จนกว่าจะกดปุ่มคำอธิบาย',
+    await page.evaluate(() => !document.querySelector('#main .flow') && !document.querySelector('#main .je-chip')));
+  await page.click('#helpBtn');
+  await page.waitForTimeout(100);
   const ctxInfo = await page.evaluate(() => ({
     on: (document.querySelector('.flow a.on') || {}).textContent || '',
     steps: document.querySelectorAll('.flow a').length,
@@ -1436,7 +1422,7 @@ const overflowInfo = (page) => page.evaluate(() => {
   ok('★ ส่งออกตารางเป็น CSV เปิดใน Excel ได้ (มี BOM ภาษาไทยไม่เพี้ยน)', csv.charCodeAt(0) === 0xFEFF
     && dl.suggestedFilename() === 'Financii_invoices_2026-07.csv' && csvRows[1].indexOf('ใบกำกับภาษี') === 0,
     dl.suggestedFilename() + ' · ' + csvRows.length + ' แถว');
-  ok('ตัวเลขใน CSV เป็นตัวเลขล้วน Excel คำนวณต่อได้', csvRows.some((r) => /,\d+\.\d{2},\d+\.\d{2},/.test(r))
+  ok('ตัวเลขใน CSV เป็นตัวเลขล้วน Excel คำนวณต่อได้', csvRows.some((r) => /,\d+\.\d{2}(,|$)/.test(r))
     && !csvRows.slice(3).some((r) => /"\d{1,3}(,\d{3})+\.\d{2}"/.test(r)));
 
   /* ข้อมูลกิจการ */

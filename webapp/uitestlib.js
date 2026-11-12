@@ -12,13 +12,18 @@ const ok = (name, cond, extra) => {
 /** รอให้หน้าต่างแบบฟอร์มปิด (บันทึกสำเร็จ) */
 const closed = (p) => p.waitForFunction(
   () => !document.getElementById('modal').classList.contains('show'), null, { timeout: 5000 });
-async function open(viewport) {
+async function open(viewport, opts) {
   browser = await chromium.launch();
   const page = await browser.newPage({ viewport: viewport || { width: 1440, height: 950 } });
   page.on('pageerror', (e) => errors.push(e.message));
   page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
   page.on('dialog', (d) => d.accept());
   await page.goto(URL);
+  /* ชุดทดสอบรุ่นเดิมกรอกส่วนลด ภาษี บัญชีรายบรรทัด — เปิดโหมดรายบรรทัดไว้ให้
+     ชุดที่ทดสอบโหมดปกติ (ภาษีทั้งใบ) ส่ง { lineDetail: false } */
+  if (!(opts && opts.lineDetail === false)) await page.evaluate(() => localStorage.setItem('financii.lineDetail', '1'));
+  /* คำอธิบายหน้า (วงจรเอกสาร/ผลบัญชี/ขั้นงานปิดงวด) ปกติซ่อน — ชุดทดสอบรุ่นเดิมอ่านแถบนี้ จึงเปิดไว้ให้ */
+  if (!(opts && opts.pageHelp === false)) await page.evaluate(() => localStorage.setItem('financii.pageHelp', '1'));
   await page.waitForTimeout(400);
   return { page, errors };
 }

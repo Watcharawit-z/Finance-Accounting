@@ -82,7 +82,7 @@
   --z-raised: 10; --z-sticky: 200; --z-drawer: 300; --z-dropdown: 350;
   --z-modal: 400; --z-picker: 420; --z-palette: 450; --z-print: 480; --z-toast: 500; --z-tooltip: 600;
 
-  --side-w: 264px; --top-h: 58px;
+  --rail-w: 72px; --side-w: 316px; --top-h: 58px;
 
   /* ชื่อเดิม — โค้ดหน้าจอและกราฟยังอ้างอยู่ ชี้ไปโทเค็นใหม่ทั้งหมด */
   --paper: var(--color-paper-2); --panel: var(--color-paper); --sunken: var(--color-paper-3); --hover: var(--color-paper-2);
@@ -167,8 +167,8 @@ kbd{font-family:var(--font-mono); font-size:11px; padding:0 5px; border:1px soli
    =================================================================== */
 .app{display:grid; grid-template-columns:minmax(0,1fr); min-height:100dvh}
 .side{
-  position:fixed; top:0; left:0; bottom:0; width:min(296px, 86vw); z-index:var(--z-drawer);
-  display:flex; flex-direction:column; background:var(--color-paper-2); color:var(--color-ink-2);
+  position:fixed; top:0; left:0; bottom:0; width:min(var(--side-w), 92vw); z-index:var(--z-drawer);
+  display:grid; grid-template-columns:var(--rail-w) minmax(0,1fr); background:var(--color-paper-2); color:var(--color-ink-2);
   border-right:1px solid var(--color-rule); transform:translateX(-100%);
   transition:transform var(--dur-short) var(--ease-out);
 }
@@ -202,6 +202,23 @@ body.nav-open .side{transform:none; box-shadow:var(--shadow-float)}
 }
 .demo-tag{color:var(--color-warn); border-color:var(--color-warn); background:var(--color-warn-soft); font-weight:600}
 
+/* แถบไอคอนหมวดหลัก — สีเข้ม ไอคอนกับชื่อสั้นใต้ไอคอน หมวดที่เลือกพื้นสว่างขึ้น */
+.rail{display:flex; flex-direction:column; justify-content:space-between; gap:var(--space-xs); min-height:0; overflow-y:auto;
+  background:var(--color-graphite); padding:var(--space-xs) 6px; scrollbar-width:none}
+.rail-top,.rail-bot{display:flex; flex-direction:column; gap:2px}
+.rail-i{display:flex; flex-direction:column; align-items:center; gap:3px; width:100%; min-height:52px; padding:7px 2px 6px; position:relative;
+  font:inherit; font-size:11px; line-height:1.2; color:var(--color-on-graphite-2); background:none; border:0; border-radius:var(--radius-ctl);
+  cursor:pointer; text-align:center}
+.rail-i svg.i{width:20px; height:20px}
+.rail-i:hover{color:var(--color-on-graphite); background:var(--color-graphite-2)}
+.rail-i.on{color:var(--color-on-graphite); background:var(--color-graphite-2); font-weight:600}
+.rail-i.on::before{content:""; position:absolute; left:-6px; top:10px; bottom:10px; width:3px; border-radius:0 3px 3px 0; background:var(--color-accent-2)}
+.rail-i:focus-visible{outline:2px solid var(--color-accent-2); outline-offset:-2px}
+.rail-l{overflow-wrap:anywhere}
+.rail-dot{position:absolute; top:7px; right:12px; width:7px; height:7px; border-radius:50%; background:var(--color-warn)}
+.panel{display:flex; flex-direction:column; min-width:0; min-height:0}
+.nav-t{font-family:var(--font-display); font-size:17px; font-weight:700; color:var(--color-ink); padding:var(--space-sm) 10px var(--space-xs)}
+.nav-gap{height:1px; background:var(--color-rule); margin:var(--space-xs) 10px}
 #nav{flex:1; overflow-y:auto; padding:var(--space-xs) var(--space-xs) var(--space-lg); scrollbar-width:thin; scrollbar-color:var(--color-rule-2) transparent}
 .nav-sec{font-size:var(--text-xs); font-weight:600; color:var(--color-muted); padding:var(--space-md) 10px var(--space-2xs)}
 .nav-g{display:none}
@@ -307,7 +324,7 @@ body.nav-open .side{transform:none; box-shadow:var(--shadow-float)}
 .card-acts{display:flex; align-items:center; gap:var(--space-xs); flex-wrap:wrap}
 .card-f{padding:var(--space-sm) var(--space-md); border-top:1px solid var(--color-rule); font-size:var(--text-sm); color:var(--color-muted); line-height:1.6; background:var(--color-paper-2)}
 .filters{display:flex; gap:var(--space-xs); padding:0 var(--space-md) var(--space-sm); flex-wrap:wrap; align-items:center}
-.sub-h{display:flex; align-items:center; gap:10px; padding:var(--space-md) var(--space-md) var(--space-2xs); font-family:var(--font-display); font-size:14px; font-weight:600; color:var(--color-ink)}
+.sub-h{display:flex; flex-wrap:wrap; align-items:center; gap:10px; padding:var(--space-md) var(--space-md) var(--space-2xs); font-family:var(--font-display); font-size:14px; font-weight:600; color:var(--color-ink)}
 .note{margin:var(--space-sm) var(--space-md); padding:10px 12px; border-radius:var(--radius-ctl); font-size:var(--text-sm); color:var(--color-ink-2);
   background:var(--color-paper-2); border:1px solid var(--color-rule)}
 .note.warn{border-color:var(--color-warn); background:var(--color-warn-soft); color:var(--color-ink)}
@@ -444,6 +461,8 @@ ul.plain{margin:8px 0; padding-left:20px} ul.plain li{margin:3px 0}
 #userBtn svg.i{width:16px; height:16px}
 /* .top-btn ตั้ง display เอง ทำให้แอตทริบิวต์ hidden ไม่มีผล — ต้องสั่งซ่อนตรง ๆ ไม่งั้นเห็นปุ่มเปล่า */
 #userBtn[hidden]{display:none}
+#helpBtn{font-weight:700; font-size:15px}
+#helpBtn.on{background:var(--color-accent-soft); color:var(--color-accent); border-color:var(--color-accent)}
 /* ตัวอย่างข้อมูลสำหรับเชื่อมระบบอื่น (หน้าเจ้าของ) — เลื่อนข้างในกรอบของตัวเอง ไม่ดันหน้าให้ล้น */
 pre.code-sample{margin:8px var(--space-md) var(--space-md); padding:10px 12px; background:var(--color-paper-2); border:1px solid var(--color-rule);
   border-radius:var(--radius-ctl); font-family:var(--font-mono); font-size:12.5px; line-height:1.5; color:var(--color-ink); overflow-x:auto; white-space:pre; max-width:100%}
@@ -593,6 +612,45 @@ details.adv .flds{margin-bottom:10px}
 /* ---------- เอกสารธุรกิจ: หัวเอกสาร รายการ ยอดท้ายเอกสาร ---------- */
 .doc-head{padding-bottom:var(--space-sm)}
 .credit-pair .pair{display:grid; grid-template-columns:minmax(0,5.5rem) minmax(0,1fr); gap:var(--space-xs)}
+/* ตารางรายการแบบปกติ: ลำดับ · สินค้า/รายละเอียด · จำนวน · หน่วย · ราคาต่อหน่วย · ราคารวม
+   ส่วนลด ภาษี บัญชีรายบรรทัด (ln-adv) โผล่เมื่อเปิดโหมดรายบรรทัด */
+#lnTable:not(.ln-detail) .ln-adv:not(.ln-acc), #lnTable:not(.ln-detail):not(.ln-showacc) .ln-acc{display:none}
+/* รายการเอกสาร: ชื่อเต็มไม่ตัดบรรทัดกลางคำ · หมวดหมู่ค่าใช้จ่ายเป็นป้าย */
+.dl-name{font-weight:500; color:var(--color-ink)}
+.cat-pill{display:inline-block; padding:1px 8px; border-radius:999px; font-size:var(--text-xs); color:var(--color-accent);
+  background:var(--color-accent-soft); white-space:nowrap; max-width:220px; overflow:hidden; text-overflow:ellipsis; vertical-align:middle}
+#lnTable tbody{counter-reset:ln}
+#lnTable tbody tr{counter-increment:ln}
+#lnTable td.ln-no::before{content:counter(ln)}
+#lnTable .ln-no{width:44px; text-align:center; color:var(--color-muted); font-variant-numeric:tabular-nums}
+#lnTable td.ln-prod{min-width:240px}
+#lnTable td.ln-prod select{margin-bottom:4px; width:100%}
+.ghost.ln-toggle{display:inline-flex; align-items:center; width:auto; height:32px; padding:0 10px; font-size:var(--text-sm); color:var(--color-accent); white-space:nowrap; border-color:var(--color-rule-2)}
+.ghost.ln-toggle:hover{background:var(--color-accent-soft)}
+.ghost.ln-toggle[aria-pressed="true"]{background:var(--color-accent-soft); border-color:var(--color-accent)}
+.doc-tax{display:inline-flex; align-items:center; gap:8px}
+.doc-tax select{height:30px; padding:0 6px; font:inherit; font-size:var(--text-sm); color:var(--color-ink); background:var(--color-paper);
+  border:1px solid var(--color-rule-2); border-radius:var(--radius-ctl)}
+/* หัวเอกสาร: ซ้าย คู่ค้า + ที่อยู่บนเอกสาร · ขวา ยอดรวมทั้งสิ้นตัวใหญ่ + วันที่ เครดิต ครบกำหนด */
+.doc-head{display:grid; grid-template-columns:minmax(0,1fr); gap:var(--space-md); padding:var(--space-md) var(--space-md) var(--space-xs)}
+.doc-head .flds{padding:0; gap:var(--space-sm) var(--space-md)}
+.dh-l{grid-template-columns:repeat(auto-fit,minmax(min(200px,100%),1fr))}
+.dh-r{display:grid; gap:var(--space-sm); align-content:start}
+.dh-total{display:flex; flex-direction:column; align-items:flex-end; gap:0; padding-bottom:var(--space-2xs); border-bottom:1px solid var(--color-rule)}
+.dh-total span{font-size:var(--text-sm); color:var(--color-ink-2)}
+.dh-total b{font-family:var(--font-display); font-size:30px; line-height:1.15; font-weight:700; color:var(--color-accent); font-variant-numeric:tabular-nums}
+.dh-meta{grid-template-columns:repeat(auto-fit,minmax(min(170px,100%),1fr))}
+.dh-addr textarea{min-height:72px}
+.dh-more > summary{cursor:pointer; color:var(--color-accent); font-size:var(--text-sm); font-weight:500; padding:2px 0; list-style:none}
+.dh-more > summary::-webkit-details-marker{display:none}
+.dh-more > summary::before{content:"+ "}
+.dh-more[open] > summary::before{content:"− "}
+.dh-more > .flds{margin-top:var(--space-xs)}
+.dh-row{border-top:1px solid var(--color-rule); margin:var(--space-sm) var(--space-md) 0; padding:var(--space-sm) 0 0 !important}
+@media (min-width: 48rem){
+  .doc-head{grid-template-columns:minmax(0,1.3fr) minmax(0,1fr); gap:var(--space-xl); padding:var(--space-md) var(--space-lg) var(--space-xs)}
+  .dh-row{margin:var(--space-sm) var(--space-lg) 0}
+}
 .contact-box{border:1px solid var(--color-rule); border-radius:var(--radius-ctl); background:var(--color-paper-2)}
 .contact-box > summary{display:flex; flex-wrap:wrap; align-items:baseline; gap:4px 10px; padding:10px 12px; cursor:pointer; list-style:none;
   font-size:var(--text-sm); color:var(--color-ink-2)}
@@ -602,8 +660,9 @@ details.adv .flds{margin-bottom:10px}
 .contact-box .cb-edit{margin-left:auto; color:var(--color-accent); font-weight:500; white-space:nowrap}
 .contact-box[open] > summary{border-bottom:1px solid var(--color-rule)}
 .contact-box .flds{padding:var(--space-sm) 12px var(--space-md)}
-.ln-opts{display:flex; flex-wrap:wrap; gap:6px 14px; font-family:var(--font-body); font-weight:400; font-size:var(--text-sm); color:var(--color-muted)}
+.ln-opts{display:flex; flex:1 1 auto; min-width:0; flex-wrap:wrap; align-items:center; justify-content:flex-end; gap:6px 14px; font-family:var(--font-body); font-weight:400; font-size:var(--text-sm); color:var(--color-muted)}
 .ln-opts label{display:inline-flex; align-items:center; gap:6px; white-space:nowrap}
+.ln-opts label[hidden]{display:none}
 .ln-opts select{height:32px; padding:0 8px; font:inherit; font-size:var(--text-sm); color:var(--color-ink); background:var(--color-paper);
   border:1px solid var(--color-rule-2); border-radius:var(--radius-ctl)}
 .lines input.uom{min-width:56px}
@@ -779,6 +838,24 @@ table.nb-tbl{width:100%; border-collapse:collapse; font-size:14px}
 #modal.show .modal-box{animation:rise var(--dur-long) var(--ease-out)}
 @keyframes fade{from{opacity:0}}
 @keyframes rise{from{opacity:0; transform:scale(.97)}}
+/* เอกสารเปิดเป็นหน้าเต็ม (ฟอร์มที่มีตารางรายการ) — ทับพื้นที่ทำงาน เมนูซ้ายยังอยู่ ไม่มีพื้นมืด */
+#modal.as-page{background:var(--color-paper-2); padding:0; align-items:stretch; justify-content:stretch}
+#modal.as-page.show .modal-box{animation:fade var(--dur-short) var(--ease-out)}
+#modal.as-page .modal-box{width:100%; max-width:none; min-height:100%; border:0; border-radius:0; box-shadow:none; background:transparent; overflow:visible}
+#modal.as-page .modal-h{position:sticky; top:0; z-index:3; align-items:center; flex-wrap:wrap; gap:var(--space-xs) var(--space-sm);
+  background:var(--color-paper); padding:var(--space-sm) var(--space-md); border-bottom:1px solid var(--color-rule)}
+#modal.as-page .pg-tt{min-width:0; flex:1 1 280px}
+#modal.as-page .pg-tt .card-sub{margin-top:2px}
+#modal.as-page .modal-b{max-height:none; overflow:visible; max-width:1240px; margin:var(--space-md) auto var(--space-2xl);
+  background:var(--color-paper); border:1px solid var(--color-rule); border-radius:var(--radius-panel); padding:var(--space-2xs) 0 var(--space-lg)}
+#modal.as-page .modal-f{max-width:1240px; margin:0 auto var(--space-2xl); background:none; border:0; padding:0 var(--space-md)}
+@media (min-width: 56.25rem){
+  #modal.as-page{left:var(--side-w)}
+  #modal.as-page .modal-h{padding:var(--space-sm) var(--space-lg)}
+  #modal.as-page .modal-b{margin:var(--space-lg) var(--space-lg) var(--space-2xl)}
+  #modal.as-page .modal-f{margin:0 var(--space-lg) var(--space-2xl)}
+}
+@media (min-width: 90rem){ #modal.as-page .modal-b,#modal.as-page .modal-f{margin-left:auto; margin-right:auto} }
 .modal-box{background:var(--color-paper); border:1px solid var(--color-rule); border-radius:var(--radius-panel); width:min(820px,100%); box-shadow:var(--shadow-float); overflow:hidden}
 /* ฟอร์มเอกสารธุรกิจ (มีตารางรายการ) กว้างกว่ากล่องทั่วไป — ตารางมีส่วนลด ภาษี บัญชี และจำนวนเงินต่อบรรทัด */
 .modal-box.xl{width:min(1240px,100%)}
@@ -1047,12 +1124,15 @@ button.st-btn:focus-visible{outline:2px solid var(--color-focus); outline-offset
 
 <div class="app">
   <aside class="side" aria-label="แถบเมนู">
-    <div class="side-h">
-      <div class="brand"><span class="brand-mark" aria-hidden="true">F</span><div>Financii<span class="brand-sub">ระบบบัญชีไทย</span></div></div>
-      <div class="co" id="coName"></div>
+    <nav class="rail" id="rail" aria-label="หมวดหลัก"></nav>
+    <div class="panel">
+      <div class="side-h">
+        <div class="brand"><span class="brand-mark" aria-hidden="true">F</span><div>Financii<span class="brand-sub">ระบบบัญชีไทย</span></div></div>
+        <div class="co" id="coName"></div>
+      </div>
+      <nav id="nav" aria-label="หน้าในหมวด"></nav>
+      <div class="side-f"><kbd>Ctrl</kbd><kbd>K</kbd> ค้นหาเอกสารและสั่งงาน</div>
     </div>
-    <nav id="nav" aria-label="เมนูหลัก"></nav>
-    <div class="side-f"><kbd>Ctrl</kbd><kbd>K</kbd> ค้นหาเอกสารและสั่งงาน</div>
   </aside>
   <div class="work">
     <header class="top">
@@ -1064,6 +1144,7 @@ button.st-btn:focus-visible{outline:2px solid var(--color-focus); outline-offset
       <span id="syncTag" class="sync-tag" role="status" aria-live="polite"></span>
       <label class="periodwrap" id="periodWrap"><span class="pw-label">งวดบัญชี</span><select id="periodSel" aria-label="เลือกงวดบัญชี"></select></label>
       <button class="icon-btn" id="densityBtn" data-act="density" aria-label="สลับความหนาแน่นของตาราง"></button>
+      <button class="icon-btn" id="helpBtn" data-act="pagehelp" aria-label="คำอธิบายหน้านี้">?</button>
       <button class="icon-btn" id="themeBtn" data-act="theme" aria-label="สลับโหมดสว่างและมืด"></button>
       <button class="top-btn" id="userBtn" data-act="owner:account" hidden></button>
     </header>
@@ -11743,7 +11824,7 @@ function cell(c) {
     if ('mono' in c) return '<td class="mono">' + esc(c.mono) + '</td>';
     if ('dim' in c) return '<td class="dim">' + esc(c.dim) + '</td>';
     if ('st' in c) return '<td><span class="st ' + c.st[0] + '">' + esc(c.st[1]) + '</span></td>';
-    if ('html' in c) return '<td>' + c.html + '</td>';
+    if ('html' in c) return '<td' + (c.cls ? ' class="' + c.cls + '"' : '') + '>' + c.html + '</td>';
     if ('c' in c) return '<td class="ctr">' + esc(c.c) + '</td>';
   }
   return '<td>' + esc(c) + '</td>';
@@ -11854,6 +11935,26 @@ let modalSubmit = null;
 function modal(o) {
   const m = document.getElementById('modal');
   const xl = o.wide || /id="lnTable"[^>]*data-mode="(sale|purchase|expense)"/.test(o.body || '');
+  /* เอกสารที่มีตารางรายการ เปิดเป็นหน้าเต็มแบบเดียวกับโปรแกรมบัญชีที่คุ้นมือ (ไม่ใช่กล่องลอย ตารางรายการไม่ถูกบีบ)
+     หัวหน้า: ชื่อเอกสารซ้าย · ปิดหน้าต่าง / บันทึก มุมขวาบน · เมนูซ้ายยังเห็นอยู่ */
+  const page = o.page !== false && /id="lnTable"/.test(o.body || '');
+  m.classList.toggle('as-page', page);
+  if (page) {
+    m.innerHTML = '<div class="modal-box page" role="dialog" aria-modal="true" aria-label="' + esc(o.title) + '">'
+      + '<div class="modal-h"><div class="pg-tt"><h3>' + esc(o.title) + '</h3>'
+      + (o.sub ? '<div class="card-sub">' + esc(o.sub) + '</div>' : '') + '</div>'
+      + '<span class="grow"></span>' + btn('modal:close', o.cancelLabel || 'ปิดหน้าต่าง')
+      + (o.submitLabel ? btn('modal:submit', o.submitLabel, o.submitKind || 'primary') : '') + '</div>'
+      + '<div class="modal-b">' + o.body + '</div>'
+      + (o.note ? '<div class="modal-f"><span class="dim">' + esc(o.note) + '</span></div>' : '')
+      + '</div>';
+    m.classList.add('show');
+    m.scrollTop = 0;
+    modalSubmit = o.onSubmit || null;
+    const f0 = m.querySelector('.modal-b input,.modal-b select,.modal-b textarea');
+    if (f0) requestAnimationFrame(function () { if (!m.contains(document.activeElement)) f0.focus(); });
+    return;
+  }
   m.innerHTML = '<div class="modal-box' + (xl ? ' xl' : '') + '" role="dialog" aria-modal="true">'
     + '<div class="modal-h"><h3>' + esc(o.title) + '</h3>'
     + (o.sub ? '<div class="card-sub">' + esc(o.sub) + '</div>' : '')
@@ -11878,7 +11979,7 @@ function modal(o) {
   }
 }
 function closeModal() {
-  document.getElementById('modal').classList.remove('show');
+  document.getElementById('modal').classList.remove('show', 'as-page');
   document.getElementById('modal').innerHTML = '';
   modalSubmit = null;
 }
@@ -12086,113 +12187,109 @@ function navGroups() {
   const bnOpen = DB.docs.billingNote.filter((b) => ['issued', 'partially_paid'].indexOf(billingNoteStatus(b)) >= 0).length;
   const grnWaiting = DB.docs.goodsReceipt.filter((g) => g.status === 'received').length;
   const pbWaiting = DB.docs.paymentBatch.filter(paymentBatchActive).length;
+  /* จัดหมวดแบบเดียวกับโปรแกรมบัญชีที่นักบัญชีไทยคุ้นมือ: แถบไอคอนซ้ายคือหมวดหลัก กดแล้วเห็นหน้าในหมวดเป็นคอลัมน์ถัดมา
+     g = ชื่อสั้นใต้ไอคอน · t = ชื่อหมวดเต็มบนหัวคอลัมน์ · subs = กลุ่มหน้าในหมวด (s ว่าง = เว้นช่องคั่น ไม่มีหัวข้อ) */
+  const owner = ownerVisible() ? [['ownerdaily', 'ยอดขาย กำไร ค่าแอด', null]] : [];
   return [
-    { g: 'ภาพรวม', flat: true, icon: 'grid', items: [
-      ['dashboard', 'แดชบอร์ด', todo || null, 'grid'],
-    ].concat(ownerVisible() ? [['ownerdaily', 'ยอดขาย กำไร ค่าแอด', null, 'trend']] : []).concat([
-      ['close', 'ปิดงวดบัญชี', null, 'lock'],
-    ])},
-    /* วงจรรายได้ — เรียงตามลำดับที่เอกสารเกิดจริง เสนอราคา → สั่งขาย → ใบกำกับ → วางบิล → ใบเสร็จ
-       ปลายกลุ่มคือใบที่ออกตามหลังเพื่อแก้ยอด (ลดหนี้ ม.86/10 · เพิ่มหนี้ ม.86/9) */
-    { sec: 'งานประจำวัน', g: 'เอกสารขาย', icon: 'sale', items: [
-      ['quotations', 'ใบเสนอราคา', quoteOpen || null],
-      ['salesorders', 'ใบสั่งขาย', soOpen || null],
-      ['invoices', 'ใบกำกับภาษี', null],
-      ['cashsales', 'ขายเงินสด', null],
-      ['billingnotes', 'ใบวางบิล', bnOpen || null],
-      ['receipts', 'ใบเสร็จรับเงิน', null],
-      ['deposits', 'เงินมัดจำรับ', null],
-      ['creditnotes', 'ใบลดหนี้', null],
-      ['debitnotes', 'ใบเพิ่มหนี้', null],
-      ['offsets', 'หักกลบ · ตัดหนี้สูญ', null],
+    { g: 'ภาพรวม', t: 'ภาพรวมกิจการ', icon: 'grid', subs: [
+      { s: '', items: [['dashboard', 'แดชบอร์ด', todo || null]].concat(owner) },
     ]},
-    /* วงจรรายจ่าย — ใบสั่งซื้อ → ใบรับสินค้า (ของเข้าคลัง) → ตั้งหนี้ (ใบกำกับมาถึง) → จ่าย */
-    { g: 'เอกสารซื้อ', icon: 'buy', items: [
-      ['purchaseorders', 'ใบสั่งซื้อ', poOpen || null],
-      ['goodsreceipts', 'ใบรับสินค้า', grnWaiting || null],
-      ['bills', 'ตั้งหนี้ผู้ขาย', null],
-      ['payments', 'ใบสำคัญจ่าย', null],
-      ['vdeposits', 'เงินมัดจำจ่าย', null],
-      ['vendorcns', 'ใบลดหนี้จากผู้ขาย', null],
-    ]},
-    /* ค่าใช้จ่ายที่มีหัก ณ ที่จ่าย ออก 50 ทวิ ให้เองในแถบหัก ณ ที่จ่าย — สองแถบนี้ผูกกัน */
-    { g: 'ค่าใช้จ่าย', icon: 'receipt', items: [
-      ['expenses', 'ค่าใช้จ่าย', null],
-      ['whtcert', 'หัก ณ ที่จ่าย', null],
-      ['paymentprep', 'เตรียมจ่ายเงิน', pbWaiting || null],
-    ]},
-    { g: 'ธนาคาร', icon: 'bank', items: [
-      ['bank', 'กระทบยอดธนาคาร', unmatched || null],
-      ['cashflow', 'งบกระแสเงินสด', null],
-    ]},
-    /* สมุดรายวันเฉพาะ 5 เล่ม เรียงตามที่นักบัญชีใช้ บันทึกรายการด้วยมือได้ทุกเล่ม */
-    { sec: 'บัญชีและภาษี', g: 'บัญชี', icon: 'book', items: [
-      ['jgeneral', 'สมุดรายวันทั่วไป', null],
-      ['jpurchase', 'สมุดรายวันซื้อ', null],
-      ['jsales', 'สมุดรายวันขาย', null],
-      ['jpayment', 'สมุดรายวันจ่าย', null],
-      ['jreceipt', 'สมุดรายวันรับ', null],
-      ['coa', 'ผังบัญชี', null],
-    ]},
-    { g: 'ยื่นแบบภาษี', icon: 'tax', items: [
-      ['pp30', 'แบบ ภ.พ.30', null],
-      ['pnd', 'ภ.ง.ด.1 / 3 / 53', null],
-      ['taxcal', 'ปฏิทินภาษี', null],
-    ]},
-    { sec: 'ทะเบียน', g: 'ผู้ติดต่อ', icon: 'contact', items: [
-      ['customers', 'ลูกค้า', null],
-      ['vendors', 'ผู้ขาย', null],
-    ]},
-    { g: 'สินค้า', icon: 'box', items: [
-      ['items', 'ทะเบียนสินค้า', null],
-      ['stockadj', 'ยอดยกมา · ตรวจนับ · ตัดจำหน่าย', null],
-      ['stockcard', 'สต๊อกการ์ด · สินค้าคงเหลือ', null],
-      ['stockmoves', 'ความเคลื่อนไหวสต๊อก', null],
-    ]},
-    { g: 'สินทรัพย์', icon: 'asset', items: [
-      ['assets', 'ทะเบียนทรัพย์สิน', null],
-      ['deprec', 'ค่าเสื่อมราคา', null],
-    ]},
-    { g: 'เงินเดือน', icon: 'payroll', items: [
-      ['payroll', 'งวดจ่ายเงินเดือน', null],
-      ['attendance', 'ขาด ลา มาสาย', null],
-      ['employees', 'ทะเบียนพนักงาน', null],
-      ['payrollfile', 'ภ.ง.ด.1 · สปส.1-10 · นำส่ง', null],
-      ['payrollyear', 'สรุปทั้งปี · ภ.ง.ด.1ก · 50 ทวิ', null],
-    ]},
-    /* รายงานทั้งหมดรวมไว้ที่เดียว แยกหมวดย่อยแบบเดียวกับที่นักบัญชีคุ้นเคย */
-    { sec: 'รายงานและระบบ', g: 'รายงาน', icon: 'chart', subs: [
-      { s: 'งบการเงิน', items: [
-        ['bs', 'งบแสดงฐานะการเงิน', null],
-        ['pl', 'งบกำไรขาดทุน', null],
-        ['equity', 'งบแสดงการเปลี่ยนแปลงส่วนของผู้ถือหุ้น', null],
+    { g: 'การเงิน', t: 'การเงิน', icon: 'bank', subs: [
+      { s: '', items: [
+        ['bank', 'บัญชีธนาคาร · กระทบยอด', unmatched || null],
+        ['paymentprep', 'เตรียมจ่ายเงิน', pbWaiting || null],
+        ['cashflow', 'งบกระแสเงินสด', null],
       ]},
-      { s: 'สมุดบัญชี', items: [
-        ['journals', 'สมุดรายวันรวมทุกเล่ม', null],
-        ['ledger', 'บัญชีแยกประเภท', null],
-        ['tb', 'งบทดลอง', null],
+    ]},
+    /* เรียงตามลำดับที่เอกสารเกิดจริง เสนอราคา → วางบิล/แจ้งหนี้ → ใบกำกับ → ใบเสร็จ · ขายเงินสด · แก้ยอด · มัดจำ */
+    { g: 'ขาย', t: 'เอกสารขาย', icon: 'sale', subs: [
+      { s: '', items: [
+        ['quotations', 'ใบเสนอราคา', quoteOpen || null],
+        ['salesorders', 'ใบสั่งขาย', soOpen || null],
+        ['billingnotes', 'ใบวางบิล / ใบแจ้งหนี้', bnOpen || null],
+        ['invoices', 'ใบกำกับภาษี', null],
+        ['receipts', 'ใบเสร็จรับเงิน', null],
       ]},
-      { s: 'ลูกหนี้', items: [
-        ['ar', 'อายุลูกหนี้', overdue || null],
+      { s: '', items: [['cashsales', 'ขายเงินสด', null]] },
+      { s: '', items: [['creditnotes', 'ใบลดหนี้', null], ['debitnotes', 'ใบเพิ่มหนี้', null]] },
+      { s: '', items: [['deposits', 'ใบรับเงินมัดจำ', null], ['offsets', 'หักกลบ · ตัดหนี้สูญ', null]] },
+    ]},
+    { g: 'ซื้อ', t: 'เอกสารซื้อ', icon: 'buy', subs: [
+      { s: '', items: [
+        ['purchaseorders', 'ใบสั่งซื้อ', poOpen || null],
+        ['goodsreceipts', 'ใบรับสินค้า', grnWaiting || null],
+        ['bills', 'บันทึกซื้อ / ตั้งหนี้', null],
+        ['payments', 'ใบสำคัญจ่าย', null],
       ]},
-      { s: 'เจ้าหนี้', items: [
-        ['ap', 'อายุเจ้าหนี้', null],
+      { s: '', items: [['vdeposits', 'ใบจ่ายเงินมัดจำ', null], ['vendorcns', 'ใบลดหนี้จากผู้ขาย', null]] },
+    ]},
+    { g: 'ค่าใช้จ่าย', t: 'ค่าใช้จ่าย', icon: 'receipt', subs: [
+      { s: '', items: [['expenses', 'ค่าใช้จ่าย', null], ['whtcert', 'หัก ณ ที่จ่าย', null]] },
+      { s: 'จัดการสินทรัพย์', items: [['assets', 'ทะเบียนทรัพย์สิน', null], ['deprec', 'ค่าเสื่อมราคา', null]] },
+    ]},
+    { g: 'สินค้า', t: 'สินค้าและคลัง', icon: 'box', subs: [
+      { s: '', items: [
+        ['items', 'สินค้า / บริการ', null],
+        ['stockadj', 'ปรับสต๊อก (ยอดยกมา ตรวจนับ ตัดจำหน่าย)', null],
+        ['stockcard', 'สต๊อกการ์ด · สินค้าคงเหลือ', null],
+        ['stockmoves', 'ความเคลื่อนไหวสต๊อก', null],
       ]},
-      { s: 'ภาษี', items: [
+    ]},
+    { g: 'ผู้ติดต่อ', t: 'สมุดรายชื่อ', icon: 'contact', subs: [
+      { s: '', items: [['customers', 'ลูกค้า', null], ['vendors', 'ผู้จำหน่าย', null]] },
+    ]},
+    /* บริหารบัญชี — สมุดรายวัน 5 เล่ม ผังบัญชี ปิดงวด/ปิดงบ ยอดยกมา */
+    { g: 'บัญชี', t: 'บริหารบัญชี', icon: 'book', subs: [
+      { s: 'สมุดรายวัน', items: [
+        ['jgeneral', 'สมุดรายวันทั่วไป', null],
+        ['jsales', 'สมุดรายวันขาย', null],
+        ['jpurchase', 'สมุดรายวันซื้อ', null],
+        ['jreceipt', 'สมุดรายวันรับ', null],
+        ['jpayment', 'สมุดรายวันจ่าย', null],
+      ]},
+      { s: '', items: [['coa', 'ผังบัญชี', null], ['close', 'ปิดงวด · ปิดงบบัญชี', todo || null]] },
+      { s: 'ยอดยกมา', items: [['openitems', 'ลูกหนี้/เจ้าหนี้ยกมารายใบ', null], ['import', 'นำเข้าข้อมูลจากระบบเดิม', null]] },
+    ]},
+    { g: 'ภาษี', t: 'บริหารภาษี', icon: 'tax', subs: [
+      { s: '', items: [
+        ['pp30', 'ยื่นภาษีมูลค่าเพิ่ม (ภ.พ.30)', null],
+        ['pnd', 'ยื่นภาษีหัก ณ ที่จ่าย (ภ.ง.ด.)', null],
         ['vatout', 'รายงานภาษีขาย', null],
         ['vatin', 'รายงานภาษีซื้อ', null],
-      ]},
-      { s: 'โครงการและงบประมาณ', items: [
-        ['projects', 'โครงการ', null],
-        ['budget', 'งบประมาณเทียบใช้จริง', null],
+        ['taxcal', 'ปฏิทินภาษี', null],
       ]},
     ]},
-    { g: 'ระบบ', icon: 'gear', items: [
-      ['settings', 'ข้อมูลกิจการ', null],
-      ['import', 'นำเข้าข้อมูลจากระบบเดิม', null],
-      ['openitems', 'ลูกหนี้/เจ้าหนี้ยกมารายใบ', null],
-      ['audit', 'ร่องรอยการตรวจสอบ', null],
-      ['about', 'เกี่ยวกับระบบนี้', null],
+    { g: 'รายงาน', t: 'รายงาน', icon: 'chart', subs: [
+      { s: 'งบการเงิน', items: [
+        ['pl', 'งบกำไรขาดทุน', null],
+        ['bs', 'งบแสดงฐานะการเงิน', null],
+        ['equity', 'งบการเปลี่ยนแปลงส่วนของผู้ถือหุ้น', null],
+      ]},
+      { s: 'บัญชี', items: [
+        ['tb', 'งบทดลอง', null],
+        ['ledger', 'บัญชีแยกประเภท', null],
+        ['journals', 'สมุดรายวันรวมทุกเล่ม', null],
+      ]},
+      { s: 'ลูกหนี้ · เจ้าหนี้', items: [['ar', 'อายุลูกหนี้', overdue || null], ['ap', 'อายุเจ้าหนี้', null]] },
+      { s: 'โครงการ', items: [['projects', 'โครงการ', null], ['budget', 'งบประมาณเทียบใช้จริง', null]] },
+    ]},
+    { g: 'เงินเดือน', t: 'เงินเดือน', icon: 'payroll', subs: [
+      { s: '', items: [
+        ['payroll', 'งวดจ่ายเงินเดือน', null],
+        ['attendance', 'ขาด ลา มาสาย', null],
+        ['employees', 'ทะเบียนพนักงาน', null],
+      ]},
+      { s: 'นำส่งและยื่นแบบ', items: [
+        ['payrollfile', 'ภ.ง.ด.1 · สปส.1-10 · นำส่ง', null],
+        ['payrollyear', 'สรุปทั้งปี · ภ.ง.ด.1ก · 50 ทวิ', null],
+      ]},
+    ]},
+    { g: 'ตั้งค่า', t: 'ตั้งค่า', icon: 'gear', bottom: true, subs: [
+      { s: '', items: [
+        ['settings', 'ข้อมูลกิจการ · เอกสาร · ผู้ใช้', null],
+        ['audit', 'ร่องรอยการตรวจสอบ', null],
+        ['about', 'เกี่ยวกับระบบนี้', null],
+      ]},
     ]},
   ];
 }
@@ -12224,41 +12321,42 @@ function navSubOf(screen) {
   return w && w.sub ? w.sub.s : null;
 }
 function navGroupIsOpen(g) {
-  if (STATE.navGroupOpen[g.g] !== undefined) return STATE.navGroupOpen[g.g];
   const w = navWhere(STATE.screen);
   return !!(w && w.g.g === g.g);
 }
+/** หมวดที่แสดงอยู่ในคอลัมน์เมนู — หมวดของหน้าที่เปิดอยู่ (หน้าที่ไม่อยู่ในเมนูใช้หมวดล่าสุด) */
+function navModule(groups) {
+  const w = navWhere(STATE.screen);
+  if (w) STATE.navModule = w.g.g;
+  return groups.find((g) => g.g === STATE.navModule) || groups[0];
+}
+/** หน้าล่าสุดที่เปิดในแต่ละหมวด — กดไอคอนหมวดแล้วกลับไปหน้าเดิมของหมวดนั้น */
+const NAV_LAST = {};
 
 /* ---------- โครงหน้าจอ ---------- */
+/** แถบไอคอนหมวดหลัก (ซ้ายสุด) + คอลัมน์หน้าในหมวดที่เลือก */
 function renderNav() {
   const groups = navGroups();
-  const openSub = navSubOf(STATE.screen);
-  const where = navWhere(STATE.screen);
+  const mod = navModule(groups);
+  if (navWhere(STATE.screen)) NAV_LAST[mod.g] = STATE.screen;
   const badge = (n) => (n ? '<span class="badge">' + n + '</span>' : '');
-  const item = (it, cls) => '<a href="#" class="nav-i ' + cls + (STATE.screen === it[0] ? ' on' : '')
+  const count = (g) => (g.subs || []).reduce((n, s) => n + s.items.reduce((m, i) => m + (i[2] || 0), 0), 0);
+  const railBtn = (g) => '<button class="rail-i' + (g === mod ? ' on' : '') + '" data-act="navm:' + esc(g.g) + '"'
+    + ' title="' + esc(g.t || g.g) + '"' + (g === mod ? ' aria-current="true"' : '') + '>'
+    + icon(g.icon) + '<span class="rail-l">' + esc(g.g) + '</span>'
+    + (count(g) && g !== mod ? '<span class="rail-dot" aria-label="มีงานค้าง ' + count(g) + ' รายการ"></span>' : '') + '</button>';
+  const rail = document.getElementById('rail');
+  if (rail) {
+    rail.innerHTML = '<div class="rail-top">' + groups.filter((g) => !g.bottom).map(railBtn).join('') + '</div>'
+      + '<div class="rail-bot">' + groups.filter((g) => g.bottom).map(railBtn).join('') + '</div>';
+  }
+  const item = (it) => '<a href="#" class="nav-i' + (STATE.screen === it[0] ? ' on' : '')
     + '" data-act="go:' + it[0] + '"' + (STATE.screen === it[0] ? ' aria-current="page"' : '') + '>'
-    + (cls === 'flat' ? icon(it[3] || 'file') : '') + '<span>' + esc(it[1]) + '</span>' + badge(it[2]) + '</a>';
-  let nav = '';
-  groups.forEach(function (g) {
-    if (g.sec) nav += '<div class="nav-sec">' + esc(g.sec) + '</div>';
-    if (g.flat) { g.items.forEach(function (it) { nav += item(it, 'flat'); }); return; }
-    const open = navGroupIsOpen(g);
-    const sum = (g.items || []).reduce((n, i) => n + (i[2] || 0), 0)
-      + (g.subs || []).reduce((n, s) => n + s.items.reduce((m, i) => m + (i[2] || 0), 0), 0);
-    nav += '<button class="nav-gh' + (open ? ' open' : '') + (where && where.g.g === g.g ? ' has-on' : '')
-      + '" data-act="navg:' + esc(g.g) + '" aria-expanded="' + (open ? 'true' : 'false') + '">'
-      + icon(g.icon) + '<span>' + esc(g.g) + '</span>' + (open ? '' : badge(sum)) + icon('chev', 'chev') + '</button>';
-    if (!open) return;
-    (g.items || []).forEach(function (it) { nav += item(it, 'child'); });
-    (g.subs || []).forEach(function (s) {
-      const sOpen = STATE.navOpen[s.s] === undefined ? s.s === openSub : STATE.navOpen[s.s];
-      nav += '<button class="nav-s' + (sOpen ? ' open' : '') + '" data-act="nav:' + esc(s.s) + '"'
-        + ' aria-expanded="' + (sOpen ? 'true' : 'false') + '">'
-        + '<span class="chev" aria-hidden="true">›</span>' + esc(s.s)
-        + (!sOpen && s.items.some((i) => i[2]) ? badge(s.items.reduce((n, i) => n + (i[2] || 0), 0)) : '')
-        + '</button>';
-      if (sOpen) s.items.forEach(function (it) { nav += item(it, 'sub'); });
-    });
+    + '<span>' + esc(it[1]) + '</span>' + badge(it[2]) + '</a>';
+  let nav = '<div class="nav-t">' + esc(mod.t || mod.g) + '</div>';
+  (mod.subs || []).forEach(function (sub, k) {
+    nav += sub.s ? '<div class="nav-sec">' + esc(sub.s) + '</div>' : (k ? '<div class="nav-gap" role="separator"></div>' : '');
+    sub.items.forEach(function (it) { nav += item(it); });
   });
   document.getElementById('nav').innerHTML = nav;
 }
@@ -12270,8 +12368,8 @@ function renderCrumb() {
   const extra = { importResult: ['ระบบ', 'ผลการนำเข้า'] }[STATE.screen];
   let h = '';
   if (w) {
-    if (!w.g.flat) h += '<span class="grp">' + esc(w.g.g) + '</span>' + sep;
-    if (w.sub) h += '<span class="grp">' + esc(w.sub.s) + '</span>' + sep;
+    h += '<span class="grp">' + esc(w.g.t || w.g.g) + '</span>' + sep;
+    if (w.sub && w.sub.s) h += '<span class="grp">' + esc(w.sub.s) + '</span>' + sep;
     h += '<b>' + esc(w.item[1]) + '</b>';
   } else if (extra) {
     h = '<span class="grp">' + esc(extra[0]) + '</span>' + sep + '<b>' + esc(extra[1]) + '</b>';
@@ -12279,6 +12377,9 @@ function renderCrumb() {
   document.getElementById('crumb').innerHTML = h;
 }
 
+/* ปุ่ม "?" บนแถบบน — แสดง/ซ่อนคำอธิบายของหน้า จำไว้ในเบราว์เซอร์นี้ */
+const HELP_KEY = 'financii.pageHelp';
+const pageHelpOn = () => lsGet(HELP_KEY) === '1';
 function renderTopTools() {
   const mac = /Mac|iPhone|iPad/.test(navigator.platform || '');
   document.getElementById('cmdBtn').innerHTML = icon('search')
@@ -12296,6 +12397,12 @@ function renderTopTools() {
   tb.title = dark ? 'เปลี่ยนเป็นโหมดสว่าง' : 'เปลี่ยนเป็นโหมดมืด';
   const pw = document.getElementById('periodWrap');
   if (pw && !pw.querySelector('svg')) pw.insertAdjacentHTML('afterbegin', icon('calendar'));
+  const hb = document.getElementById('helpBtn');
+  if (hb) {
+    hb.classList.toggle('on', pageHelpOn());
+    hb.setAttribute('aria-pressed', pageHelpOn() ? 'true' : 'false');
+    hb.title = pageHelpOn() ? 'ซ่อนคำอธิบายหน้านี้' : 'แสดงคำอธิบายหน้านี้ (ลำดับงานและผลทางบัญชี)';
+  }
   /* ผู้ใช้ที่เข้าอยู่ — เฉพาะเปิดผ่านเซิร์ฟเวอร์ที่ใช้รหัส กดแล้วดูสิทธิ์ เข้าแบบเจ้าของ หรือออกจากระบบ */
   const ub = document.getElementById('userBtn');
   if (ub) {
@@ -12360,7 +12467,8 @@ function render() {
   const printHead = '<div class="print-co"><b>' + esc(DB.company.name || '') + '</b>'
     + (DB.company.taxId ? ' · เลขประจำตัวผู้เสียภาษี ' + esc(DB.company.taxId) : '')
     + '<span>งวด ' + esc(thPeriod(STATE.period)) + ' · พิมพ์เมื่อ ' + esc(thDate(TODAY)) + '</span></div>';
-  try { html = printHead + pageContext(STATE.screen) + fn(); }
+  /* คำอธิบายหน้า (ลำดับงาน ผลทางบัญชี) ซ่อนไว้ — หน้าจอเหลือแค่งาน กด "?" บนแถบบนเพื่อดู */
+  try { html = printHead + (pageHelpOn() ? pageContext(STATE.screen) : '') + fn(); }
   catch (e) {
     console.error(e);
     html = card({ title:'เปิดหน้านี้ไม่ได้', body:'<div class="empty">' + esc(e.message) + '</div>' });
@@ -12602,23 +12710,48 @@ function docHead(o) {
   const type = d.creditType || 'credit';
   const days = type === 'cash' ? 0 : d.creditDays !== undefined && d.creditDays !== null ? d.creditDays : p ? p.termDays || 0 : 0;
   const due = d.due && d.date === date ? d.due : addDays(date, days);
-  const who = o.side === 'vendor' ? 'ผู้ขาย' : 'ลูกค้า';
-  return '<div class="flds doc-head">'
-    + field({ name:'partner', label: who, type:'select', value: code,
+  const who = o.side === 'vendor' ? 'ผู้จำหน่าย' : 'ลูกค้า';
+  /* วางแบบเอกสารธุรกิจที่นักบัญชีคุ้นมือ: ซ้าย = คู่ค้าและที่อยู่บนเอกสาร · ขวา = ยอดรวมทั้งสิ้นตัวใหญ่ วันที่ เครดิต ครบกำหนด
+     ใต้สองคอลัมน์ = โปรเจกต์ เลขที่อ้างอิง */
+  return '<div class="doc-head">'
+    + '<div class="dh-l flds">'
+    + field({ name:'partner', label: 'ชื่อ' + who, type:'select', value: code, wide:true,
         options: parties.length ? parties : [['', '— ยังไม่มี' + who + 'ในทะเบียน เพิ่มที่เมนูผู้ติดต่อ —']], hint: o.partnerHint })
-    + field({ name:'date', label:'วันที่เอกสาร', type:'date', value: date })
-    + (o.extra || '')
+    + contactFields(p, d.snap && d.snap.edited ? d.snap : null, who)
+    + '</div>'
+    + '<div class="dh-r">'
+    + '<div class="dh-total"><span>จำนวนเงินรวมทั้งสิ้น</span><b id="tGrandTop">0.00</b></div>'
+    + '<div class="flds dh-meta">'
+    + field({ name:'date', label:'วันที่', type:'date', value: date })
     + (o.credit === false ? ''
       : field({ name:'creditType', label:'เงื่อนไขชำระ', type:'select', value: type, options: CREDIT_OPTS })
-        + '<div class="fld-w credit-pair"' + (type === 'cash' ? ' hidden' : '') + '><label for="f_creditDays">เครดิต (วัน) / วันครบกำหนด</label>'
+        + '<div class="fld-w credit-pair"' + (type === 'cash' ? ' hidden' : '') + '><label for="f_creditDays">เครดิต (วัน) / ครบกำหนด</label>'
         + '<span class="pair"><input id="f_creditDays" name="creditDays" type="number" min="0" step="1" inputmode="numeric" value="' + days + '">'
-        + '<input id="f_dueDate" name="dueDate" type="date" value="' + due + '" aria-label="วันครบกำหนด"></span>'
-        + '<div class="fld-hint">แก้จำนวนวันหรือวันครบกำหนดช่องใดก็ได้ อีกช่องคำนวณให้</div></div>')
-    + field({ name:'project', label:'โปรเจกต์', value: d.project || '', placeholder:'ไม่บังคับ' })
+        + '<input id="f_dueDate" name="dueDate" type="date" value="' + due + '" aria-label="วันครบกำหนด"></span></div>')
     + field({ name:'salesName', label: o.side === 'vendor' ? 'ผู้จัดทำ' : 'พนักงานขาย', value: d.salesName || lsGet(LS_SALES_NAME) || '', placeholder:'ไม่บังคับ' })
+    + (o.extra || '')
+    + '</div></div></div>'
+    + '<div class="flds dh-row">'
+    + field({ name:'project', label:'ชื่อโปรเจกต์', value: d.project || '', placeholder:'ไม่บังคับ' })
     + field({ name:'reference', label:'เลขที่อ้างอิง', value: d.reference || '', placeholder: o.side === 'vendor' ? 'เช่น เลขใบเสนอราคาของผู้ขาย' : 'เช่น เลขใบสั่งซื้อของลูกค้า' })
-    + contactBox(p, d.snap && d.snap.edited ? d.snap : null, who)
     + '</div>';
+}
+
+/** ข้อมูลคู่ค้าบนเอกสารใบนี้ — ที่อยู่ เลขผู้เสียภาษี สาขา แสดงให้เห็นและแก้ได้เลย (ทะเบียนไม่เปลี่ยน)
+    ชื่อบนเอกสาร ผู้ติดต่อ โทร อีเมล อยู่ในส่วน "เพิ่มเติม" */
+function contactFields(p, snap, who) {
+  const s = snap || (p ? snapshotPartner(p) : {});
+  return '<div class="fld-w wide dh-addr"><label for="f_cAddress">ที่อยู่บนเอกสาร</label>'
+    + '<textarea id="f_cAddress" name="cAddress" rows="3" placeholder="ที่อยู่' + who + '">' + esc(s.address || '') + '</textarea></div>'
+    + field({ name:'cTaxId', label:'เลขประจำตัวผู้เสียภาษี', value: s.taxId || '', cls:'mono' })
+    + field({ name:'cBranch', label:'สำนักงาน/สาขาเลขที่ (00000 = สำนักงานใหญ่)', value: s.branch || '', cls:'mono' })
+    + '<details class="fld-w wide dh-more"' + (snap ? ' open' : '') + '><summary>ชื่อบนเอกสาร ผู้ติดต่อ โทรศัพท์ อีเมล</summary><div class="flds">'
+    + field({ name:'cName', label:'ชื่อที่พิมพ์บนเอกสาร', value: s.name || '' })
+    + field({ name:'cPerson', label:'ผู้ติดต่อ', value: s.contactPerson || '' })
+    + field({ name:'cPhone', label:'โทรศัพท์', value: s.phone || '' })
+    + field({ name:'cEmail', label:'อีเมล', value: s.email || '' })
+    + '</div></details>'
+    + '<div class="fld-hint wide">แก้ที่อยู่หรือสาขาตรงนี้ = เฉพาะเอกสารใบนี้ ทะเบียนผู้ติดต่อไม่เปลี่ยน</div>';
 }
 
 /** ข้อมูลคู่ค้าบนเอกสารใบนี้ — ปิดไว้ก่อน เปิดแก้ได้เมื่อออกให้สาขาอื่นหรือที่อยู่ใหม่ (ทะเบียนไม่เปลี่ยน) */
@@ -16388,6 +16521,23 @@ function docSourceOf(d) {
   return meta ? { kind, no: d.fromDoc, screen: meta[0], label: meta[1] } : null;
 }
 
+/** หมวดหมู่ค่าใช้จ่าย = ชื่อบัญชีของบรรทัดแรก (หลายหมวด = บอกว่ามีหลายหมวด) */
+function expCategory(e) {
+  const accs = Array.from(new Set((e.lines || []).map((l) => l.acc).filter(Boolean)));
+  const a = accs.length ? DB.accounts.find((x) => x.code === accs[0]) : null;
+  return (a ? a.name : 'ไม่ระบุหมวด') + (accs.length > 1 ? ' +' + (accs.length - 1) : '');
+}
+/* ---------- คอลัมน์รายการเอกสาร ----------
+   แบบเดียวกับโปรแกรมบัญชีที่คุ้นมือ: วันที่ · เลขที่ · ชื่อคู่ค้า (โปรเจกต์ใต้ชื่อ) · ยอดรวมสุทธิ · สถานะ
+   ยอดก่อนภาษี/ภาษี/รายละเอียดอื่นดูในหน้าเอกสาร ตารางเหลือเฉพาะที่ใช้ตัดสินใจ */
+const docNameCell = (d, name) => ({ html: '<span class="dl-name">' + esc(name || d.partnerName || '—') + '</span>'
+  + (d.project ? '<div class="dim">' + esc(d.project) + '</div>' : '') });
+const docNoCell = (d, extra) => ({ html: '<span class="mono">' + esc(d.no) + '</span>' + (extra ? '<div class="dim">' + esc(extra) + '</div>' : '') });
+/** ยอดรวมสุทธิ + ยอดค้าง (แสดงเมื่อรับ/จ่ายไปบางส่วน) */
+const netCell = (total, left) => (left && left !== total
+  ? { html: '<div class="num-c">' + fmt(total) + '</div><div class="dim num-c">ค้าง ' + fmt(left) + '</div>', cls: 'num' }
+  : { n: total });
+
 function scInvoices() {
   /* ตัวกรอง "ค้างชำระทุกเดือน" ดูใบที่ยังค้างจากทุกงวด — ใบเก่าที่ยังไม่ได้เก็บเงินต้องไม่หายไปเพราะเปลี่ยนเดือน
      ตัวกรองอื่นดูเฉพาะงวดที่เลือก (เงื่อนไขงวดอยู่ใน LIST_CHIPS) */
@@ -16402,11 +16552,11 @@ function scInvoices() {
       actions: btn('new:invoice', '+ ออกใบกำกับภาษี', periodIsOpen() ? 'primary' : 'disabled'),
       filters: listFilters('invoices', 'ค้นหาเลขที่หรือชื่อลูกค้า', base),
       body: tbl({
-        cols:[{t:'เลขที่'},{t:'วันที่'},{t:'ลูกค้า'},{t:'ครบกำหนด'},{t:'ก่อนภาษี',a:'r'},{t:'ภาษี',a:'r'},{t:'รวม',a:'r'},{t:'คงเหลือ',a:'r'},{t:'สถานะ'}],
-        rows: rows.map((d) => [{mono:d.no}, thDateNum(d.date), d.partnerName, showDue(d) ? thDateNum(d.due) : {dim: creditTermText(d)},
-          {n:d.base}, {n:d.vat}, {n:d.total}, {n:invOutstanding(d)}, docStatusCell('invoice', d)]),
-        rowAttr: (r, i) => rowCls(rows[i]) + ' data-act="sel:' + r[0].mono + '"',
-        foot: ['รวม', '', '', '', {n:totals.base}, {n:totals.vat}, {n:totals.total}, {n:liveOnly(rows).reduce((s, d) => s + invOutstanding(d), 0)}, ''],
+        cols:[{t:'วันที่'},{t:'เลขที่เอกสาร'},{t:'ชื่อลูกค้า / โปรเจกต์'},{t:'ครบกำหนด'},{t:'ยอดรวมสุทธิ',a:'r'},{t:'สถานะ'}],
+        rows: rows.map((d) => [thDateNum(d.date), docNoCell(d), docNameCell(d), showDue(d) ? thDateNum(d.due) : {dim: creditTermText(d)},
+          netCell(d.total, invOutstanding(d)), docStatusCell('invoice', d)]),
+        rowAttr: (r, i) => rowCls(rows[i]) + ' data-act="sel:' + rows[i].no + '"',
+        foot: ['', '', 'ยอดรวมทั้งหมด', '', {n:totals.total}, ''],
         empty: 'ยังไม่มีใบกำกับภาษีในงวดนี้',
         emptyAction: btn('new:invoice', 'ออกใบกำกับภาษีใบแรก', 'primary'),
       }),
@@ -16453,12 +16603,11 @@ function scCashSales() {
     actions: btn('new:cashsale', '+ ขายเงินสด', periodIsOpen() ? 'primary' : 'disabled'),
     filters: listFilters('cashsales', 'ค้นหาเลขที่หรือชื่อผู้ซื้อ', base),
     body: tbl({
-      cols:[{t:'เลขที่'},{t:'วันที่'},{t:'ผู้ซื้อ'},{t:'รับชำระโดย'},{t:'ก่อนภาษี',a:'r'},{t:'ภาษี',a:'r'},{t:'รับเงิน',a:'r'},{t:'สถานะ'}],
-      rows: rows.map((d) => [{mono:d.no}, thDateNum(d.date), d.buyerName || {dim:'ลูกค้าทั่วไป'},
-        RECEIPT_METHODS[d.method] || d.method,
-        {n:d.base}, {n:d.vat}, {n:d.total}, docStatusCell('cashSale', d)]),
-      rowAttr: (r, i) => rowCls(rows[i]) + ' data-act="sel:' + r[0].mono + '"',
-      foot: rows.length ? ['รวม', '', '', '', {n:t.base}, {n:t.vat}, {n:t.total}, ''] : null,
+      cols:[{t:'วันที่'},{t:'เลขที่เอกสาร'},{t:'ชื่อผู้ซื้อ / โปรเจกต์'},{t:'ยอดรวมสุทธิ',a:'r'},{t:'สถานะ'}],
+      rows: rows.map((d) => [thDateNum(d.date), docNoCell(d, RECEIPT_METHODS[d.method] || d.method), docNameCell(d, d.buyerName || 'ลูกค้าทั่วไป'),
+        {n:d.total}, docStatusCell('cashSale', d)]),
+      rowAttr: (r, i) => rowCls(rows[i]) + ' data-act="sel:' + rows[i].no + '"',
+      foot: rows.length ? ['', '', 'ยอดรวมทั้งหมด', {n:t.total}, ''] : null,
       empty:'ยังไม่มีการขายเงินสดในงวดนี้',
       emptyAction: periodIsOpen() ? btn('new:cashsale', 'ขายเงินสดใบแรก', 'primary') : '',
     }),
@@ -16515,13 +16664,12 @@ function scReceipts() {
     actions: btn('new:receipt', '+ ออกใบเสร็จรับเงิน', periodIsOpen() ? 'primary' : 'disabled'),
     filters: listFilters('receipts', 'ค้นหาเลขที่ ลูกค้า หรือใบกำกับ', base),
     body: tbl({
-      cols:[{t:'เลขที่'},{t:'วันที่'},{t:'ลูกค้า'},{t:'อ้างใบกำกับ'},{t:'วิธีรับ'},{t:'รับก่อนหัก',a:'r'},{t:'ลูกค้าหักไว้',a:'r'},{t:'รับสุทธิ',a:'r'},{t:'สถานะ'}],
-      rows: rows.map((d) => [{mono:d.no}, thDateNum(d.date), d.partnerName,
-        {mono:d.invoiceNo + (d.billingNoteNo ? ' · ' + d.billingNoteNo : '')},
-        RECEIPT_METHODS[d.method] || 'โอนเงิน',
-        {n:d.gross}, {n:d.wht}, {n:d.net}, docStatusCell('receipt', d)]),
-      rowAttr: (r, i) => rowCls(rows[i]) + ' data-act="sel:' + r[0].mono + '" title="คลิกเพื่อดูรายละเอียด พิมพ์ หรือยกเลิก"',
-      foot: ['รวม','','','','', {n:t.g}, {n:t.w}, {n:t.n}, ''],
+      cols:[{t:'วันที่'},{t:'เลขที่เอกสาร'},{t:'ชื่อลูกค้า / โปรเจกต์'},{t:'ยอดรับสุทธิ',a:'r'},{t:'สถานะ'}],
+      rows: rows.map((d) => [thDateNum(d.date), docNoCell(d, 'อ้าง ' + d.invoiceNo + (d.billingNoteNo ? ' · ' + d.billingNoteNo : '') + ' · ' + (RECEIPT_METHODS[d.method] || 'โอนเงิน')),
+        docNameCell(d), d.wht ? { html: '<div>' + fmt(d.net) + '</div><div class="dim">ลูกค้าหัก ' + fmt(d.wht) + '</div>', cls: 'num' } : {n:d.net},
+        docStatusCell('receipt', d)]),
+      rowAttr: (r, i) => rowCls(rows[i]) + ' data-act="sel:' + rows[i].no + '" title="คลิกเพื่อดูรายละเอียด พิมพ์ หรือยกเลิก"',
+      foot: ['', '', 'ยอดรวมทั้งหมด', {n:t.n}, ''],
       empty:'ยังไม่มีการรับชำระในงวดนี้',
       emptyAction: periodIsOpen() ? btn('new:receipt', 'ออกใบเสร็จรับเงิน', 'primary') : '',
     }),
@@ -17512,14 +17660,14 @@ function tradeDocScreen(kind) {
       actions: btn('new:' + newAct, '+ ออก' + cfg.label, 'primary'),
       filters: listFilters(scr, 'ค้นหาเลขที่หรือชื่อคู่ค้า', base),
       body: tbl({
-        cols:[{t:'เลขที่'},{t:'วันที่'},{t: cfg.side === 'customer' ? 'ลูกค้า' : 'ผู้ขาย'}]
+        cols:[{t:'วันที่'},{t:'เลขที่เอกสาร'},{t: (cfg.side === 'customer' ? 'ชื่อลูกค้า' : 'ชื่อผู้จำหน่าย') + ' / โปรเจกต์'}]
           .concat(cfg.validDays ? [{t:'ยืนราคาถึง'}] : [])
-          .concat([{t:'ก่อนภาษี',a:'r'},{t:'รวม',a:'r'},{t:'สถานะ'},{t:'เอกสารปลายทาง'}]),
-        rows: rows.map((d) => [{mono:d.no}, thDateNum(d.date), d.partnerName]
+          .concat([{t:'ยอดรวมสุทธิ',a:'r'},{t:'สถานะ'}]),
+        rows: rows.map((d) => [thDateNum(d.date), docNoCell(d, d.convertedTo ? '→ ' + d.convertedTo : ''), docNameCell(d)]
           .concat(cfg.validDays ? [thDateNum(d.validUntil)] : [])
-          .concat([{n:d.base}, {n:d.total}, docStatusCell(kind, d),
-            d.convertedTo ? {mono:d.convertedTo} : '—'])),
-        rowAttr: (r) => 'class="row-link" data-act="sel:' + r[0].mono + '"',
+          .concat([{n:d.total}, docStatusCell(kind, d)])),
+        rowAttr: (r, i) => 'class="row-link" data-act="sel:' + rows[i].no + '"',
+        foot: ['', '', 'ยอดรวมทั้งหมด'].concat(cfg.validDays ? [''] : []).concat([{n: liveOnly(rows).reduce((s, d) => s + d.total, 0)}, '']),
         empty:'ยังไม่มี' + cfg.label,
         emptyAction: btn('new:' + newAct, 'ออก' + cfg.label + 'ใบแรก', 'primary'),
       }),
@@ -17640,13 +17788,13 @@ function scBillingNotes() {
       actions: btn('new:billingdoc', '+ ใบวางบิล/ใบแจ้งหนี้', 'primary') + btn('new:billingnote', '+ ใบวางบิลรวมใบกำกับ'),
       filters: searchBox('ค้นหาเลขที่หรือชื่อลูกค้า'),
       body: tbl({
-        cols:[{t:'เลขที่'},{t:'วันที่'},{t:'ลูกค้า'},{t:'แบบ'},{t:'ครบกำหนด/นัดชำระ'},{t:'ยอด',a:'r'},{t:'คงค้าง',a:'r'},{t:'สถานะ'}],
+        cols:[{t:'วันที่'},{t:'เลขที่เอกสาร'},{t:'ชื่อลูกค้า / โปรเจกต์'},{t:'ครบกำหนด / นัดชำระ'},{t:'ยอดรวมสุทธิ',a:'r'},{t:'สถานะ'}],
         rows: rows.map((b) => isItemBilling(b)
-          ? [{mono:b.no}, thDateNum(b.date), b.partnerName, 'ใบแจ้งหนี้ ' + b.lines.length + ' รายการ',
-            showDue(b) ? thDateNum(b.due) : {dim: creditTermText(b)}, {n:b.total}, {dim:'ยังไม่ตั้งลูกหนี้'}, docStatusCell('billingNote', b)]
-          : [{mono:b.no}, thDateNum(b.date), b.partnerName, 'รวม ' + b.invoices.length + ' ใบกำกับ', thDateNum(b.dueDate), {n:b.total},
-            {n: billingNoteStatus(b) === 'cancelled' ? 0 : billingNoteOutstanding(b)}, docStatusCell('billingNote', b)]),
-        rowAttr: (r, i) => 'class="row-link' + (billingNoteStatus(rows[i]) === 'cancelled' ? ' is-void' : '') + '" data-act="sel:' + r[0].mono + '"',
+          ? [thDateNum(b.date), docNoCell(b, 'ใบแจ้งหนี้ ' + b.lines.length + ' รายการ'), docNameCell(b),
+            showDue(b) ? thDateNum(b.due) : {dim: creditTermText(b)}, {n:b.total}, docStatusCell('billingNote', b)]
+          : [thDateNum(b.date), docNoCell(b, 'วางบิลรวม ' + b.invoices.length + ' ใบกำกับ'), docNameCell(b), thDateNum(b.dueDate),
+            netCell(b.total, billingNoteStatus(b) === 'cancelled' ? 0 : billingNoteOutstanding(b)), docStatusCell('billingNote', b)]),
+        rowAttr: (r, i) => 'class="row-link' + (billingNoteStatus(rows[i]) === 'cancelled' ? ' is-void' : '') + '" data-act="sel:' + rows[i].no + '"',
         empty:'ยังไม่มีใบวางบิล',
         emptyAction: btn('new:billingdoc', 'ออกใบวางบิล/ใบแจ้งหนี้ใบแรก', 'primary') + ' ' + btn('new:billingnote', 'วางบิลรวมใบกำกับที่ออกแล้ว'),
       }),
@@ -17697,11 +17845,11 @@ function scGoodsReceipts() {
       actions: btn('new:goodsreceipt', '+ ออกใบรับสินค้า', periodIsOpen() ? 'primary' : 'disabled'),
       filters: listFilters('goodsreceipts', 'ค้นหาเลขที่ ผู้ขาย ใบส่งของ หรือใบสั่งซื้อ', base),
       body: tbl({
-        cols:[{t:'เลขที่'},{t:'วันที่รับ'},{t:'ผู้ขาย'},{t:'ใบส่งของผู้ขาย'},{t:'อ้างใบสั่งซื้อ'},{t:'มูลค่า',a:'r'},{t:'สถานะ'},{t:'ตั้งหนี้'}],
-        rows: rows.map((g) => [{mono:g.no}, thDateNum(g.date), g.partnerName,
-          g.vendorDoNo ? {mono:g.vendorDoNo} : {dim:'—'}, g.poNo ? {mono:g.poNo} : {dim:'—'},
-          {n:g.total}, docStatusCell('goodsReceipt', g), g.billNo ? {mono:g.billNo} : {dim:'—'}]),
-        rowAttr: (r, i) => rowCls(rows[i]) + ' data-act="sel:' + r[0].mono + '"',
+        cols:[{t:'วันที่รับ'},{t:'เลขที่เอกสาร'},{t:'ชื่อผู้จำหน่าย / โปรเจกต์'},{t:'ยอดรวม (ก่อนภาษี)',a:'r'},{t:'สถานะ'}],
+        rows: rows.map((g) => [thDateNum(g.date),
+          docNoCell(g, [g.poNo ? 'จาก ' + g.poNo : '', g.vendorDoNo ? 'ใบส่งของ ' + g.vendorDoNo : '', g.billNo ? 'ตั้งหนี้ ' + g.billNo : ''].filter(Boolean).join(' · ')),
+          docNameCell(g), {n:g.total}, docStatusCell('goodsReceipt', g)]),
+        rowAttr: (r, i) => rowCls(rows[i]) + ' data-act="sel:' + rows[i].no + '"',
         empty:'ยังไม่มีใบรับสินค้าในงวดนี้',
         emptyAction: periodIsOpen() ? btn('new:goodsreceipt', 'ออกใบรับสินค้าใบแรก', 'primary') : '',
       }),
@@ -17759,13 +17907,14 @@ function scExpenses() {
       actions: btn('new:expense', '+ บันทึกค่าใช้จ่าย', periodIsOpen() ? 'primary' : 'disabled'),
       filters: listFilters('expenses', 'ค้นหาเลขที่ ผู้รับเงิน เลขใบกำกับ หรือรายการ', base),
       body: tbl({
-        cols:[{t:'เลขที่'},{t:'วันที่'},{t:'ผู้รับเงิน'},{t:'รายการ'},{t:'ก่อนภาษี',a:'r'},{t:'ภาษีซื้อ',a:'r'},{t:'หัก ณ ที่จ่าย',a:'r'},{t:'จ่ายสุทธิ',a:'r'},{t:'50 ทวิ'},{t:'สถานะ'}],
-        rows: rows.map((e) => [{mono:e.no}, thDateNum(e.date), e.partnerName,
-          e.lines[0].desc + (e.lines.length > 1 ? ' และอีก ' + (e.lines.length - 1) + ' รายการ' : ''),
-          {n:e.base}, {n:e.vat}, {n:e.wht}, {n:e.net},
-          e.certNo ? {mono:e.certNo} : (e.wht ? {dim:'ธนาคารออกให้'} : {dim:'—'}), docStatusCell('expense', e)]),
-        rowAttr: (r, i) => rowCls(rows[i]) + ' data-act="sel:' + r[0].mono + '"',
-        foot: ['รวม','','','', {n:t.b}, {n:t.v}, {n:t.w}, {n:t.n}, '', ''],
+        cols:[{t:'วันที่'},{t:'เลขที่เอกสาร'},{t:'ชื่อผู้จำหน่าย / โปรเจกต์'},{t:'หมวดหมู่'},{t:'ยอดรวมสุทธิ',a:'r'},{t:'สถานะ'}],
+        rows: rows.map((e) => [thDateNum(e.date), docNoCell(e, e.certNo ? '50 ทวิ ' + e.certNo : ''), docNameCell(e),
+          { html: '<span class="cat-pill">' + esc(expCategory(e)) + '</span><div class="dim">' + esc(e.lines[0].desc
+            + (e.lines.length > 1 ? ' และอีก ' + (e.lines.length - 1) + ' รายการ' : '')) + '</div>' },
+          e.wht ? { html: '<div>' + fmt(e.net) + '</div><div class="dim">หัก ณ ที่จ่าย ' + fmt(e.wht) + '</div>', cls: 'num' } : {n:e.net},
+          docStatusCell('expense', e)]),
+        rowAttr: (r, i) => rowCls(rows[i]) + ' data-act="sel:' + rows[i].no + '"',
+        foot: ['', '', 'ยอดรวมทั้งหมด', '', {n:t.n}, ''],
         empty:'ยังไม่มีค่าใช้จ่ายในงวดนี้',
         emptyAction: periodIsOpen() ? btn('new:expense', 'บันทึกค่าใช้จ่ายรายการแรก', 'primary') : '',
       }),
@@ -20051,7 +20200,8 @@ function cmdkKey(ev) {
    ใส่ BOM ไว้หน้าไฟล์ Excel จะอ่านภาษาไทยถูก · ตัวเลขส่งออกเป็นตัวเลขล้วน
    (ไม่มีจุลภาค วงเล็บกลายเป็นเครื่องหมายลบ) ให้ Excel คำนวณต่อได้ทันที */
 function csvCell(td) {
-  const raw = (td.textContent || '').replace(/\s+/g, ' ').trim();
+  /* ช่องตัวเลขที่มีบรรทัดรอง (เช่น ยอดรวม + ค้างชำระ) ส่งออกเฉพาะตัวเลขหลัก */
+  const raw = ((td.querySelector('.num-c') || td).textContent || '').replace(/\s+/g, ' ').trim();
   if (!td.classList.contains('num')) return raw;
   if (raw === '—' || raw === '') return '';
   const neg = /^\(.*\)$/.test(raw);
@@ -24887,43 +25037,59 @@ function lineRow(i, mode, l) {
     + '</select>';
   const accs = lineAccOptions(mode);
   const disc = v.disc === undefined || v.disc === null ? '' : String(v.disc);
+  /* ช่องสินค้ากับคำอธิบายอยู่ในเซลล์เดียวกัน (เลือกสินค้าด้านบน พิมพ์รายละเอียดด้านล่าง)
+     ส่วนลด ภาษี บัญชีรายบรรทัด (ln-adv) ซ่อนไว้ในโหมดปกติ — ภาษีตั้งทีเดียวทั้งใบที่ยอดท้ายเอกสาร
+     ค่าใช้จ่ายเห็นช่องหมวดหมู่เสมอ (ใช้เลือกหมวดค่าใช้จ่ายทุกบรรทัด) */
   return '<tr data-ln="' + i + '">'
-    + '<td>' + sel('l' + i + '_item', items, v.itemCode || '', ' class="itemsel" data-i="' + i + '"' + (cost ? ' data-cost="1"' : '')) + '</td>'
-    + '<td><input name="l' + i + '_desc" placeholder="พิมพ์เองได้" value="' + esc(v.desc || '') + '"></td>'
+    + '<td class="ln-no" aria-hidden="true"></td>'
+    + '<td class="ln-prod">' + sel('l' + i + '_item', items, v.itemCode || '', ' class="itemsel" data-i="' + i + '"' + (cost ? ' data-cost="1"' : ''))
+    + '<input name="l' + i + '_desc" placeholder="' + (cost ? 'รายละเอียด' : 'รายละเอียด (พิมพ์เองได้ ไม่ต้องเลือกสินค้า)') + '" value="' + esc(v.desc || '') + '"></td>'
     + '<td><input name="l' + i + '_qty" class="r" inputmode="decimal" value="' + esc(v.qty !== undefined ? String(v.qty) : (i === 0 ? '1' : '')) + '"></td>'
     + (cost ? '' : '<td><input name="l' + i + '_uom" class="uom" value="' + esc(v.uom || '') + '" placeholder="หน่วย"></td>')
     + '<td><input name="l' + i + '_price" class="r" inputmode="decimal" value="' + esc(v.price !== undefined ? plainNum(v.price) : '') + '"></td>'
-    + (cost ? '' : '<td><input name="l' + i + '_disc" class="r" inputmode="decimal" value="' + esc(disc) + '" placeholder="0"></td>')
-    + '<td>' + sel('l' + i + '_tax', LINE_VAT, v.taxCode || 'VAT7') + '</td>'
-    + (accs ? '<td>' + sel('l' + i + '_acc', accs, v.acc || lineDefaultAcc(mode, v.itemCode)) + '</td>' : '')
+    + (cost ? '' : '<td class="ln-adv"><input name="l' + i + '_disc" class="r" inputmode="decimal" value="' + esc(disc) + '" placeholder="0"></td>')
+    + '<td class="ln-adv">' + sel('l' + i + '_tax', LINE_VAT, v.taxCode || lineDocTax()) + '</td>'
+    + (accs ? '<td class="' + (mode === 'expense' ? 'ln-cat' : 'ln-adv ln-acc') + '">' + sel('l' + i + '_acc', accs, v.acc || lineDefaultAcc(mode, v.itemCode)) + '</td>' : '')
     + (cost ? '' : '<td class="num ln-amt" data-amt="' + i + '"></td>')
     + '<td><button class="icon-btn" data-act="ln:del:' + i + '" aria-label="ลบบรรทัดที่ ' + (i + 1) + '" title="ลบบรรทัดนี้">✕</button></td>'
     + '</tr>';
 }
+/* โหมดตารางรายการ: ปกติ (ภาษีทั้งใบ ส่วนลดท้ายบิล) หรือรายบรรทัด — จำไว้ในเบราว์เซอร์นี้ */
+const LN_DETAIL_KEY = 'financii.lineDetail';
+let LN_DOC_TAX = 'VAT7';
+/** อัตราภาษีของบรรทัดใหม่ — ตามช่องภาษีทั้งใบ (ถ้ามี) */
+const lineDocTax = () => (document.querySelector('#modal [name="docTax"]') || {}).value || LN_DOC_TAX;
 /* ตารางรายการ + แถบตั้งค่าราคา (รวม/ไม่รวมภาษี · ส่วนลดรายการเป็น % หรือบาท) + ยอดท้ายเอกสารแบบเอกสารธุรกิจ
    pricing = ตั้งค่าราคาเดิมของเอกสาร (ตอนแก้ไข) · ไม่ส่ง = ค่าเริ่มต้นของกิจการ */
-function lineEditor(n, mode, init, pricing, footLeft) {
+/* o.acc = เห็นช่องบัญชีเสมอแม้โหมดปกติ (ฟอร์มตั้งหนี้ — ฝ่ายบัญชีต้องเลือกบัญชีค่าใช้จ่ายทุกครั้ง) */
+function lineEditor(n, mode, init, pricing, footLeft, o) {
   const m = mode || 'sale';
   const cost = m === 'cost';
   const rows = init || [];
   const count = Math.max(n || 1, rows.length);
   const P = normPricing(pricing);
   const opt = (o, cur) => o.map((x) => '<option value="' + x[0] + '"' + (x[0] === cur ? ' selected' : '') + '>' + esc(x[1]) + '</option>').join('');
+  /* แสดงส่วนลด/ภาษี/บัญชีรายบรรทัด: ผู้ใช้เปิดไว้ หรือเอกสารเดิมมีส่วนลดรายบรรทัดหรือภาษีหลายอัตรา (ซ่อนแล้วจะมองไม่เห็นค่าที่ต่างกัน) */
+  const mixed = rows.some((l) => l && l.disc && Number(String(l.disc).replace('%', '')) !== 0)
+    || new Set(rows.filter((l) => l && l.taxCode).map((l) => l.taxCode)).size > 1;
+  const detail = !cost && (lsGet(LN_DETAIL_KEY) === '1' || mixed);
+  LN_DOC_TAX = (rows.find((l) => l && l.taxCode) || {}).taxCode || 'VAT7';
   let h = '<div class="sub-h">' + (cost ? 'สินค้าที่รับเข้าคลัง' : m === 'expense' ? 'รายการค่าใช้จ่าย' : 'รายการสินค้าหรือบริการ')
     + (cost ? '' : '<span class="grow"></span><span class="ln-opts">'
-      + '<label>ราคา <select name="priceMode" aria-label="ราคาสินค้า">' + opt([['exclusive', 'ไม่รวมภาษี'], ['inclusive', 'รวมภาษีแล้ว']], P.mode) + '</select></label>'
-      + '<label>ส่วนลดรายการเป็น <select name="discKind" aria-label="หน่วยส่วนลดรายการ">' + opt([['percent', '%'], ['amount', 'บาท']], P.lineDisc) + '</select></label>'
+      + '<label>ราคาสินค้า <select name="priceMode" aria-label="ราคาสินค้า">' + opt([['exclusive', 'ราคาไม่รวมภาษี'], ['inclusive', 'ราคารวมภาษี']], P.mode) + '</select></label>'
+      + '<label class="ln-adv-opt"' + (detail ? '' : ' hidden') + '>ส่วนลดรายการเป็น <select name="discKind" aria-label="หน่วยส่วนลดรายการ">' + opt([['percent', '%'], ['amount', 'บาท']], P.lineDisc) + '</select></label>'
+      + '<button class="ghost ln-toggle" data-act="ln:detail" aria-pressed="' + detail + '">' + (detail ? 'ซ่อนส่วนลด/ภาษี/บัญชีรายบรรทัด' : 'ส่วนลด/ภาษี/บัญชีรายบรรทัด') + '</button>'
       + '</span>')
-    + '</div><div class="scroll"><table class="lines" id="lnTable" data-mode="' + m + '" data-next="' + count + '"><thead><tr>'
-    + '<th>' + (cost ? 'สินค้า' : 'สินค้า/บริการ') + '</th><th>' + (m === 'sale' ? 'คำอธิบายบนใบกำกับ' : 'คำอธิบาย')
-    + '</th><th class="r" style="width:74px">จำนวน</th>'
-    + (cost ? '' : '<th style="width:76px">หน่วย</th>')
-    + '<th class="r" style="width:112px">' + (cost ? 'ต้นทุนต่อหน่วย (ก่อนภาษี)' : 'ราคาต่อหน่วย') + '</th>'
-    + (cost ? '' : '<th class="r" style="width:84px">ส่วนลด</th>')
-    + '<th style="width:104px">ภาษี</th>'
-    + (m === 'sale' ? '<th style="width:200px">บันทึกรายได้เข้าบัญชี</th>' : m === 'purchase' ? '<th style="width:200px">บันทึกเข้าบัญชี (ตอนตั้งหนี้)</th>'
-      : m === 'expense' ? '<th style="width:200px">หมวดค่าใช้จ่าย</th>' : '')
-    + (cost ? '' : '<th class="r" style="width:118px">จำนวนเงิน</th>')
+    + '</div><div class="scroll"><table class="lines' + (detail ? ' ln-detail' : '') + (o && o.acc ? ' ln-showacc' : '') + '" id="lnTable" data-mode="' + m + '" data-next="' + count + '"><thead><tr>'
+    + '<th class="ln-no">ลำดับ</th>'
+    + '<th>' + (cost ? 'สินค้า / รายละเอียด' : 'ชื่อสินค้า / รายละเอียด') + '</th><th class="r" style="width:84px">จำนวน</th>'
+    + (cost ? '' : '<th style="width:80px">หน่วย</th>')
+    + '<th class="r" style="width:120px">' + (cost ? 'ต้นทุนต่อหน่วย (ก่อนภาษี)' : 'ราคาต่อหน่วย') + '</th>'
+    + (cost ? '' : '<th class="r ln-adv" style="width:84px">ส่วนลด</th>')
+    + '<th class="ln-adv" style="width:104px">ภาษี</th>'
+    + (m === 'sale' ? '<th class="ln-adv ln-acc" style="width:200px">บันทึกรายได้เข้าบัญชี</th>' : m === 'purchase' ? '<th class="ln-adv ln-acc" style="width:200px">บันทึกเข้าบัญชี (ตอนตั้งหนี้)</th>'
+      : m === 'expense' ? '<th class="ln-cat" style="width:210px">หมวดหมู่</th>' : '')
+    + (cost ? '' : '<th class="r" style="width:118px">ราคารวม</th>')
     + '<th style="width:44px"></th></tr></thead><tbody>';
   for (let i = 0; i < count; i++) h += lineRow(i, m, rows[i]);
   h += '</tbody></table></div>';
@@ -24944,7 +25110,10 @@ function lineEditor(n, mode, init, pricing, footLeft) {
     + row('ราคาหลังหักส่วนลด', 'tAfter')
     + row('ยอดที่ไม่มีภาษี (0% / ยกเว้น)', 'tExempt', ' data-opt="exempt"')
     + row('มูลค่าที่คำนวณภาษี', 'tVatable')
-    + row('ภาษีมูลค่าเพิ่ม', 'tVat')
+    /* ภาษีทั้งใบ (โหมดปกติ) — เปลี่ยนแล้วทุกบรรทัดเปลี่ยนตาม · โหมดรายบรรทัดเลือกที่บรรทัด */
+    + '<tr><th><label class="doc-tax"><span>ภาษีมูลค่าเพิ่ม</span><select name="docTax" aria-label="ภาษีทั้งใบ"' + (detail ? ' hidden' : '') + '>'
+    + opt([['VAT7', '7%'], ['VAT0', '0% (ส่งออก)'], ['EXEMPT', 'ไม่มี / ยกเว้น']], LN_DOC_TAX) + '</select></label></th>'
+    + '<td class="num" id="tVat">—</td></tr>'
     + row('<b>จำนวนเงินรวมทั้งสิ้น</b>', 'tTotal', ' class="grand"')
     + row('หักภาษี ณ ที่จ่าย', 'tWht', ' data-opt="wht"')
     + row('<b>ยอดชำระ</b>', 'tNet', ' data-opt="wht" class="grand"')
@@ -25032,6 +25201,7 @@ function refreshLineSum() {
     set('tVatable', fmt(t.vatable));
     set('tVat', fmt(t.vat) + (r.v.rate !== '0' ? ' (' + r.v.rate + '%)' : ''));
     set('tTotal', fmt(t.total));
+    set('tGrandTop', fmt(t.total));
     const code = val('docWht');
     let w = null;
     const calcEl = document.querySelector('#modal [data-wht-calc]');
@@ -25066,6 +25236,28 @@ EXTRA_DISPATCH.push(function (head, rest) {
     const f = body.querySelector('[name="l' + i + '_item"]');
     if (f) f.focus();
   }
+  /* สลับแสดงส่วนลด/ภาษี/บัญชีรายบรรทัด — ซ่อนกลับได้เฉพาะเมื่อทุกบรรทัดภาษีเดียวกันและไม่มีส่วนลดรายบรรทัด */
+  if (rest[0] === 'detail') {
+    const on = !t.classList.contains('ln-detail');
+    if (!on) {
+      const taxes = new Set(Array.from(t.querySelectorAll('select[name$="_tax"]')).map((e) => e.value));
+      const disc = Array.from(t.querySelectorAll('input[name$="_disc"]')).some((e) => M(e.value.replace('%', '') || '0') !== 0);
+      if (taxes.size > 1 || disc) {
+        toast('ซ่อนไม่ได้ — มีส่วนลดหรือภาษีต่างกันรายบรรทัด', 'err', 'ล้างส่วนลดรายบรรทัดและตั้งภาษีให้เท่ากันก่อน');
+        return true;
+      }
+      const dt = document.querySelector('#modal [name="docTax"]');
+      if (dt && taxes.size === 1) dt.value = Array.from(taxes)[0];
+    }
+    t.classList.toggle('ln-detail', on);
+    lsSet(LN_DETAIL_KEY, on ? '1' : '0');
+    document.querySelectorAll('#modal .ln-adv-opt').forEach((e) => { e.hidden = !on; });
+    const dt = document.querySelector('#modal [name="docTax"]');
+    if (dt) dt.hidden = on;
+    const b = document.querySelector('#modal [data-act="ln:detail"]');
+    if (b) { b.textContent = on ? 'ซ่อนส่วนลด/ภาษี/บัญชีรายบรรทัด' : 'ส่วนลด/ภาษี/บัญชีรายบรรทัด'; b.setAttribute('aria-pressed', String(on)); }
+    return true;
+  }
   if (rest[0] === 'del') {
     const tr = body.querySelector('tr[data-ln="' + rest[1] + '"]');
     if (tr) tr.remove();
@@ -25083,6 +25275,12 @@ EXTRA_INPUT.push(function (t) {
 });
 EXTRA_CHANGE.push(function (t) {
   if (t.name === 'docWht') { refreshLineSum(); return false; }
+  /* ภาษีทั้งใบ → ทุกบรรทัด */
+  if (t.name === 'docTax') {
+    document.querySelectorAll('#lnTable select[name$="_tax"]').forEach((e) => { e.value = t.value; });
+    refreshLineSum();
+    return true;
+  }
   if (t.name === 'partner' && document.querySelector('#modal [name="docWht"]') && !document.querySelector('#modal [data-wht-edit]')) {
     document.querySelector('#modal [name="docWht"]').value = partnerWht(t.value);
     refreshLineSum();
@@ -26126,7 +26324,7 @@ function modalBill(o) {
       + lineEditor(3, 'purchase', po ? poLinesForBill(po) : null, po ? po.pricing : null,
           field({ name:'claim', label:'สิทธิภาษีซื้อ', type:'select', value:'yes', options: CLAIM_OPTS })
           + purWhtField({ label:'หัก ณ ที่จ่ายตอนจ่ายเงิน', value: po ? (po.whtCode || '') : (p.whtCode || ''), options: optWht(),
-              partner: code, hint:'เติมจากทะเบียนผู้ขาย · ค่าสินค้าล้วนเลือก "ไม่หัก"' }))
+              partner: code, hint:'เติมจากทะเบียนผู้ขาย · ค่าสินค้าล้วนเลือก "ไม่หัก"' }), { acc: true })
       + '<div id="billDeps">' + depositPicker('ap', code) + '</div>'
       + docNotes(po, 'พิมพ์บนใบตั้งหนี้ เช่น เงื่อนไขที่ตกลงกับผู้ขาย')
       + '</div>',
@@ -27268,14 +27466,15 @@ function dispatch(act) {
   if (head === 'printdoc') { printDoc(rest[0], rest.slice(1).join(':')); return; }
   if (head === 'printgo') { printNow(); return; }
   if (head === 'printclose') { closePrint(); return; }
-  if (head === 'navg') {
+  /* กดไอคอนหมวดบนแถบซ้าย — เปิดหน้าล่าสุดที่ใช้ในหมวดนั้น (ยังไม่เคยเปิด = หน้าแรกของหมวด) */
+  if (head === 'pagehelp') { lsSet(HELP_KEY, pageHelpOn() ? '0' : '1'); render(); return; }
+  if (head === 'navm') {
     const g = navGroups().find((x) => x.g === arg);
-    if (g) { STATE.navGroupOpen[arg] = !navGroupIsOpen(g); renderNav(); }
-    return;
-  }
-  if (head === 'nav') {
-    const cur = STATE.navOpen[arg] === undefined ? arg === navSubOf(STATE.screen) : STATE.navOpen[arg];
-    STATE.navOpen[arg] = !cur;
+    if (!g) return;
+    const first = g.subs[0].items[0][0];
+    STATE.navModule = g.g;
+    STATE.screen = NAV_LAST[g.g] || first;
+    STATE.sel = null; STATE.filter = '';
     render();
     return;
   }

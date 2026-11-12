@@ -49,7 +49,7 @@ function cell(c) {
     if ('mono' in c) return '<td class="mono">' + esc(c.mono) + '</td>';
     if ('dim' in c) return '<td class="dim">' + esc(c.dim) + '</td>';
     if ('st' in c) return '<td><span class="st ' + c.st[0] + '">' + esc(c.st[1]) + '</span></td>';
-    if ('html' in c) return '<td>' + c.html + '</td>';
+    if ('html' in c) return '<td' + (c.cls ? ' class="' + c.cls + '"' : '') + '>' + c.html + '</td>';
     if ('c' in c) return '<td class="ctr">' + esc(c.c) + '</td>';
   }
   return '<td>' + esc(c) + '</td>';
@@ -160,6 +160,26 @@ let modalSubmit = null;
 function modal(o) {
   const m = document.getElementById('modal');
   const xl = o.wide || /id="lnTable"[^>]*data-mode="(sale|purchase|expense)"/.test(o.body || '');
+  /* เอกสารที่มีตารางรายการ เปิดเป็นหน้าเต็มแบบเดียวกับโปรแกรมบัญชีที่คุ้นมือ (ไม่ใช่กล่องลอย ตารางรายการไม่ถูกบีบ)
+     หัวหน้า: ชื่อเอกสารซ้าย · ปิดหน้าต่าง / บันทึก มุมขวาบน · เมนูซ้ายยังเห็นอยู่ */
+  const page = o.page !== false && /id="lnTable"/.test(o.body || '');
+  m.classList.toggle('as-page', page);
+  if (page) {
+    m.innerHTML = '<div class="modal-box page" role="dialog" aria-modal="true" aria-label="' + esc(o.title) + '">'
+      + '<div class="modal-h"><div class="pg-tt"><h3>' + esc(o.title) + '</h3>'
+      + (o.sub ? '<div class="card-sub">' + esc(o.sub) + '</div>' : '') + '</div>'
+      + '<span class="grow"></span>' + btn('modal:close', o.cancelLabel || 'ปิดหน้าต่าง')
+      + (o.submitLabel ? btn('modal:submit', o.submitLabel, o.submitKind || 'primary') : '') + '</div>'
+      + '<div class="modal-b">' + o.body + '</div>'
+      + (o.note ? '<div class="modal-f"><span class="dim">' + esc(o.note) + '</span></div>' : '')
+      + '</div>';
+    m.classList.add('show');
+    m.scrollTop = 0;
+    modalSubmit = o.onSubmit || null;
+    const f0 = m.querySelector('.modal-b input,.modal-b select,.modal-b textarea');
+    if (f0) requestAnimationFrame(function () { if (!m.contains(document.activeElement)) f0.focus(); });
+    return;
+  }
   m.innerHTML = '<div class="modal-box' + (xl ? ' xl' : '') + '" role="dialog" aria-modal="true">'
     + '<div class="modal-h"><h3>' + esc(o.title) + '</h3>'
     + (o.sub ? '<div class="card-sub">' + esc(o.sub) + '</div>' : '')
@@ -184,7 +204,7 @@ function modal(o) {
   }
 }
 function closeModal() {
-  document.getElementById('modal').classList.remove('show');
+  document.getElementById('modal').classList.remove('show', 'as-page');
   document.getElementById('modal').innerHTML = '';
   modalSubmit = null;
 }
@@ -392,113 +412,109 @@ function navGroups() {
   const bnOpen = DB.docs.billingNote.filter((b) => ['issued', 'partially_paid'].indexOf(billingNoteStatus(b)) >= 0).length;
   const grnWaiting = DB.docs.goodsReceipt.filter((g) => g.status === 'received').length;
   const pbWaiting = DB.docs.paymentBatch.filter(paymentBatchActive).length;
+  /* จัดหมวดแบบเดียวกับโปรแกรมบัญชีที่นักบัญชีไทยคุ้นมือ: แถบไอคอนซ้ายคือหมวดหลัก กดแล้วเห็นหน้าในหมวดเป็นคอลัมน์ถัดมา
+     g = ชื่อสั้นใต้ไอคอน · t = ชื่อหมวดเต็มบนหัวคอลัมน์ · subs = กลุ่มหน้าในหมวด (s ว่าง = เว้นช่องคั่น ไม่มีหัวข้อ) */
+  const owner = ownerVisible() ? [['ownerdaily', 'ยอดขาย กำไร ค่าแอด', null]] : [];
   return [
-    { g: 'ภาพรวม', flat: true, icon: 'grid', items: [
-      ['dashboard', 'แดชบอร์ด', todo || null, 'grid'],
-    ].concat(ownerVisible() ? [['ownerdaily', 'ยอดขาย กำไร ค่าแอด', null, 'trend']] : []).concat([
-      ['close', 'ปิดงวดบัญชี', null, 'lock'],
-    ])},
-    /* วงจรรายได้ — เรียงตามลำดับที่เอกสารเกิดจริง เสนอราคา → สั่งขาย → ใบกำกับ → วางบิล → ใบเสร็จ
-       ปลายกลุ่มคือใบที่ออกตามหลังเพื่อแก้ยอด (ลดหนี้ ม.86/10 · เพิ่มหนี้ ม.86/9) */
-    { sec: 'งานประจำวัน', g: 'เอกสารขาย', icon: 'sale', items: [
-      ['quotations', 'ใบเสนอราคา', quoteOpen || null],
-      ['salesorders', 'ใบสั่งขาย', soOpen || null],
-      ['invoices', 'ใบกำกับภาษี', null],
-      ['cashsales', 'ขายเงินสด', null],
-      ['billingnotes', 'ใบวางบิล', bnOpen || null],
-      ['receipts', 'ใบเสร็จรับเงิน', null],
-      ['deposits', 'เงินมัดจำรับ', null],
-      ['creditnotes', 'ใบลดหนี้', null],
-      ['debitnotes', 'ใบเพิ่มหนี้', null],
-      ['offsets', 'หักกลบ · ตัดหนี้สูญ', null],
+    { g: 'ภาพรวม', t: 'ภาพรวมกิจการ', icon: 'grid', subs: [
+      { s: '', items: [['dashboard', 'แดชบอร์ด', todo || null]].concat(owner) },
     ]},
-    /* วงจรรายจ่าย — ใบสั่งซื้อ → ใบรับสินค้า (ของเข้าคลัง) → ตั้งหนี้ (ใบกำกับมาถึง) → จ่าย */
-    { g: 'เอกสารซื้อ', icon: 'buy', items: [
-      ['purchaseorders', 'ใบสั่งซื้อ', poOpen || null],
-      ['goodsreceipts', 'ใบรับสินค้า', grnWaiting || null],
-      ['bills', 'ตั้งหนี้ผู้ขาย', null],
-      ['payments', 'ใบสำคัญจ่าย', null],
-      ['vdeposits', 'เงินมัดจำจ่าย', null],
-      ['vendorcns', 'ใบลดหนี้จากผู้ขาย', null],
-    ]},
-    /* ค่าใช้จ่ายที่มีหัก ณ ที่จ่าย ออก 50 ทวิ ให้เองในแถบหัก ณ ที่จ่าย — สองแถบนี้ผูกกัน */
-    { g: 'ค่าใช้จ่าย', icon: 'receipt', items: [
-      ['expenses', 'ค่าใช้จ่าย', null],
-      ['whtcert', 'หัก ณ ที่จ่าย', null],
-      ['paymentprep', 'เตรียมจ่ายเงิน', pbWaiting || null],
-    ]},
-    { g: 'ธนาคาร', icon: 'bank', items: [
-      ['bank', 'กระทบยอดธนาคาร', unmatched || null],
-      ['cashflow', 'งบกระแสเงินสด', null],
-    ]},
-    /* สมุดรายวันเฉพาะ 5 เล่ม เรียงตามที่นักบัญชีใช้ บันทึกรายการด้วยมือได้ทุกเล่ม */
-    { sec: 'บัญชีและภาษี', g: 'บัญชี', icon: 'book', items: [
-      ['jgeneral', 'สมุดรายวันทั่วไป', null],
-      ['jpurchase', 'สมุดรายวันซื้อ', null],
-      ['jsales', 'สมุดรายวันขาย', null],
-      ['jpayment', 'สมุดรายวันจ่าย', null],
-      ['jreceipt', 'สมุดรายวันรับ', null],
-      ['coa', 'ผังบัญชี', null],
-    ]},
-    { g: 'ยื่นแบบภาษี', icon: 'tax', items: [
-      ['pp30', 'แบบ ภ.พ.30', null],
-      ['pnd', 'ภ.ง.ด.1 / 3 / 53', null],
-      ['taxcal', 'ปฏิทินภาษี', null],
-    ]},
-    { sec: 'ทะเบียน', g: 'ผู้ติดต่อ', icon: 'contact', items: [
-      ['customers', 'ลูกค้า', null],
-      ['vendors', 'ผู้ขาย', null],
-    ]},
-    { g: 'สินค้า', icon: 'box', items: [
-      ['items', 'ทะเบียนสินค้า', null],
-      ['stockadj', 'ยอดยกมา · ตรวจนับ · ตัดจำหน่าย', null],
-      ['stockcard', 'สต๊อกการ์ด · สินค้าคงเหลือ', null],
-      ['stockmoves', 'ความเคลื่อนไหวสต๊อก', null],
-    ]},
-    { g: 'สินทรัพย์', icon: 'asset', items: [
-      ['assets', 'ทะเบียนทรัพย์สิน', null],
-      ['deprec', 'ค่าเสื่อมราคา', null],
-    ]},
-    { g: 'เงินเดือน', icon: 'payroll', items: [
-      ['payroll', 'งวดจ่ายเงินเดือน', null],
-      ['attendance', 'ขาด ลา มาสาย', null],
-      ['employees', 'ทะเบียนพนักงาน', null],
-      ['payrollfile', 'ภ.ง.ด.1 · สปส.1-10 · นำส่ง', null],
-      ['payrollyear', 'สรุปทั้งปี · ภ.ง.ด.1ก · 50 ทวิ', null],
-    ]},
-    /* รายงานทั้งหมดรวมไว้ที่เดียว แยกหมวดย่อยแบบเดียวกับที่นักบัญชีคุ้นเคย */
-    { sec: 'รายงานและระบบ', g: 'รายงาน', icon: 'chart', subs: [
-      { s: 'งบการเงิน', items: [
-        ['bs', 'งบแสดงฐานะการเงิน', null],
-        ['pl', 'งบกำไรขาดทุน', null],
-        ['equity', 'งบแสดงการเปลี่ยนแปลงส่วนของผู้ถือหุ้น', null],
+    { g: 'การเงิน', t: 'การเงิน', icon: 'bank', subs: [
+      { s: '', items: [
+        ['bank', 'บัญชีธนาคาร · กระทบยอด', unmatched || null],
+        ['paymentprep', 'เตรียมจ่ายเงิน', pbWaiting || null],
+        ['cashflow', 'งบกระแสเงินสด', null],
       ]},
-      { s: 'สมุดบัญชี', items: [
-        ['journals', 'สมุดรายวันรวมทุกเล่ม', null],
-        ['ledger', 'บัญชีแยกประเภท', null],
-        ['tb', 'งบทดลอง', null],
+    ]},
+    /* เรียงตามลำดับที่เอกสารเกิดจริง เสนอราคา → วางบิล/แจ้งหนี้ → ใบกำกับ → ใบเสร็จ · ขายเงินสด · แก้ยอด · มัดจำ */
+    { g: 'ขาย', t: 'เอกสารขาย', icon: 'sale', subs: [
+      { s: '', items: [
+        ['quotations', 'ใบเสนอราคา', quoteOpen || null],
+        ['salesorders', 'ใบสั่งขาย', soOpen || null],
+        ['billingnotes', 'ใบวางบิล / ใบแจ้งหนี้', bnOpen || null],
+        ['invoices', 'ใบกำกับภาษี', null],
+        ['receipts', 'ใบเสร็จรับเงิน', null],
       ]},
-      { s: 'ลูกหนี้', items: [
-        ['ar', 'อายุลูกหนี้', overdue || null],
+      { s: '', items: [['cashsales', 'ขายเงินสด', null]] },
+      { s: '', items: [['creditnotes', 'ใบลดหนี้', null], ['debitnotes', 'ใบเพิ่มหนี้', null]] },
+      { s: '', items: [['deposits', 'ใบรับเงินมัดจำ', null], ['offsets', 'หักกลบ · ตัดหนี้สูญ', null]] },
+    ]},
+    { g: 'ซื้อ', t: 'เอกสารซื้อ', icon: 'buy', subs: [
+      { s: '', items: [
+        ['purchaseorders', 'ใบสั่งซื้อ', poOpen || null],
+        ['goodsreceipts', 'ใบรับสินค้า', grnWaiting || null],
+        ['bills', 'บันทึกซื้อ / ตั้งหนี้', null],
+        ['payments', 'ใบสำคัญจ่าย', null],
       ]},
-      { s: 'เจ้าหนี้', items: [
-        ['ap', 'อายุเจ้าหนี้', null],
+      { s: '', items: [['vdeposits', 'ใบจ่ายเงินมัดจำ', null], ['vendorcns', 'ใบลดหนี้จากผู้ขาย', null]] },
+    ]},
+    { g: 'ค่าใช้จ่าย', t: 'ค่าใช้จ่าย', icon: 'receipt', subs: [
+      { s: '', items: [['expenses', 'ค่าใช้จ่าย', null], ['whtcert', 'หัก ณ ที่จ่าย', null]] },
+      { s: 'จัดการสินทรัพย์', items: [['assets', 'ทะเบียนทรัพย์สิน', null], ['deprec', 'ค่าเสื่อมราคา', null]] },
+    ]},
+    { g: 'สินค้า', t: 'สินค้าและคลัง', icon: 'box', subs: [
+      { s: '', items: [
+        ['items', 'สินค้า / บริการ', null],
+        ['stockadj', 'ปรับสต๊อก (ยอดยกมา ตรวจนับ ตัดจำหน่าย)', null],
+        ['stockcard', 'สต๊อกการ์ด · สินค้าคงเหลือ', null],
+        ['stockmoves', 'ความเคลื่อนไหวสต๊อก', null],
       ]},
-      { s: 'ภาษี', items: [
+    ]},
+    { g: 'ผู้ติดต่อ', t: 'สมุดรายชื่อ', icon: 'contact', subs: [
+      { s: '', items: [['customers', 'ลูกค้า', null], ['vendors', 'ผู้จำหน่าย', null]] },
+    ]},
+    /* บริหารบัญชี — สมุดรายวัน 5 เล่ม ผังบัญชี ปิดงวด/ปิดงบ ยอดยกมา */
+    { g: 'บัญชี', t: 'บริหารบัญชี', icon: 'book', subs: [
+      { s: 'สมุดรายวัน', items: [
+        ['jgeneral', 'สมุดรายวันทั่วไป', null],
+        ['jsales', 'สมุดรายวันขาย', null],
+        ['jpurchase', 'สมุดรายวันซื้อ', null],
+        ['jreceipt', 'สมุดรายวันรับ', null],
+        ['jpayment', 'สมุดรายวันจ่าย', null],
+      ]},
+      { s: '', items: [['coa', 'ผังบัญชี', null], ['close', 'ปิดงวด · ปิดงบบัญชี', todo || null]] },
+      { s: 'ยอดยกมา', items: [['openitems', 'ลูกหนี้/เจ้าหนี้ยกมารายใบ', null], ['import', 'นำเข้าข้อมูลจากระบบเดิม', null]] },
+    ]},
+    { g: 'ภาษี', t: 'บริหารภาษี', icon: 'tax', subs: [
+      { s: '', items: [
+        ['pp30', 'ยื่นภาษีมูลค่าเพิ่ม (ภ.พ.30)', null],
+        ['pnd', 'ยื่นภาษีหัก ณ ที่จ่าย (ภ.ง.ด.)', null],
         ['vatout', 'รายงานภาษีขาย', null],
         ['vatin', 'รายงานภาษีซื้อ', null],
-      ]},
-      { s: 'โครงการและงบประมาณ', items: [
-        ['projects', 'โครงการ', null],
-        ['budget', 'งบประมาณเทียบใช้จริง', null],
+        ['taxcal', 'ปฏิทินภาษี', null],
       ]},
     ]},
-    { g: 'ระบบ', icon: 'gear', items: [
-      ['settings', 'ข้อมูลกิจการ', null],
-      ['import', 'นำเข้าข้อมูลจากระบบเดิม', null],
-      ['openitems', 'ลูกหนี้/เจ้าหนี้ยกมารายใบ', null],
-      ['audit', 'ร่องรอยการตรวจสอบ', null],
-      ['about', 'เกี่ยวกับระบบนี้', null],
+    { g: 'รายงาน', t: 'รายงาน', icon: 'chart', subs: [
+      { s: 'งบการเงิน', items: [
+        ['pl', 'งบกำไรขาดทุน', null],
+        ['bs', 'งบแสดงฐานะการเงิน', null],
+        ['equity', 'งบการเปลี่ยนแปลงส่วนของผู้ถือหุ้น', null],
+      ]},
+      { s: 'บัญชี', items: [
+        ['tb', 'งบทดลอง', null],
+        ['ledger', 'บัญชีแยกประเภท', null],
+        ['journals', 'สมุดรายวันรวมทุกเล่ม', null],
+      ]},
+      { s: 'ลูกหนี้ · เจ้าหนี้', items: [['ar', 'อายุลูกหนี้', overdue || null], ['ap', 'อายุเจ้าหนี้', null]] },
+      { s: 'โครงการ', items: [['projects', 'โครงการ', null], ['budget', 'งบประมาณเทียบใช้จริง', null]] },
+    ]},
+    { g: 'เงินเดือน', t: 'เงินเดือน', icon: 'payroll', subs: [
+      { s: '', items: [
+        ['payroll', 'งวดจ่ายเงินเดือน', null],
+        ['attendance', 'ขาด ลา มาสาย', null],
+        ['employees', 'ทะเบียนพนักงาน', null],
+      ]},
+      { s: 'นำส่งและยื่นแบบ', items: [
+        ['payrollfile', 'ภ.ง.ด.1 · สปส.1-10 · นำส่ง', null],
+        ['payrollyear', 'สรุปทั้งปี · ภ.ง.ด.1ก · 50 ทวิ', null],
+      ]},
+    ]},
+    { g: 'ตั้งค่า', t: 'ตั้งค่า', icon: 'gear', bottom: true, subs: [
+      { s: '', items: [
+        ['settings', 'ข้อมูลกิจการ · เอกสาร · ผู้ใช้', null],
+        ['audit', 'ร่องรอยการตรวจสอบ', null],
+        ['about', 'เกี่ยวกับระบบนี้', null],
+      ]},
     ]},
   ];
 }
@@ -530,41 +546,42 @@ function navSubOf(screen) {
   return w && w.sub ? w.sub.s : null;
 }
 function navGroupIsOpen(g) {
-  if (STATE.navGroupOpen[g.g] !== undefined) return STATE.navGroupOpen[g.g];
   const w = navWhere(STATE.screen);
   return !!(w && w.g.g === g.g);
 }
+/** หมวดที่แสดงอยู่ในคอลัมน์เมนู — หมวดของหน้าที่เปิดอยู่ (หน้าที่ไม่อยู่ในเมนูใช้หมวดล่าสุด) */
+function navModule(groups) {
+  const w = navWhere(STATE.screen);
+  if (w) STATE.navModule = w.g.g;
+  return groups.find((g) => g.g === STATE.navModule) || groups[0];
+}
+/** หน้าล่าสุดที่เปิดในแต่ละหมวด — กดไอคอนหมวดแล้วกลับไปหน้าเดิมของหมวดนั้น */
+const NAV_LAST = {};
 
 /* ---------- โครงหน้าจอ ---------- */
+/** แถบไอคอนหมวดหลัก (ซ้ายสุด) + คอลัมน์หน้าในหมวดที่เลือก */
 function renderNav() {
   const groups = navGroups();
-  const openSub = navSubOf(STATE.screen);
-  const where = navWhere(STATE.screen);
+  const mod = navModule(groups);
+  if (navWhere(STATE.screen)) NAV_LAST[mod.g] = STATE.screen;
   const badge = (n) => (n ? '<span class="badge">' + n + '</span>' : '');
-  const item = (it, cls) => '<a href="#" class="nav-i ' + cls + (STATE.screen === it[0] ? ' on' : '')
+  const count = (g) => (g.subs || []).reduce((n, s) => n + s.items.reduce((m, i) => m + (i[2] || 0), 0), 0);
+  const railBtn = (g) => '<button class="rail-i' + (g === mod ? ' on' : '') + '" data-act="navm:' + esc(g.g) + '"'
+    + ' title="' + esc(g.t || g.g) + '"' + (g === mod ? ' aria-current="true"' : '') + '>'
+    + icon(g.icon) + '<span class="rail-l">' + esc(g.g) + '</span>'
+    + (count(g) && g !== mod ? '<span class="rail-dot" aria-label="มีงานค้าง ' + count(g) + ' รายการ"></span>' : '') + '</button>';
+  const rail = document.getElementById('rail');
+  if (rail) {
+    rail.innerHTML = '<div class="rail-top">' + groups.filter((g) => !g.bottom).map(railBtn).join('') + '</div>'
+      + '<div class="rail-bot">' + groups.filter((g) => g.bottom).map(railBtn).join('') + '</div>';
+  }
+  const item = (it) => '<a href="#" class="nav-i' + (STATE.screen === it[0] ? ' on' : '')
     + '" data-act="go:' + it[0] + '"' + (STATE.screen === it[0] ? ' aria-current="page"' : '') + '>'
-    + (cls === 'flat' ? icon(it[3] || 'file') : '') + '<span>' + esc(it[1]) + '</span>' + badge(it[2]) + '</a>';
-  let nav = '';
-  groups.forEach(function (g) {
-    if (g.sec) nav += '<div class="nav-sec">' + esc(g.sec) + '</div>';
-    if (g.flat) { g.items.forEach(function (it) { nav += item(it, 'flat'); }); return; }
-    const open = navGroupIsOpen(g);
-    const sum = (g.items || []).reduce((n, i) => n + (i[2] || 0), 0)
-      + (g.subs || []).reduce((n, s) => n + s.items.reduce((m, i) => m + (i[2] || 0), 0), 0);
-    nav += '<button class="nav-gh' + (open ? ' open' : '') + (where && where.g.g === g.g ? ' has-on' : '')
-      + '" data-act="navg:' + esc(g.g) + '" aria-expanded="' + (open ? 'true' : 'false') + '">'
-      + icon(g.icon) + '<span>' + esc(g.g) + '</span>' + (open ? '' : badge(sum)) + icon('chev', 'chev') + '</button>';
-    if (!open) return;
-    (g.items || []).forEach(function (it) { nav += item(it, 'child'); });
-    (g.subs || []).forEach(function (s) {
-      const sOpen = STATE.navOpen[s.s] === undefined ? s.s === openSub : STATE.navOpen[s.s];
-      nav += '<button class="nav-s' + (sOpen ? ' open' : '') + '" data-act="nav:' + esc(s.s) + '"'
-        + ' aria-expanded="' + (sOpen ? 'true' : 'false') + '">'
-        + '<span class="chev" aria-hidden="true">›</span>' + esc(s.s)
-        + (!sOpen && s.items.some((i) => i[2]) ? badge(s.items.reduce((n, i) => n + (i[2] || 0), 0)) : '')
-        + '</button>';
-      if (sOpen) s.items.forEach(function (it) { nav += item(it, 'sub'); });
-    });
+    + '<span>' + esc(it[1]) + '</span>' + badge(it[2]) + '</a>';
+  let nav = '<div class="nav-t">' + esc(mod.t || mod.g) + '</div>';
+  (mod.subs || []).forEach(function (sub, k) {
+    nav += sub.s ? '<div class="nav-sec">' + esc(sub.s) + '</div>' : (k ? '<div class="nav-gap" role="separator"></div>' : '');
+    sub.items.forEach(function (it) { nav += item(it); });
   });
   document.getElementById('nav').innerHTML = nav;
 }
@@ -576,8 +593,8 @@ function renderCrumb() {
   const extra = { importResult: ['ระบบ', 'ผลการนำเข้า'] }[STATE.screen];
   let h = '';
   if (w) {
-    if (!w.g.flat) h += '<span class="grp">' + esc(w.g.g) + '</span>' + sep;
-    if (w.sub) h += '<span class="grp">' + esc(w.sub.s) + '</span>' + sep;
+    h += '<span class="grp">' + esc(w.g.t || w.g.g) + '</span>' + sep;
+    if (w.sub && w.sub.s) h += '<span class="grp">' + esc(w.sub.s) + '</span>' + sep;
     h += '<b>' + esc(w.item[1]) + '</b>';
   } else if (extra) {
     h = '<span class="grp">' + esc(extra[0]) + '</span>' + sep + '<b>' + esc(extra[1]) + '</b>';
@@ -585,6 +602,9 @@ function renderCrumb() {
   document.getElementById('crumb').innerHTML = h;
 }
 
+/* ปุ่ม "?" บนแถบบน — แสดง/ซ่อนคำอธิบายของหน้า จำไว้ในเบราว์เซอร์นี้ */
+const HELP_KEY = 'financii.pageHelp';
+const pageHelpOn = () => lsGet(HELP_KEY) === '1';
 function renderTopTools() {
   const mac = /Mac|iPhone|iPad/.test(navigator.platform || '');
   document.getElementById('cmdBtn').innerHTML = icon('search')
@@ -602,6 +622,12 @@ function renderTopTools() {
   tb.title = dark ? 'เปลี่ยนเป็นโหมดสว่าง' : 'เปลี่ยนเป็นโหมดมืด';
   const pw = document.getElementById('periodWrap');
   if (pw && !pw.querySelector('svg')) pw.insertAdjacentHTML('afterbegin', icon('calendar'));
+  const hb = document.getElementById('helpBtn');
+  if (hb) {
+    hb.classList.toggle('on', pageHelpOn());
+    hb.setAttribute('aria-pressed', pageHelpOn() ? 'true' : 'false');
+    hb.title = pageHelpOn() ? 'ซ่อนคำอธิบายหน้านี้' : 'แสดงคำอธิบายหน้านี้ (ลำดับงานและผลทางบัญชี)';
+  }
   /* ผู้ใช้ที่เข้าอยู่ — เฉพาะเปิดผ่านเซิร์ฟเวอร์ที่ใช้รหัส กดแล้วดูสิทธิ์ เข้าแบบเจ้าของ หรือออกจากระบบ */
   const ub = document.getElementById('userBtn');
   if (ub) {
@@ -666,7 +692,8 @@ function render() {
   const printHead = '<div class="print-co"><b>' + esc(DB.company.name || '') + '</b>'
     + (DB.company.taxId ? ' · เลขประจำตัวผู้เสียภาษี ' + esc(DB.company.taxId) : '')
     + '<span>งวด ' + esc(thPeriod(STATE.period)) + ' · พิมพ์เมื่อ ' + esc(thDate(TODAY)) + '</span></div>';
-  try { html = printHead + pageContext(STATE.screen) + fn(); }
+  /* คำอธิบายหน้า (ลำดับงาน ผลทางบัญชี) ซ่อนไว้ — หน้าจอเหลือแค่งาน กด "?" บนแถบบนเพื่อดู */
+  try { html = printHead + (pageHelpOn() ? pageContext(STATE.screen) : '') + fn(); }
   catch (e) {
     console.error(e);
     html = card({ title:'เปิดหน้านี้ไม่ได้', body:'<div class="empty">' + esc(e.message) + '</div>' });

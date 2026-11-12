@@ -656,6 +656,23 @@ function docSourceOf(d) {
   return meta ? { kind, no: d.fromDoc, screen: meta[0], label: meta[1] } : null;
 }
 
+/** หมวดหมู่ค่าใช้จ่าย = ชื่อบัญชีของบรรทัดแรก (หลายหมวด = บอกว่ามีหลายหมวด) */
+function expCategory(e) {
+  const accs = Array.from(new Set((e.lines || []).map((l) => l.acc).filter(Boolean)));
+  const a = accs.length ? DB.accounts.find((x) => x.code === accs[0]) : null;
+  return (a ? a.name : 'ไม่ระบุหมวด') + (accs.length > 1 ? ' +' + (accs.length - 1) : '');
+}
+/* ---------- คอลัมน์รายการเอกสาร ----------
+   แบบเดียวกับโปรแกรมบัญชีที่คุ้นมือ: วันที่ · เลขที่ · ชื่อคู่ค้า (โปรเจกต์ใต้ชื่อ) · ยอดรวมสุทธิ · สถานะ
+   ยอดก่อนภาษี/ภาษี/รายละเอียดอื่นดูในหน้าเอกสาร ตารางเหลือเฉพาะที่ใช้ตัดสินใจ */
+const docNameCell = (d, name) => ({ html: '<span class="dl-name">' + esc(name || d.partnerName || '—') + '</span>'
+  + (d.project ? '<div class="dim">' + esc(d.project) + '</div>' : '') });
+const docNoCell = (d, extra) => ({ html: '<span class="mono">' + esc(d.no) + '</span>' + (extra ? '<div class="dim">' + esc(extra) + '</div>' : '') });
+/** ยอดรวมสุทธิ + ยอดค้าง (แสดงเมื่อรับ/จ่ายไปบางส่วน) */
+const netCell = (total, left) => (left && left !== total
+  ? { html: '<div class="num-c">' + fmt(total) + '</div><div class="dim num-c">ค้าง ' + fmt(left) + '</div>', cls: 'num' }
+  : { n: total });
+
 function scInvoices() {
   /* ตัวกรอง "ค้างชำระทุกเดือน" ดูใบที่ยังค้างจากทุกงวด — ใบเก่าที่ยังไม่ได้เก็บเงินต้องไม่หายไปเพราะเปลี่ยนเดือน
      ตัวกรองอื่นดูเฉพาะงวดที่เลือก (เงื่อนไขงวดอยู่ใน LIST_CHIPS) */
@@ -670,11 +687,11 @@ function scInvoices() {
       actions: btn('new:invoice', '+ ออกใบกำกับภาษี', periodIsOpen() ? 'primary' : 'disabled'),
       filters: listFilters('invoices', 'ค้นหาเลขที่หรือชื่อลูกค้า', base),
       body: tbl({
-        cols:[{t:'เลขที่'},{t:'วันที่'},{t:'ลูกค้า'},{t:'ครบกำหนด'},{t:'ก่อนภาษี',a:'r'},{t:'ภาษี',a:'r'},{t:'รวม',a:'r'},{t:'คงเหลือ',a:'r'},{t:'สถานะ'}],
-        rows: rows.map((d) => [{mono:d.no}, thDateNum(d.date), d.partnerName, showDue(d) ? thDateNum(d.due) : {dim: creditTermText(d)},
-          {n:d.base}, {n:d.vat}, {n:d.total}, {n:invOutstanding(d)}, docStatusCell('invoice', d)]),
-        rowAttr: (r, i) => rowCls(rows[i]) + ' data-act="sel:' + r[0].mono + '"',
-        foot: ['รวม', '', '', '', {n:totals.base}, {n:totals.vat}, {n:totals.total}, {n:liveOnly(rows).reduce((s, d) => s + invOutstanding(d), 0)}, ''],
+        cols:[{t:'วันที่'},{t:'เลขที่เอกสาร'},{t:'ชื่อลูกค้า / โปรเจกต์'},{t:'ครบกำหนด'},{t:'ยอดรวมสุทธิ',a:'r'},{t:'สถานะ'}],
+        rows: rows.map((d) => [thDateNum(d.date), docNoCell(d), docNameCell(d), showDue(d) ? thDateNum(d.due) : {dim: creditTermText(d)},
+          netCell(d.total, invOutstanding(d)), docStatusCell('invoice', d)]),
+        rowAttr: (r, i) => rowCls(rows[i]) + ' data-act="sel:' + rows[i].no + '"',
+        foot: ['', '', 'ยอดรวมทั้งหมด', '', {n:totals.total}, ''],
         empty: 'ยังไม่มีใบกำกับภาษีในงวดนี้',
         emptyAction: btn('new:invoice', 'ออกใบกำกับภาษีใบแรก', 'primary'),
       }),
@@ -721,12 +738,11 @@ function scCashSales() {
     actions: btn('new:cashsale', '+ ขายเงินสด', periodIsOpen() ? 'primary' : 'disabled'),
     filters: listFilters('cashsales', 'ค้นหาเลขที่หรือชื่อผู้ซื้อ', base),
     body: tbl({
-      cols:[{t:'เลขที่'},{t:'วันที่'},{t:'ผู้ซื้อ'},{t:'รับชำระโดย'},{t:'ก่อนภาษี',a:'r'},{t:'ภาษี',a:'r'},{t:'รับเงิน',a:'r'},{t:'สถานะ'}],
-      rows: rows.map((d) => [{mono:d.no}, thDateNum(d.date), d.buyerName || {dim:'ลูกค้าทั่วไป'},
-        RECEIPT_METHODS[d.method] || d.method,
-        {n:d.base}, {n:d.vat}, {n:d.total}, docStatusCell('cashSale', d)]),
-      rowAttr: (r, i) => rowCls(rows[i]) + ' data-act="sel:' + r[0].mono + '"',
-      foot: rows.length ? ['รวม', '', '', '', {n:t.base}, {n:t.vat}, {n:t.total}, ''] : null,
+      cols:[{t:'วันที่'},{t:'เลขที่เอกสาร'},{t:'ชื่อผู้ซื้อ / โปรเจกต์'},{t:'ยอดรวมสุทธิ',a:'r'},{t:'สถานะ'}],
+      rows: rows.map((d) => [thDateNum(d.date), docNoCell(d, RECEIPT_METHODS[d.method] || d.method), docNameCell(d, d.buyerName || 'ลูกค้าทั่วไป'),
+        {n:d.total}, docStatusCell('cashSale', d)]),
+      rowAttr: (r, i) => rowCls(rows[i]) + ' data-act="sel:' + rows[i].no + '"',
+      foot: rows.length ? ['', '', 'ยอดรวมทั้งหมด', {n:t.total}, ''] : null,
       empty:'ยังไม่มีการขายเงินสดในงวดนี้',
       emptyAction: periodIsOpen() ? btn('new:cashsale', 'ขายเงินสดใบแรก', 'primary') : '',
     }),
@@ -783,13 +799,12 @@ function scReceipts() {
     actions: btn('new:receipt', '+ ออกใบเสร็จรับเงิน', periodIsOpen() ? 'primary' : 'disabled'),
     filters: listFilters('receipts', 'ค้นหาเลขที่ ลูกค้า หรือใบกำกับ', base),
     body: tbl({
-      cols:[{t:'เลขที่'},{t:'วันที่'},{t:'ลูกค้า'},{t:'อ้างใบกำกับ'},{t:'วิธีรับ'},{t:'รับก่อนหัก',a:'r'},{t:'ลูกค้าหักไว้',a:'r'},{t:'รับสุทธิ',a:'r'},{t:'สถานะ'}],
-      rows: rows.map((d) => [{mono:d.no}, thDateNum(d.date), d.partnerName,
-        {mono:d.invoiceNo + (d.billingNoteNo ? ' · ' + d.billingNoteNo : '')},
-        RECEIPT_METHODS[d.method] || 'โอนเงิน',
-        {n:d.gross}, {n:d.wht}, {n:d.net}, docStatusCell('receipt', d)]),
-      rowAttr: (r, i) => rowCls(rows[i]) + ' data-act="sel:' + r[0].mono + '" title="คลิกเพื่อดูรายละเอียด พิมพ์ หรือยกเลิก"',
-      foot: ['รวม','','','','', {n:t.g}, {n:t.w}, {n:t.n}, ''],
+      cols:[{t:'วันที่'},{t:'เลขที่เอกสาร'},{t:'ชื่อลูกค้า / โปรเจกต์'},{t:'ยอดรับสุทธิ',a:'r'},{t:'สถานะ'}],
+      rows: rows.map((d) => [thDateNum(d.date), docNoCell(d, 'อ้าง ' + d.invoiceNo + (d.billingNoteNo ? ' · ' + d.billingNoteNo : '') + ' · ' + (RECEIPT_METHODS[d.method] || 'โอนเงิน')),
+        docNameCell(d), d.wht ? { html: '<div>' + fmt(d.net) + '</div><div class="dim">ลูกค้าหัก ' + fmt(d.wht) + '</div>', cls: 'num' } : {n:d.net},
+        docStatusCell('receipt', d)]),
+      rowAttr: (r, i) => rowCls(rows[i]) + ' data-act="sel:' + rows[i].no + '" title="คลิกเพื่อดูรายละเอียด พิมพ์ หรือยกเลิก"',
+      foot: ['', '', 'ยอดรวมทั้งหมด', {n:t.n}, ''],
       empty:'ยังไม่มีการรับชำระในงวดนี้',
       emptyAction: periodIsOpen() ? btn('new:receipt', 'ออกใบเสร็จรับเงิน', 'primary') : '',
     }),
@@ -1780,14 +1795,14 @@ function tradeDocScreen(kind) {
       actions: btn('new:' + newAct, '+ ออก' + cfg.label, 'primary'),
       filters: listFilters(scr, 'ค้นหาเลขที่หรือชื่อคู่ค้า', base),
       body: tbl({
-        cols:[{t:'เลขที่'},{t:'วันที่'},{t: cfg.side === 'customer' ? 'ลูกค้า' : 'ผู้ขาย'}]
+        cols:[{t:'วันที่'},{t:'เลขที่เอกสาร'},{t: (cfg.side === 'customer' ? 'ชื่อลูกค้า' : 'ชื่อผู้จำหน่าย') + ' / โปรเจกต์'}]
           .concat(cfg.validDays ? [{t:'ยืนราคาถึง'}] : [])
-          .concat([{t:'ก่อนภาษี',a:'r'},{t:'รวม',a:'r'},{t:'สถานะ'},{t:'เอกสารปลายทาง'}]),
-        rows: rows.map((d) => [{mono:d.no}, thDateNum(d.date), d.partnerName]
+          .concat([{t:'ยอดรวมสุทธิ',a:'r'},{t:'สถานะ'}]),
+        rows: rows.map((d) => [thDateNum(d.date), docNoCell(d, d.convertedTo ? '→ ' + d.convertedTo : ''), docNameCell(d)]
           .concat(cfg.validDays ? [thDateNum(d.validUntil)] : [])
-          .concat([{n:d.base}, {n:d.total}, docStatusCell(kind, d),
-            d.convertedTo ? {mono:d.convertedTo} : '—'])),
-        rowAttr: (r) => 'class="row-link" data-act="sel:' + r[0].mono + '"',
+          .concat([{n:d.total}, docStatusCell(kind, d)])),
+        rowAttr: (r, i) => 'class="row-link" data-act="sel:' + rows[i].no + '"',
+        foot: ['', '', 'ยอดรวมทั้งหมด'].concat(cfg.validDays ? [''] : []).concat([{n: liveOnly(rows).reduce((s, d) => s + d.total, 0)}, '']),
         empty:'ยังไม่มี' + cfg.label,
         emptyAction: btn('new:' + newAct, 'ออก' + cfg.label + 'ใบแรก', 'primary'),
       }),
@@ -1908,13 +1923,13 @@ function scBillingNotes() {
       actions: btn('new:billingdoc', '+ ใบวางบิล/ใบแจ้งหนี้', 'primary') + btn('new:billingnote', '+ ใบวางบิลรวมใบกำกับ'),
       filters: searchBox('ค้นหาเลขที่หรือชื่อลูกค้า'),
       body: tbl({
-        cols:[{t:'เลขที่'},{t:'วันที่'},{t:'ลูกค้า'},{t:'แบบ'},{t:'ครบกำหนด/นัดชำระ'},{t:'ยอด',a:'r'},{t:'คงค้าง',a:'r'},{t:'สถานะ'}],
+        cols:[{t:'วันที่'},{t:'เลขที่เอกสาร'},{t:'ชื่อลูกค้า / โปรเจกต์'},{t:'ครบกำหนด / นัดชำระ'},{t:'ยอดรวมสุทธิ',a:'r'},{t:'สถานะ'}],
         rows: rows.map((b) => isItemBilling(b)
-          ? [{mono:b.no}, thDateNum(b.date), b.partnerName, 'ใบแจ้งหนี้ ' + b.lines.length + ' รายการ',
-            showDue(b) ? thDateNum(b.due) : {dim: creditTermText(b)}, {n:b.total}, {dim:'ยังไม่ตั้งลูกหนี้'}, docStatusCell('billingNote', b)]
-          : [{mono:b.no}, thDateNum(b.date), b.partnerName, 'รวม ' + b.invoices.length + ' ใบกำกับ', thDateNum(b.dueDate), {n:b.total},
-            {n: billingNoteStatus(b) === 'cancelled' ? 0 : billingNoteOutstanding(b)}, docStatusCell('billingNote', b)]),
-        rowAttr: (r, i) => 'class="row-link' + (billingNoteStatus(rows[i]) === 'cancelled' ? ' is-void' : '') + '" data-act="sel:' + r[0].mono + '"',
+          ? [thDateNum(b.date), docNoCell(b, 'ใบแจ้งหนี้ ' + b.lines.length + ' รายการ'), docNameCell(b),
+            showDue(b) ? thDateNum(b.due) : {dim: creditTermText(b)}, {n:b.total}, docStatusCell('billingNote', b)]
+          : [thDateNum(b.date), docNoCell(b, 'วางบิลรวม ' + b.invoices.length + ' ใบกำกับ'), docNameCell(b), thDateNum(b.dueDate),
+            netCell(b.total, billingNoteStatus(b) === 'cancelled' ? 0 : billingNoteOutstanding(b)), docStatusCell('billingNote', b)]),
+        rowAttr: (r, i) => 'class="row-link' + (billingNoteStatus(rows[i]) === 'cancelled' ? ' is-void' : '') + '" data-act="sel:' + rows[i].no + '"',
         empty:'ยังไม่มีใบวางบิล',
         emptyAction: btn('new:billingdoc', 'ออกใบวางบิล/ใบแจ้งหนี้ใบแรก', 'primary') + ' ' + btn('new:billingnote', 'วางบิลรวมใบกำกับที่ออกแล้ว'),
       }),
@@ -1965,11 +1980,11 @@ function scGoodsReceipts() {
       actions: btn('new:goodsreceipt', '+ ออกใบรับสินค้า', periodIsOpen() ? 'primary' : 'disabled'),
       filters: listFilters('goodsreceipts', 'ค้นหาเลขที่ ผู้ขาย ใบส่งของ หรือใบสั่งซื้อ', base),
       body: tbl({
-        cols:[{t:'เลขที่'},{t:'วันที่รับ'},{t:'ผู้ขาย'},{t:'ใบส่งของผู้ขาย'},{t:'อ้างใบสั่งซื้อ'},{t:'มูลค่า',a:'r'},{t:'สถานะ'},{t:'ตั้งหนี้'}],
-        rows: rows.map((g) => [{mono:g.no}, thDateNum(g.date), g.partnerName,
-          g.vendorDoNo ? {mono:g.vendorDoNo} : {dim:'—'}, g.poNo ? {mono:g.poNo} : {dim:'—'},
-          {n:g.total}, docStatusCell('goodsReceipt', g), g.billNo ? {mono:g.billNo} : {dim:'—'}]),
-        rowAttr: (r, i) => rowCls(rows[i]) + ' data-act="sel:' + r[0].mono + '"',
+        cols:[{t:'วันที่รับ'},{t:'เลขที่เอกสาร'},{t:'ชื่อผู้จำหน่าย / โปรเจกต์'},{t:'ยอดรวม (ก่อนภาษี)',a:'r'},{t:'สถานะ'}],
+        rows: rows.map((g) => [thDateNum(g.date),
+          docNoCell(g, [g.poNo ? 'จาก ' + g.poNo : '', g.vendorDoNo ? 'ใบส่งของ ' + g.vendorDoNo : '', g.billNo ? 'ตั้งหนี้ ' + g.billNo : ''].filter(Boolean).join(' · ')),
+          docNameCell(g), {n:g.total}, docStatusCell('goodsReceipt', g)]),
+        rowAttr: (r, i) => rowCls(rows[i]) + ' data-act="sel:' + rows[i].no + '"',
         empty:'ยังไม่มีใบรับสินค้าในงวดนี้',
         emptyAction: periodIsOpen() ? btn('new:goodsreceipt', 'ออกใบรับสินค้าใบแรก', 'primary') : '',
       }),
@@ -2027,13 +2042,14 @@ function scExpenses() {
       actions: btn('new:expense', '+ บันทึกค่าใช้จ่าย', periodIsOpen() ? 'primary' : 'disabled'),
       filters: listFilters('expenses', 'ค้นหาเลขที่ ผู้รับเงิน เลขใบกำกับ หรือรายการ', base),
       body: tbl({
-        cols:[{t:'เลขที่'},{t:'วันที่'},{t:'ผู้รับเงิน'},{t:'รายการ'},{t:'ก่อนภาษี',a:'r'},{t:'ภาษีซื้อ',a:'r'},{t:'หัก ณ ที่จ่าย',a:'r'},{t:'จ่ายสุทธิ',a:'r'},{t:'50 ทวิ'},{t:'สถานะ'}],
-        rows: rows.map((e) => [{mono:e.no}, thDateNum(e.date), e.partnerName,
-          e.lines[0].desc + (e.lines.length > 1 ? ' และอีก ' + (e.lines.length - 1) + ' รายการ' : ''),
-          {n:e.base}, {n:e.vat}, {n:e.wht}, {n:e.net},
-          e.certNo ? {mono:e.certNo} : (e.wht ? {dim:'ธนาคารออกให้'} : {dim:'—'}), docStatusCell('expense', e)]),
-        rowAttr: (r, i) => rowCls(rows[i]) + ' data-act="sel:' + r[0].mono + '"',
-        foot: ['รวม','','','', {n:t.b}, {n:t.v}, {n:t.w}, {n:t.n}, '', ''],
+        cols:[{t:'วันที่'},{t:'เลขที่เอกสาร'},{t:'ชื่อผู้จำหน่าย / โปรเจกต์'},{t:'หมวดหมู่'},{t:'ยอดรวมสุทธิ',a:'r'},{t:'สถานะ'}],
+        rows: rows.map((e) => [thDateNum(e.date), docNoCell(e, e.certNo ? '50 ทวิ ' + e.certNo : ''), docNameCell(e),
+          { html: '<span class="cat-pill">' + esc(expCategory(e)) + '</span><div class="dim">' + esc(e.lines[0].desc
+            + (e.lines.length > 1 ? ' และอีก ' + (e.lines.length - 1) + ' รายการ' : '')) + '</div>' },
+          e.wht ? { html: '<div>' + fmt(e.net) + '</div><div class="dim">หัก ณ ที่จ่าย ' + fmt(e.wht) + '</div>', cls: 'num' } : {n:e.net},
+          docStatusCell('expense', e)]),
+        rowAttr: (r, i) => rowCls(rows[i]) + ' data-act="sel:' + rows[i].no + '"',
+        foot: ['', '', 'ยอดรวมทั้งหมด', '', {n:t.n}, ''],
         empty:'ยังไม่มีค่าใช้จ่ายในงวดนี้',
         emptyAction: periodIsOpen() ? btn('new:expense', 'บันทึกค่าใช้จ่ายรายการแรก', 'primary') : '',
       }),

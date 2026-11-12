@@ -230,7 +230,8 @@ function cmdkKey(ev) {
    ใส่ BOM ไว้หน้าไฟล์ Excel จะอ่านภาษาไทยถูก · ตัวเลขส่งออกเป็นตัวเลขล้วน
    (ไม่มีจุลภาค วงเล็บกลายเป็นเครื่องหมายลบ) ให้ Excel คำนวณต่อได้ทันที */
 function csvCell(td) {
-  const raw = (td.textContent || '').replace(/\s+/g, ' ').trim();
+  /* ช่องตัวเลขที่มีบรรทัดรอง (เช่น ยอดรวม + ค้างชำระ) ส่งออกเฉพาะตัวเลขหลัก */
+  const raw = ((td.querySelector('.num-c') || td).textContent || '').replace(/\s+/g, ' ').trim();
   if (!td.classList.contains('num')) return raw;
   if (raw === '—' || raw === '') return '';
   const neg = /^\(.*\)$/.test(raw);
