@@ -1,5 +1,27 @@
 [
   {
+    "date": "2026-11-13",
+    "scope": "app",
+    "verb": "redesign",
+    "target": "webapp/shell.html + webapp/src/ui-core.js (rail) + webapp/src/ui-screens.js (dashboard)",
+    "design_system": "webapp/design.md",
+    "genre": "playful",
+    "macrostructure": "Index-First",
+    "theme": "custom",
+    "theme_axes": "light / rounded-sans / cool",
+    "vibe": "เป็นมิตร โค้งมน อบอุ่น แต่แม่นยำ",
+    "nav": "icon rail (light, pill indicator) + page column + bordered top bar",
+    "footer": "none (app)",
+    "enrichment": "none",
+    "fonts": [
+      "Mitr",
+      "Noto Sans Thai Looped",
+      "IBM Plex Mono"
+    ],
+    "brief": "Owner asked for a friendlier, rounded look for the Thai accounting app; menus/forms/positions kept (FlowAccount-style layout from docs/22)",
+    "critique": "P4 H5 E4 S4 R4 V4"
+  },
+  {
     "date": "2026-10-20",
     "scope": "app",
     "verb": "redesign",
@@ -11,7 +33,11 @@
     "nav": "app sidebar (hairline, light) + bordered ⌘K top bar",
     "footer": "none (app)",
     "enrichment": "none",
-    "fonts": ["Bai Jamjuree", "IBM Plex Sans Thai", "IBM Plex Mono"],
+    "fonts": [
+      "Bai Jamjuree",
+      "IBM Plex Sans Thai",
+      "IBM Plex Mono"
+    ],
     "brief": "Thai accounting web app for bookkeepers and owners: easy to use, modern, numbers aligned, one cobalt signal, one graphite overview band on the dashboard",
     "critique": "P4 H5 E4 S4 R5 V4"
   }

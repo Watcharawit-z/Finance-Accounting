@@ -292,7 +292,7 @@ const overflowInfo = (page) => page.evaluate(() => {
   ok('กดปุ่มเมนูแล้วลิ้นชักเปิด', await page.evaluate(() =>
     document.getElementById('nav').getBoundingClientRect().right > 100));
 
-  console.log('\n[11.1] ฟอนต์: ระบบดีไซน์ (design.md) — Bai Jamjuree หัวเรื่อง · IBM Plex Sans Thai เนื้อความ · IBM Plex Mono รหัส');
+  console.log('\n[11.1] ฟอนต์: ระบบดีไซน์ (design.md) — Mitr หัวเรื่อง · Noto Sans Thai Looped เนื้อความและจำนวนเงิน · IBM Plex Mono รหัส');
   const fonts = await page.evaluate(() => {
     const css = getComputedStyle(document.documentElement);
     const num = document.querySelector('#main td.num');
@@ -302,13 +302,17 @@ const overflowInfo = (page) => page.evaluate(() => {
       print: css.getPropertyValue('--print'),
       tnum: num ? getComputedStyle(num).fontVariantNumeric : 'no td.num',
       link: Array.prototype.some.call(document.querySelectorAll('link[rel="stylesheet"]'),
-        (l) => /Bai\+Jamjuree/.test(l.href) && /IBM\+Plex\+Sans\+Thai/.test(l.href)
+        (l) => /Mitr/.test(l.href) && /Noto\+Sans\+Thai\+Looped/.test(l.href)
           && /IBM\+Plex\+Mono/.test(l.href) && /Sarabun/.test(l.href)) };
   });
-  ok('ตัวหนังสือบนจอใช้ IBM Plex Sans Thai (มีอักษรไทย ตัวเลขกว้างเท่ากัน)', /^"?IBM Plex Sans Thai"?/.test(fonts.body), fonts.body);
-  ok('หัวเรื่องใช้ Bai Jamjuree · รหัสใช้ IBM Plex Mono', /Bai Jamjuree/.test(fonts.display) && /IBM Plex Mono/.test(fonts.mono),
+  ok('ตัวหนังสือบนจอใช้ Noto Sans Thai Looped (ไทยแบบมีหัว ตัวเลขกว้างเท่ากัน)', /^"?Noto Sans Thai Looped"?/.test(fonts.body), fonts.body);
+  ok('หัวเรื่องใช้ Mitr · รหัสใช้ IBM Plex Mono', /^\s*"?Mitr/.test(fonts.display) && /IBM Plex Mono/.test(fonts.mono),
     fonts.display.trim() + ' | ' + fonts.mono.trim());
-  ok('โหลดฟอนต์ครบ (Bai Jamjuree, IBM Plex Sans Thai, IBM Plex Mono, Sarabun สำหรับพิมพ์)', fonts.link);
+  const kpiFont = await page.evaluate(() => { const was = STATE.screen; STATE.screen = 'dashboard'; render();
+    const e = document.querySelector('#main .kpi-v'); const f = e ? getComputedStyle(e).fontFamily : 'no kpi';
+    STATE.screen = was; render(); return f; });
+  ok('★ จำนวนเงินบนการ์ดสรุปใช้ฟอนต์เนื้อความ ไม่ใช้ Mitr (เลข 0 ของ Mitr มีขีด)', /^"?Noto Sans Thai Looped/.test(kpiFont), kpiFont);
+  ok('โหลดฟอนต์ครบ (Mitr, Noto Sans Thai Looped, IBM Plex Mono, Sarabun สำหรับพิมพ์)', fonts.link);
   ok('เอกสารพิมพ์ยังใช้ Sarabun แบบหนังสือราชการ', /^\s*"?Sarabun/.test(fonts.print), fonts.print);
   ok('ช่องจำนวนเงินใช้ตัวเลขกว้างเท่ากัน หลักตรงกันทุกแถว', /tabular-nums/.test(fonts.tnum), fonts.tnum);
 

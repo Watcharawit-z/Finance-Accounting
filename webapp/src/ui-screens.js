@@ -326,8 +326,8 @@ function scDashboard() {
     + btn('new:expense', '+ บันทึกค่าใช้จ่าย') + btn('cmdk', 'ค้นหา…')
     + '</div></div>';
 
-  /* แถบภาพรวมงวด — แถบกราไฟต์หนึ่งเดียวของแอป (design.md) ตัวเลขเป็นพระเอก ไม่มีไอคอนประดับ */
-  return demoBanner + hello + '<div class="kpis band">' + tiles.map(function (k) {
+  /* ภาพรวมงวด — การ์ดตัวเลขแยกใบ กดแล้วไปรายงานนั้น (design.md) ตัวเลขเป็นพระเอก ไม่มีไอคอนประดับ */
+  return demoBanner + hello + '<div class="kpis dash">' + tiles.map(function (k) {
       return '<div class="kpi' + (k.tone ? ' ' + k.tone : '') + (k.act ? ' clickable" data-act="' + k.act : '') + '">'
         + '<div class="kpi-l">' + esc(k.label) + '</div>'
         + '<div class="kpi-v">' + esc(k.value) + '</div>'

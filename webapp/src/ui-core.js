@@ -568,7 +568,7 @@ function renderNav() {
   const count = (g) => (g.subs || []).reduce((n, s) => n + s.items.reduce((m, i) => m + (i[2] || 0), 0), 0);
   const railBtn = (g) => '<button class="rail-i' + (g === mod ? ' on' : '') + '" data-act="navm:' + esc(g.g) + '"'
     + ' title="' + esc(g.t || g.g) + '"' + (g === mod ? ' aria-current="true"' : '') + '>'
-    + icon(g.icon) + '<span class="rail-l">' + esc(g.g) + '</span>'
+    + '<span class="rail-ic">' + icon(g.icon) + '</span><span class="rail-l">' + esc(g.g) + '</span>'
     + (count(g) && g !== mod ? '<span class="rail-dot" aria-label="มีงานค้าง ' + count(g) + ' รายการ"></span>' : '') + '</button>';
   const rail = document.getElementById('rail');
   if (rail) {
