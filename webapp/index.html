@@ -339,6 +339,8 @@ body.nav-open .side{transform:none; box-shadow:var(--shadow-float)}
 .card-acts{display:flex; align-items:center; gap:var(--space-xs); flex-wrap:wrap}
 .card-f{padding:var(--space-sm) var(--space-md); border-top:1px solid var(--color-rule); font-size:var(--text-sm); color:var(--color-muted); line-height:1.6; background:var(--color-paper-2)}
 .filters{display:flex; gap:var(--space-xs); padding:0 var(--space-md) var(--space-sm); flex-wrap:wrap; align-items:center}
+/* แถบตัวกรองของรายการ: ช่องค้นหาหดได้ถึง 220px ให้ตัวกรองสถานะกับปุ่มบันทึกมุมมองอยู่แถวเดียวกันบนจอโน้ตบุ๊ก */
+.filters .search-w{flex:1 1 220px; min-width:min(220px,100%)}
 .sub-h{display:flex; flex-wrap:wrap; align-items:center; gap:10px; padding:var(--space-md) var(--space-md) var(--space-2xs); font-family:var(--font-display); font-size:15px; font-weight:var(--display-weight); color:var(--color-ink)}
 .note{margin:var(--space-sm) var(--space-md); padding:10px 14px; border-radius:var(--radius-item); font-size:var(--text-sm); color:var(--color-ink-2);
   background:var(--color-paper-2); border:1px solid var(--color-rule)}
@@ -13111,7 +13113,7 @@ function listFilters(screen, ph, base, wide) {
     + views.map((v) => '<span class="view-chip"><button class="chip" data-act="sview:' + v.id + '" title="เปิดมุมมองที่บันทึกไว้">'
       + icon('bookmark') + esc(v.name) + '</button><button class="view-x" data-act="sviewdel:' + v.id + '" aria-label="ลบมุมมอง '
       + esc(v.name) + '">×</button></span>').join('')
-    + '<button class="ghost" data-act="viewsave" title="บันทึกตัวกรองและคำค้นนี้เป็นมุมมอง">' + icon('bookmark') + '</button>';
+    + '<button class="ghost" data-act="viewsave" title="บันทึกตัวกรองและคำค้นนี้เป็นมุมมอง" aria-label="บันทึกตัวกรองและคำค้นนี้เป็นมุมมอง">' + icon('bookmark') + '</button>';
 }
 
 /* ---------- เมนูคลิกขวาที่แถวในตาราง ---------- */

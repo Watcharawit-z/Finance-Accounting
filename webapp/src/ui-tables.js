@@ -151,7 +151,7 @@ function listFilters(screen, ph, base, wide) {
     + views.map((v) => '<span class="view-chip"><button class="chip" data-act="sview:' + v.id + '" title="เปิดมุมมองที่บันทึกไว้">'
       + icon('bookmark') + esc(v.name) + '</button><button class="view-x" data-act="sviewdel:' + v.id + '" aria-label="ลบมุมมอง '
       + esc(v.name) + '">×</button></span>').join('')
-    + '<button class="ghost" data-act="viewsave" title="บันทึกตัวกรองและคำค้นนี้เป็นมุมมอง">' + icon('bookmark') + '</button>';
+    + '<button class="ghost" data-act="viewsave" title="บันทึกตัวกรองและคำค้นนี้เป็นมุมมอง" aria-label="บันทึกตัวกรองและคำค้นนี้เป็นมุมมอง">' + icon('bookmark') + '</button>';
 }
 
 /* ---------- เมนูคลิกขวาที่แถวในตาราง ---------- */
